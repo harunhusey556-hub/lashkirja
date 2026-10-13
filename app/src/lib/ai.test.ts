@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseOCRText, extractReferenceFields } from "./ai";
+import { parseOCRText, extractReferenceFields, isUsableDocumentText } from "./ai";
 
 const PINK_BEAUTY_SNIPPET = `
 PinkBeauty
@@ -89,5 +89,30 @@ describe("extractReferenceFields", () => {
     expect(extractReferenceFields(VARMA_OCR_SNIPPET).reference).toBe(
       "23055 28807 37031"
     );
+  });
+});
+
+describe("isUsableDocumentText", () => {
+  it("accepts real receipt text", () => {
+    expect(isUsableDocumentText(PINK_BEAUTY_SNIPPET)).toBe(true);
+  });
+
+  it("refuses the control codes a PDF with a broken ToUnicode map extracts", () => {
+    // The real signature, taken from Kymenlaakson Sähkö's electricity bill: pdftotext
+    // returns thousands of these characters and no letters at all.
+    const broken = "\u0004\u0005\u0006\u0007\u0008\t\n".repeat(120);
+    expect(broken.trim().length).toBeGreaterThan(10);
+    expect(isUsableDocumentText(broken)).toBe(false);
+  });
+
+  it("refuses text too short to read", () => {
+    expect(isUsableDocumentText("  \n ")).toBe(false);
+    expect(isUsableDocumentText("12,34 €")).toBe(false);
+  });
+
+  it("refuses control codes with a stray figure among them", () => {
+    // A couple of digits inside a wall of control codes is still not readable text.
+    const mostlyControl = "\u0001\u0002\u0003\u0004\u0005\u0006".repeat(60) + "2026 12";
+    expect(isUsableDocumentText(mostlyControl)).toBe(false);
   });
 });

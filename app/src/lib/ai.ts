@@ -207,6 +207,27 @@ export async function extractReceipt(
       const copilotToken = process.env.COPILOT_GITHUB_TOKEN;
       const isPdf = mimeType === "application/pdf";
 
+      // A PDF whose text layer is unusable (a broken ToUnicode map: control codes and no
+      // letters) is read from its pages as images, exactly like a photo. Handing that text
+      // to the model is what produced the 0,1-confidence readings guessed from the file
+      // name - the vendor misspelled, the date the day the mail arrived.
+      if (isPdf && apiKey && !isUsableDocumentText(rawText)) {
+        try {
+          const result = await extractWithAIFromPdfImages(
+            filePath,
+            apiKey,
+            profileContext,
+            vendorPriors
+          );
+          return enrichExtractedReceipt({ ...result, rawText: "" });
+        } catch (error) {
+          console.warn(
+            "PDF page-image extraction failed; falling back to the text path:",
+            error instanceof Error ? error.message : "UnknownError"
+          );
+        }
+      }
+
       const tryLLM = apiKey
         ? () => extractWithAIFromText(rawText, apiKey, profileContext, vendorPriors)
         : null;
@@ -434,6 +455,111 @@ async function extractWithAIFromImage(
 }
 
 type ExtractionContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+
+/** How many pages of a PDF are rendered for the model: a receipt or bill is 1-3 pages. */
+const VISION_MAX_PAGES = 3;
+
+/**
+ * Is this text worth sending to the model as text?
+ *
+ * A length check is not enough, and the difference is not academic: a PDF whose embedded
+ * font carries no usable ToUnicode map extracts thousands of control codes (Kymenlaakson
+ * Sähkö's electricity bills, 2026-10-13 — `pdftotext` returned 2800 characters of
+ * \x04\x05\x06…). Those pass a length test, reach the model, and the reading comes back as
+ * a 0,1-confidence guess assembled from the file name — vendor misspelled, date = the day
+ * the mail arrived. Such text must count as no text, so the document is read from its pages.
+ */
+export function isUsableDocumentText(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length < 10) return false;
+  const letters = (trimmed.match(/[\p{L}\p{N}]/gu) ?? []).length;
+  return letters >= 20 && letters / trimmed.length >= 0.3;
+}
+
+/**
+ * The first pages of a PDF as JPEG buffers, in page order — the input a photo would be.
+ * Rendering is done with poppler's pdftoppm (present wherever pdftotext is), and each page
+ * is scaled down like a photo so the request stays small.
+ */
+async function renderPdfPagesAsJpeg(filePath: string): Promise<Buffer[]> {
+  const sharp = (await import("sharp")).default;
+  const tempRoot = path.resolve(os.tmpdir());
+  const tempDir = fs.mkdtempSync(path.join(tempRoot, "lashkirja-receipt-"));
+  const resolvedTempDir = path.resolve(tempDir);
+  if (
+    resolvedTempDir === tempRoot ||
+    !resolvedTempDir.startsWith(`${tempRoot}${path.sep}lashkirja-receipt-`)
+  ) {
+    throw new ReceiptExtractionError(
+      "PDF_OCR_FAILED",
+      "PDF:n käsittely epäonnistui (väliaikaishakemisto)"
+    );
+  }
+  try {
+    const prefix = path.join(resolvedTempDir, "page");
+    execFileSync(
+      "pdftoppm",
+      ["-f", "1", "-l", String(VISION_MAX_PAGES), "-r", "150", "-jpeg", "-jpegopt", "quality=80", filePath, prefix],
+      { timeout: 45_000, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }
+    );
+    const files = fs
+      .readdirSync(resolvedTempDir)
+      .filter((name) => /^page-\d+\.jpe?g$/i.test(name))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    if (files.length === 0) {
+      throw new ReceiptExtractionError(
+        "PDF_OCR_FAILED",
+        "Skannatusta PDF:stä ei saatu sivuja luettua"
+      );
+    }
+    const pages: Buffer[] = [];
+    for (const name of files) {
+      pages.push(
+        await sharp(fs.readFileSync(path.join(resolvedTempDir, name)), { failOn: "none" })
+          .rotate()
+          .resize({ width: VISION_MAX_SIDE, height: VISION_MAX_SIDE, fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer()
+      );
+    }
+    return pages;
+  } catch (error) {
+    if (error instanceof ReceiptExtractionError) throw error;
+    throw new ReceiptExtractionError(
+      "PDF_OCR_FAILED",
+      `PDF:n sivukuvien luonti epäonnistui: ${error instanceof Error ? error.message : "tuntematon virhe"}`
+    );
+  } finally {
+    fs.rmSync(resolvedTempDir, { recursive: true, force: false });
+  }
+}
+
+/**
+ * Read a PDF from its pages, exactly the way a photo is read. This is the route for a PDF
+ * whose own text layer is unusable (see :func:`isUsableDocumentText`), and it needs no
+ * local OCR: the app's model (Gemini via LLM_BASE_URL) accepts `image_url`.
+ */
+async function extractWithAIFromPdfImages(
+  filePath: string,
+  apiKey: string,
+  profileContext?: string,
+  vendorPriors?: string
+): Promise<ExtractedReceipt> {
+  const pages = await renderPdfPagesAsJpeg(filePath);
+  const baseUrl = process.env.LLM_BASE_URL || "https://api.openai.com/v1";
+  const model = process.env.LLM_MODEL || "gpt-4o-mini";
+  const promptText = buildExtractionPrompt(profileContext || null, vendorPriors || "");
+  return postExtraction(baseUrl, model, apiKey, [
+    {
+      type: "text",
+      text: `${promptText}\n\nKuitti tai lasku on liitteenä kuvina (${pages.length} sivua).`,
+    },
+    ...pages.map((jpeg) => ({
+      type: "image_url" as const,
+      image_url: { url: `data:image/jpeg;base64,${jpeg.toString("base64")}` },
+    })),
+  ]);
+}
 
 async function postExtraction(baseUrl: string, model: string, apiKey: string, content: ExtractionContent): Promise<ExtractedReceipt> {
   const response = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
