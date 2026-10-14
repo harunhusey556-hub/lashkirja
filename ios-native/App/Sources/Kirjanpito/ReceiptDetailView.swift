@@ -116,7 +116,12 @@ struct ReceiptDetailView: View {
         }
         .overlay(alignment: .bottom) {
             if let toast {
-                ToastView(toast: toast) { runToastAction() }.padding(.bottom, 8)
+                ToastView(toast: toast) { runToastAction() }
+                    .padding(.bottom, 8)
+                    // The overlay keeps the toast out of the layout (it never pushes the list),
+                    // and the transition makes it arrive and leave the same edge smoothly
+                    // instead of blinking in and out.
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .sheet(isPresented: $showFile) {
@@ -434,13 +439,16 @@ struct ReceiptDetailView: View {
         let timing = ScreenTiming("Kuitti")
         let path = "/api/receipts/\(receiptId)"
         if state.value == nil, let cached: ReceiptResponse = await app.cachedValue(path) {
-            state.succeed(cached.receipt)
+            withMotion(.snappy) { state.succeed(cached.receipt) }
             timing.painted(fromCache: true)
         }
         state.begin()
         do {
             let r: ReceiptResponse = try await app.cachedGet(path, force: force)
-            state.succeed(r.receipt)
+            // Animated on purpose: confirming a kohdistus or approving a receipt swaps whole
+            // sections (buttons out, "Kohdistettu" in). Without this the layout jumps to the new
+            // height instead of easing to it - the owner sees that as shifting.
+            withMotion(.snappy) { state.succeed(r.receipt) }
             timing.dataReady()
             if r.receipt.hasOriginalFile && !prefetched {
                 prefetched = true
