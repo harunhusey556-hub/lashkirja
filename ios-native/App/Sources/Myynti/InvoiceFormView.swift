@@ -768,21 +768,30 @@ struct SellerDetailsScreen: View {
                     if merged.imapAccounts == nil { merged.imapAccounts = profile.imapAccounts }
                     app.profileChanged(merged)
                 }
+                .transition(.opacity)
             } else if let failure {
                 ContentUnavailableView {
                     Label(failure, systemImage: "exclamationmark.triangle")
                 } actions: {
                     Button("Yritä uudelleen") { Task { await load() } }.buttonStyle(.primary)
                 }
+                .transition(.opacity)
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
             }
         }
+        // Loading, failure and the form cross-fade instead of cutting (same .snappy as
+        // ScreenStateView), so opening the seller details never flashes.
+        .motion(.snappy, value: phase)
         .background(Theme.canvas)
         .navigationTitle("Laskuttajan tiedot")
         .navigationBarTitleDisplayMode(.inline)
         .task { if profile == nil { await load() } }
     }
+
+    /// Only what the body switches on; the animation key must be Equatable and cheap.
+    private var phase: Int { profile != nil ? 2 : (failure != nil ? 1 : 0) }
 
     /// Fresh from the server: the form saves only what changed against what it opened with.
     private func load() async {

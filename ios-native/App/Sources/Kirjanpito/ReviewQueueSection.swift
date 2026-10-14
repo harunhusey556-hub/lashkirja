@@ -44,6 +44,9 @@ struct ReviewQueueSection: View {
             } header: {
                 Text(current == .rejected ? "Hylätyt kuitit · \(rejectedTotal)" : "Odottaa hyväksyntää · \(pending.count)")
             }
+            // The last page arriving removes "Lataa lisää" at the foot of the list: it fades out
+            // instead of vanishing, and the rows below don't jump.
+            .motion(.snappy, value: pendingHasMore)
         }
     }
 
@@ -120,12 +123,19 @@ struct ReviewQueueSection: View {
             } label: {
                 HStack {
                     Text(loadingPending ? "Ladataan…" : "Lataa lisää tarkastettavia").font(.subheadline.weight(.semibold))
+                        .contentTransition(.opacity)
                     Spacer()
-                    if loadingPending { ProgressView() }
+                    // Always laid out, only faded: the row never changes height or width
+                    // when the next page starts or finishes loading.
+                    ProgressView()
+                        .opacity(loadingPending ? 1 : 0)
+                        .accessibilityHidden(!loadingPending)
                 }
                 .foregroundStyle(Theme.accent)
+                .motion(.snappy, value: loadingPending)
             }
             .disabled(loadingPending)
+            .transition(.opacity)
         }
     }
 

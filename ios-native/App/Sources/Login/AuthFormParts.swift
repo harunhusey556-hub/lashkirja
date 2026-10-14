@@ -54,19 +54,29 @@ struct AuthButtonLabel: View {
     let busyTitle: String
     let busy: Bool
     var spinnerTint: Color = Theme.onInk
+    /// Optional leading symbol for the idle title (the passkey button's key).
+    var systemImage: String? = nil
 
     var body: some View {
+        // Both faces are always laid out and only cross-fade, so the button keeps one size:
+        // the busy word never widens it and nothing beside it shifts.
         ZStack {
-            Text(title).opacity(busy ? 0 : 1)
-            if busy {
-                HStack(spacing: 8) {
-                    ProgressView().tint(spinnerTint)
-                    Text(busyTitle)
+            HStack(spacing: 8) {
+                if let systemImage {
+                    Image(systemName: systemImage).accessibilityHidden(true)
                 }
+                Text(title)
             }
+            .opacity(busy ? 0 : 1)
+            HStack(spacing: 8) {
+                ProgressView().tint(spinnerTint)
+                Text(busyTitle)
+            }
+            .opacity(busy ? 1 : 0)
         }
         .font(.headline)
         .frame(maxWidth: .infinity, minHeight: 52)
+        .motion(.snappy, value: busy)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(busy ? busyTitle : title)
     }

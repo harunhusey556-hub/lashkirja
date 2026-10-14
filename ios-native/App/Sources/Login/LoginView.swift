@@ -216,17 +216,8 @@ struct LoginView: View {
     private var passkeyButton: some View {
         VStack(spacing: 16) {
             Button { Task { await passkeySignIn() } } label: {
-                HStack(spacing: 8) {
-                    if passkeyBusy {
-                        ProgressView().tint(Theme.onInk)
-                        Text("Odotetaan pääsyavainta…")
-                    } else {
-                        Image(systemName: "person.badge.key.fill").accessibilityHidden(true)
-                        Text("Kirjaudu pääsyavaimella")
-                    }
-                }
-                .font(.headline)
-                .frame(maxWidth: .infinity, minHeight: 52)
+                AuthButtonLabel(title: "Kirjaudu pääsyavaimella", busyTitle: "Odotetaan pääsyavainta…",
+                                busy: passkeyBusy, systemImage: "person.badge.key.fill")
             }
             .buttonStyle(.primary)
             .disabled(passkeyBusy || busy)
@@ -266,12 +257,7 @@ struct LoginView: View {
             }
             VStack(spacing: 8) {
                 Button { Task { await createOfferedPasskey() } } label: {
-                    HStack(spacing: 8) {
-                        if offer.busy { ProgressView().tint(Theme.onInk) }
-                        Text(offer.busy ? "Luodaan…" : "Luo pääsyavain")
-                    }
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 52)
+                    AuthButtonLabel(title: "Luo pääsyavain", busyTitle: "Luodaan…", busy: offer.busy)
                 }
                 .buttonStyle(.primary)
                 .disabled(offer.busy || offer.created)
