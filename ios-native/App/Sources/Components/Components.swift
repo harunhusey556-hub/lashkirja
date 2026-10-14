@@ -48,21 +48,39 @@ struct ScreenStateView<Value, Content: View>: View {
     @ViewBuilder var content: (Value) -> Content
 
     var body: some View {
-        switch state.display {
-        case .loading:
-            ProgressView().frame(maxWidth: .infinity, minHeight: 200)
-                .accessibilityLabel("Ladataan")
-        case .failed(let failure):
-            LoadFailureView(failure: failure, retry: retry)
-        case .content(let value):
-            VStack(alignment: .leading, spacing: 12) {
-                if let banner = state.banner {
-                    RefreshFailureBanner(failure: banner, retry: retry)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
+        Group {
+            switch state.display {
+            case .loading:
+                ProgressView().frame(maxWidth: .infinity, minHeight: 200)
+                    .accessibilityLabel("Ladataan")
+            case .failed(let failure):
+                LoadFailureView(failure: failure, retry: retry)
+            case .content(let value):
+                VStack(alignment: .leading, spacing: 12) {
+                    if let banner = state.banner {
+                        RefreshFailureBanner(failure: banner, retry: retry)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                    }
+                    content(value)
                 }
-                content(value)
             }
+        }
+        // One place for every screen that loads data: the swap between loading, failure and
+        // content - and the height change that comes with it - eases instead of cutting, so a
+        // finished load never flashes or jumps. The owner asked for this to hold app-wide.
+        .animation(.snappy, value: phase)
+        // The refresh-failure banner arrives and leaves above the content: it must ease in too,
+        // or the content below it jumps by the banner's height.
+        .animation(.snappy, value: state.banner != nil)
+    }
+
+    /// Only what the switch distinguishes; animation keys must be Equatable and cheap.
+    private var phase: String {
+        switch state.display {
+        case .loading: "loading"
+        case .failed: "failed"
+        case .content: "content"
         }
     }
 }

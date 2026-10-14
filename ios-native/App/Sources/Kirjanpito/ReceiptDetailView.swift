@@ -116,12 +116,9 @@ struct ReceiptDetailView: View {
         }
         .overlay(alignment: .bottom) {
             if let toast {
-                ToastView(toast: toast) { runToastAction() }
-                    .padding(.bottom, 8)
-                    // The overlay keeps the toast out of the layout (it never pushes the list),
-                    // and the transition makes it arrive and leave the same edge smoothly
-                    // instead of blinking in and out.
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                // ToastView carries its own move+opacity transition, so it eases in and out
+                // wherever it is used; the overlay keeps it out of the layout.
+                ToastView(toast: toast) { runToastAction() }.padding(.bottom, 8)
             }
         }
         .sheet(isPresented: $showFile) {
