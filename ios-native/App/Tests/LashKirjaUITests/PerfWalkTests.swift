@@ -30,12 +30,12 @@ final class PerfWalkTests: WalkTestCase {
         }
         tab("Kirjanpito")
         for label in ["Kuitit", "Kohdista kuitit", "Kuukauden sulku", "ALV-ilmoitus"] {
-            if tapLabel("label BEGINSWITH %@", label) { sleep(3); back() }
+            if open(label) { sleep(3); back() }
         }
-        if tapLabel("label BEGINSWITH %@", "Pankki") {
+        if open("Pankki") {
             sleep(2)
             // Without a bank connection the hub offers "Yhdistä pankki" instead of its links.
-            if press("Yhdistä pankki") || tapLabel("label BEGINSWITH %@", "Pankkiyhteys ja tilit") { sleep(3); back() }
+            if press("Yhdistä pankki") || open("Pankkiyhteys ja tilit") { sleep(3); back() }
             back()
         }
         // The sheets open from a tab's root, where the toolbar is.
@@ -47,17 +47,34 @@ final class PerfWalkTests: WalkTestCase {
         }
     }
 
-    /// Taps the button if it shows up within a few seconds; a MISS note otherwise.
+    /// Taps the on-screen button (every tab's toolbar is in the tree; only the shown one is
+    /// hittable); a MISS note when none shows up within a few seconds.
     @discardableResult
     private func press(_ label: String) -> Bool {
-        let button = app.buttons[label].firstMatch
-        guard button.waitForExistence(timeout: 4), button.isHittable else {
+        _ = app.buttons[label].firstMatch.waitForExistence(timeout: 4)
+        guard let button = app.buttons.matching(identifier: label).allElementsBoundByIndex.first(where: { $0.isHittable }) else {
             note("MISS \(label)")
             return false
         }
         button.tap()
         taps += 1
         return true
+    }
+
+    /// Taps the on-screen row whose label starts with `prefix`, scrolling down for it.
+    private func open(_ prefix: String) -> Bool {
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", prefix))
+        _ = rows.firstMatch.waitForExistence(timeout: 8)
+        for _ in 0...6 {
+            if let row = rows.allElementsBoundByIndex.first(where: { $0.isHittable && $0.frame.minY > 30 }) {
+                row.tap()
+                taps += 1
+                return true
+            }
+            app.windows.firstMatch.swipeUp(velocity: .slow)
+        }
+        note("MISS \(prefix)")
+        return false
     }
 
     private func back() {
