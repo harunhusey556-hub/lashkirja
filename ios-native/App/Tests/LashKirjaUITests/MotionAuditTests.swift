@@ -36,6 +36,7 @@ final class MotionAuditTests: WalkTestCase {
         var expect: String
         var tapAt: Double, doneAt: Double, recStart: Double?, recEnd: Double?
         var video: String?, reached: Bool, skipped: Bool
+        var crashed: Bool? = nil
     }
 
     private var suite = ""
@@ -60,12 +61,17 @@ final class MotionAuditTests: WalkTestCase {
         let doneAt = Date().timeIntervalSince1970
         // The recording ends by itself; the next step waits for it so videos never overlap.
         for _ in 0..<Int(seconds * 4 + 60) where FileManager.default.fileExists(atPath: "\(name).rec") { usleep(250_000) }
-        let ok = done && (reached?() ?? true)
+        // A crash or a hang the system killed: kept as its own finding, then the app comes back
+        // signed in so the rest of the suite still runs.
+        let crashed = app.state != .runningForeground
+        if crashed { note("CRASH \(suite)/\(id): app state \(app.state.rawValue)") }
+        let ok = !crashed && done && (reached?() ?? true)
         let times = (try? String(contentsOfFile: "\(name).recording", encoding: .utf8))?
             .split(separator: "\n").compactMap { Double($0) } ?? []
         save(Step(id: id, suite: suite, from: from, action: id, to: to, kind: kind, expect: expect,
                   tapAt: tapAt, doneAt: doneAt, recStart: times.first, recEnd: times.count > 1 ? times[1] : nil,
-                  video: started ? "m-\(id).mov" : nil, reached: ok, skipped: !done))
+                  video: started ? "m-\(id).mov" : nil, reached: ok, skipped: !done, crashed: crashed))
+        if crashed { setUp() }
         note("\(done ? (ok ? "STEP" : "MISS-TARGET") : "SKIP") \(suite)/\(id): \(from) -> \(to)")
         return done
     }

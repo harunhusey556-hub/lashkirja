@@ -243,7 +243,8 @@ def main():
         events = probe_events(os.path.join(d, "probe.log"))
         for s in steps:
             row = {"suite": s.get("suite") or suite, "id": s["id"], "from": s["from"], "to": s["to"], "kind": s["kind"],
-                   "expect": s["expect"], "reached": s["reached"], "skipped": s["skipped"]}
+                   "expect": s["expect"], "reached": s["reached"], "skipped": s["skipped"],
+                   "crashed": bool(s.get("crashed"))}
             if s.get("video") and s.get("recStart") and os.path.exists(os.path.join(d, s["video"])):
                 tap_s = s["tapAt"] - s["recStart"]
                 res = analyze_video(os.path.join(d, s["video"]), tap_s)
@@ -273,7 +274,8 @@ def main():
     def count(check):
         return sum(1 for r in rows if r["checks"][check] == "FAIL")
     lines = ["# Motion audit", "", f"{len(rows)} steps. FAIL: intermediate {count('intermediate')}, flash {count('flash')}, "
-             f"shift (video) {count('shift_video')}, shift (probe) {count('shift_probe')}.", "",
+             f"shift (video) {count('shift_video')}, shift (probe) {count('shift_probe')}; "
+             f"crashes {sum(1 for r in rows if r['crashed'])}.", "",
              "## Calibration", "", CALIBRATION, "",
              f"Thresholds: STATIC_DIFF={STATIC_DIFF}, DISTINCT={DISTINCT}, FLASH_LUMA={FLASH_LUMA}, QUIET_S={QUIET_S}, "
              f"SHIFT_AREA={SHIFT_AREA}, PROBE_MIN_PT={PROBE_MIN_PT}.", "",
@@ -283,7 +285,7 @@ def main():
              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         c = r["checks"]
-        lines.append(f"| {r['suite']} | {r['id']} | {r['from']} → {r['to']} | {r['kind']} | {'yes' if r['reached'] else 'NO'} | "
+        lines.append(f"| {r['suite']} | {r['id']} | {r['from']} → {r['to']} | {r['kind']} | {'CRASH' if r['crashed'] else ('yes' if r['reached'] else 'NO')} | "
                      f"{c['intermediate']} | {c['flash']} | {c['shift_video']} | {c['shift_probe']} | {r.get('settle_ms', '')} | "
                      f"{r.get('jank_dropped', '')} | {'[png](' + r['sheet'] + ')' if r.get('sheet') else r.get('error', '')} |")
     lines += ["", "## Details of FAIL rows", ""]
