@@ -64,8 +64,10 @@ struct ReceiptDetailView: View {
                         Text(ReceiptReadHelp.hint).font(.subheadline).foregroundStyle(Theme.ink)
                         Button { Task { await reread() } } label: {
                             Label(rereadBusy ? "Luetaan…" : "Lue uudelleen", systemImage: "arrow.clockwise")
+                                .contentTransition(.opacity)
                         }
                         .disabled(rereadBusy)
+                        .motion(.snappy, value: rereadBusy)
                     }
                     .listRowBackground(Theme.accentSoft)
                 }
@@ -115,7 +117,7 @@ struct ReceiptDetailView: View {
                             .disabled(reviewBusy)
                     }
                 }
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
+                if let failure { Text(failure).foregroundStyle(Theme.danger).transition(.opacity) }
             } else if state.failure == nil, let row = app.receiptPreview(receiptId) {
                 // The row the list showed, at once; the fields, picture and actions fill in.
                 previewSections(row)
@@ -139,6 +141,7 @@ struct ReceiptDetailView: View {
                 }
             }
         }
+        .motion(.snappy, value: failure)
         .overlay(alignment: .bottom) {
             if let toast {
                 // ToastView carries its own move+opacity transition, so it eases in and out
@@ -229,9 +232,8 @@ struct ReceiptDetailView: View {
     }
 
     /// The notice is extra information on the receipt screen; without it the screen still works.
-    private func loadOstolasku() async {
-        let view: ReceiptPurchaseInvoiceView? = try? await app.api.get("/api/receipts/\(receiptId)/purchase-invoice")
-        ostolasku = view
+    private func fetchOstolasku() async -> ReceiptPurchaseInvoiceView? {
+        try? await app.api.get("/api/receipts/\(receiptId)/purchase-invoice")
     }
 
     private func setKind(_ kind: ReceiptDocumentKind) async {
@@ -246,7 +248,8 @@ struct ReceiptDetailView: View {
             Haptics.success()
             showToast(result.message(for: kind), action: nil, run: nil)
             app.dataVersion += 1
-            await loadOstolasku()
+            let view = await fetchOstolasku()
+            withMotion(.snappy) { ostolasku = view }
         } catch is CancellationError {
         } catch {
             // The server's own sentence, e.g. that an ostolasku with payments cannot become a kuitti.
@@ -278,11 +281,11 @@ struct ReceiptDetailView: View {
         }
     }
 
-    private func loadRule(vendor: String?) async {
-        guard let vendor, !vendor.trimmingCharacters(in: .whitespaces).isEmpty else { ruleActive = false; return }
-        if let response: VendorRuleResponse = try? await app.api.get("/api/vendor-rules", query: ["vendor": vendor]) {
-            ruleActive = response.isActive
-        }
+    /// Whether a rule is on for the vendor; nil when the server could not say (the shown answer stays).
+    private func fetchRule(vendor: String?) async -> Bool? {
+        guard let vendor, !vendor.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        let response: VendorRuleResponse? = try? await app.api.get("/api/vendor-rules", query: ["vendor": vendor])
+        return response?.isActive
     }
 
     @discardableResult
@@ -292,7 +295,7 @@ struct ReceiptDetailView: View {
         defer { ruleBusy = false }
         do {
             let _: Ignored = try await app.api.send("POST", "/api/vendor-rules", body: Body(vendor: vendor, category: category))
-            ruleActive = true
+            withMotion(.snappy) { ruleActive = true }
             Haptics.success()
             return true
         } catch is CancellationError {
@@ -310,7 +313,7 @@ struct ReceiptDetailView: View {
         defer { ruleBusy = false }
         do {
             let _: Ignored = try await app.api.send("POST", "/api/vendor-rules/undo", body: Body(vendor: vendor))
-            ruleActive = false
+            withMotion(.snappy) { ruleActive = false }
             Haptics.success()
             showToast("Sääntö kumottu.", action: nil, run: nil)
         } catch is CancellationError {
@@ -477,19 +480,30 @@ struct ReceiptDetailView: View {
             timing.painted(fromCache: true)
         }
         state.begin()
+        // The ostolasku notice and the vendor rule are asked alongside the receipt and go on screen
+        // with it: arriving after it, the notice was inserted above the fields and pushed them
+        // down, and the rule button changed its words a moment after the page settled.
+        async let ostolaskuView = fetchOstolasku()
+        let knownVendor = (state.value ?? app.receiptPreview(receiptId))?.vendor
+        async let knownRule = fetchRule(vendor: knownVendor)
         do {
             let r: ReceiptResponse = try await app.cachedGet(path, force: force)
+            let view = await ostolaskuView
+            var rule = await knownRule
+            if r.receipt.vendor != knownVendor { rule = await fetchRule(vendor: r.receipt.vendor) }
             // Animated on purpose: confirming a kohdistus or approving a receipt swaps whole
             // sections (buttons out, "Kohdistettu" in). Without this the layout jumps to the new
             // height instead of easing to it - the owner sees that as shifting.
-            withMotion(.snappy) { state.succeed(r.receipt) }
+            withMotion(.snappy) {
+                state.succeed(r.receipt)
+                ostolasku = view
+                if let rule { ruleActive = rule }
+            }
             timing.dataReady()
             if r.receipt.hasOriginalFile && !prefetched {
                 prefetched = true
                 DocumentCache.shared.prefetch(app, path: "/api/receipts/\(receiptId)/file", query: Self.fileQuery, fileName: r.receipt.fileName ?? "kuitti", key: Self.fileCacheKey)
             }
-            await loadRule(vendor: r.receipt.vendor)
-            await loadOstolasku()
         } catch is CancellationError {
         } catch {
             state.fail(error)
@@ -680,7 +694,7 @@ struct ReceiptEditSheet: View {
                 }
                 if let failure {
                     Section {
-                        Text(failure.message).foregroundStyle(Theme.danger)
+                        Text(failure.message).foregroundStyle(Theme.danger).transition(.opacity)
                         if case .versionConflict = failure {
                             Button { Task { await reload() } } label: { Label("Lataa uudelleen", systemImage: "arrow.clockwise") }
                                 .disabled(busy)
@@ -698,9 +712,21 @@ struct ReceiptEditSheet: View {
                     Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    if busy { ProgressView() } else { Button("Tallenna") { Task { await save() } }.bold() }
+                    // The button keeps its place and only fades under the spinner while saving.
+                    Button("Tallenna") { Task { await save() } }.bold()
+                        .opacity(busy ? 0 : 1)
+                        .overlay { if busy { ProgressView().transition(.opacity) } }
+                        .disabled(busy)
+                        .motion(.easeOut(duration: 0.15), value: busy)
                 }
             }
+            // A field error, the failure, the foreign-purchase section or a VAT row coming or
+            // going: the rows below ease to their new place.
+            .motion(.snappy, value: errors)
+            .motion(.snappy, value: failure?.message)
+            .motion(.snappy, value: form.type)
+            .motion(.snappy, value: form.vatRows.map(\.id))
+            .motion(.snappy, value: customCategory)
             .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
             .onAppear {
                 if form.date.isEmpty { form.date = APIDate.dayString(Date()) }
