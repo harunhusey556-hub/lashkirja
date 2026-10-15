@@ -61,8 +61,16 @@ struct MainTabView: View {
             showAssistant = false
             showAdd = false
             showNewInvoice = false
-            tab = pending.tab
-            paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
+            // Another tab: switch and push in one step, unanimated, so the closing sheet or cover
+            // reveals the destination itself, not the tab's root and then a push (three screens
+            // where the owner expects one; motion audit bad-link-over-sheet, the w32 "Näytä
+            // tarkistettavat" report). On the same tab the push animates as usual.
+            var transaction = Transaction()
+            transaction.disablesAnimations = pending.tab != tab
+            withTransaction(transaction) {
+                tab = pending.tab
+                paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
+            }
         }
         // A Home Screen quick action or App Intent: the same sheets the "+" tab and the assistant
         // button open. `initial` catches one that arrived before the tabs were on screen.
