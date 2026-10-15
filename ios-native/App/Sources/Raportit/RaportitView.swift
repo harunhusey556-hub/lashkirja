@@ -109,6 +109,13 @@ struct RaportitView: View {
             await load()
             if !Task.isCancelled { gate.mark(key: key, version: version) }
         }
+        // Once the figures are on screen, the Kuitit lists they open go into the cache: a drill
+        // paints its rows with the push, not grey rows the answer replaces after the push has
+        // settled (motion audit raportit-drill-open).
+        .task(id: "\(year)|\(app.dataVersion)|\(state.value == nil)") {
+            guard let report = state.value else { return }
+            await warmDrills(report, year: String(year))
+        }
         .onChange(of: year) { _, _ in categoryLimit.reset() }
         .sheet(isPresented: $showPackage) {
             DocumentPreviewSheet(path: "/api/export/package", query: ["month": packagePeriod], fileName: "kirjanpito-\(packagePeriod).zip")
@@ -282,6 +289,30 @@ struct RaportitView: View {
         selectedMonth = nil
         state.restart()
     }
+
+    /// The receipts lists this screen links to, as `ReceiptsView` asks for them: the Tulot and
+    /// Menot figures, the data-quality rows and the categories shown. Fills the cache only; a
+    /// failure is the list's to show when it is opened.
+    private func warmDrills(_ report: ProfitLoss, year: String) async {
+        var drills = ReportDrill.incomeTargets(report.total, key: year)
+        drills += [ReportDrill.expenseTarget(report.total, key: year)].compactMap { $0 }
+        drills += ReportDrill.dataQuality(missingVat: report.total.missingVatCount, undated: report.undatedCount, year: year).map(\.drill)
+        if let kind = ReportCategoryKind.resolve(categoryChoice, in: report.total) {
+            let rows = kind.rows(report.total)
+            drills += rows.prefix(categoryLimit.visible(rows.count)).map { ReportDrill.target(kind: kind, category: $0.category, year: year) }
+        }
+        let queries = Set(drills.compactMap(\.receiptQuery))
+        let requests = Set(queries.map { DrillRequest(path: "/api/receipts", query: ReceiptListPaging.firstQuery($0)) }
+            + queries.map { DrillRequest(path: "/api/receipts/counts", query: $0.countsQuery()) })
+        let app = app
+        await withTaskGroup(of: Void.self) { group in
+            for request in requests {
+                group.addTask { let _: Ignored? = try? await app.cachedGet(request.path, query: request.query, persist: true) }
+            }
+        }
+    }
+
+    private struct DrillRequest: Hashable { let path: String; let query: [String: String] }
 
     /// Through the app's cache: a year looked at before shows at once, then refreshes when stale.
     private func load() async {

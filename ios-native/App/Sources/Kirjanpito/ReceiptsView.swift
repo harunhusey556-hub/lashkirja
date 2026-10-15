@@ -87,11 +87,8 @@ struct ReceiptsView: View {
         var initial: ReceiptListQuery
         remembers = !drilled
         if drilled || !month.isEmpty || tab != .all || !category.isEmpty {
-            initial = ReceiptListQuery()
-            initial.month = month
-            initial.tab = tab
-            initial.category = category
-            initial.missingVat = missingVat
+            // The query Raportit warms the cache with (ReportDrill.receiptQuery).
+            initial = .drilled(month: month, tab: tab, category: category, missingVat: missingVat)
         } else {
             initial = ReceiptListQuery(remembered: UserDefaults.standard.string(forKey: Self.filterKey) ?? "")
         }
