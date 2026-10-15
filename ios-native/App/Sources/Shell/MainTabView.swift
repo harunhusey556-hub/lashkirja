@@ -17,6 +17,7 @@ struct MainTabView: View {
                 Tab(item.title, systemImage: item.symbol, value: item) {
                     NavigationStack(path: path(item)) {
                         root(item)
+                            .motionProbe("tab.\(item)")
                             .toolbar {
                                 ToolbarItemGroup(placement: .topBarTrailing) {
                                     Button { showAssistant = true } label: { Image(systemName: "bubble.left") }
@@ -38,9 +39,9 @@ struct MainTabView: View {
         // Less gap between sections, so more fits on a phone. Rows keep the system's 44 pt minimum,
         // the smallest comfortable touch target.
         .listSectionSpacing(.compact)
-        .sheet(isPresented: $showAdd) { AddSheet() }
-        .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]) }
-        .sheet(isPresented: $showAssistant) { AssistantView() }
+        .sheet(isPresented: $showAdd) { AddSheet().motionProbe("add-sheet") }
+        .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]).motionProbe("settings-sheet") }
+        .sheet(isPresented: $showAssistant) { AssistantView().motionProbe("assistant") }
         // Skipping ("Ohita nyt") keeps them away for a day; Koti then offers to resume them.
         .fullScreenCover(isPresented: Bindable(OnboardingGate.shared).isPresented) { OnboardingView() }
         // "Kuvaa kuitti" on a notification: the camera for that bank row, whatever tab is showing.

@@ -161,6 +161,7 @@ extension View {
         // Pushed screens use the small inline title: the large one costs a phone screen ~50 pt.
         navigationDestination(for: Route.self) { route in
             RouteScreen(route: route).navigationBarTitleDisplayMode(.inline)
+                .motionProbe(String(describing: route))
                 .onAppear { EventLog.shared.log(.screen(String(describing: route))) }
         }
     }
