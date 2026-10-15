@@ -46,6 +46,14 @@ struct BankHubView: View {
                 // The page's shape at once: the balances fill in as soon as they arrive (they load
                 // beside the rows), the rows a moment later.
                 balanceSection([])
+                // The month and the action row too, as placeholders of their real size: without
+                // them the page grew by both when the rows arrived.
+                Group {
+                    monthSection([])
+                    actionSection
+                }
+                .redacted(reason: .placeholder)
+                .disabled(true)
                 skeletonSection
             }
         }
@@ -136,7 +144,24 @@ struct BankHubView: View {
                 Text("Saldoja ei saatu ladattua.").foregroundStyle(Theme.ink2)
                 Button("Yritä uudelleen") { Task { await load() } }
             } else {
-                ProgressView().frame(maxWidth: .infinity)
+                // The figures' own shape while they load (a total and one account), not a spinner
+                // row a third of their height: the sections below stayed put only in the spinner's
+                // place and jumped when the balances came (motion audit pankki-hub-open).
+                Group {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Saldo yhteensä").font(.caption)
+                        Text("0 000,00 €").font(.title2.weight(.semibold))
+                    }
+                    .padding(.vertical, 4)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Käyttötili")
+                        Text("Pankki · päivitetty 1.1.2026").font(.caption)
+                        Text("0 000,00 €").font(.subheadline.weight(.semibold))
+                    }
+                }
+                .redacted(reason: .placeholder)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Ladataan saldoja")
             }
         } header: {
             HStack {
