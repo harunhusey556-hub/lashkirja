@@ -15,11 +15,20 @@ struct RecurringInvoicesView: View {
     @State private var runner = RecurringRunner()
     @State private var limit = ShowMore()
 
+    /// `preview` (the app's `lastPainted` list) is on screen in the first frame: painted from `load`
+    /// instead, the push showed a spinner first (motion audit myynti-recurring-open).
+    init(preview: RecurringList? = nil) {
+        guard let preview else { return }
+        var shown = ScreenLoad<RecurringList>()
+        shown.succeed(preview)
+        _state = State(initialValue: shown)
+    }
+
     var body: some View {
         List {
             if let list = state.value {
                 if let banner = state.banner {
-                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                    Section { RefreshFailureBanner(failure: banner, retry: { await load() }) }
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
@@ -70,7 +79,7 @@ struct RecurringInvoicesView: View {
                     ShowMoreButton(limit: $limit, total: list.recurring.count)
                 }
             } else {
-                ScreenStateView(state: state, retry: load) { (_: RecurringList) in EmptyView() }
+                ScreenStateView(state: state, retry: { await load() }) { (_: RecurringList) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
         }
@@ -83,14 +92,14 @@ struct RecurringInvoicesView: View {
                     .accessibilityLabel("Uusi toistuva lasku")
             }
         }
-        .refreshable { await load() }
+        .refreshable { await load(force: true) }
         // Every accepted write bumps dataVersion: a change made on the pushed detail shows here on Back.
         .task(id: "\(showInactive)|\(app.dataVersion)") { await load() }
         .onChange(of: showInactive) { _, _ in limit.reset() }
         .sheet(isPresented: $showNew) {
             RecurringFormSheet(existing: nil) { message in
                 notice = message
-                Task { await load() }
+                Task { await load(force: true) }
             }
         }
         .navigationDestination(item: $selected) { entry in
@@ -98,7 +107,7 @@ struct RecurringInvoicesView: View {
         }
         .recurringRunConfirmation(runner: runner) { message in
             notice = message
-            Task { await load() }
+            Task { await load(force: true) }
         }
     }
 
@@ -125,11 +134,15 @@ struct RecurringInvoicesView: View {
         .contentShape(Rectangle())
     }
 
-    private func load() async {
+    /// Through the app's cache (`NextPrefetch.myynti` warms the active plans); a write bumps
+    /// `dataVersion`, so the list after one is the server's.
+    private func load(force: Bool = false) async {
         state.begin()
         do {
-            let list: RecurringList = try await app.api.get("/api/recurring-invoices", query: showInactive ? ["includeInactive": "1"] : [:])
+            let query = showInactive ? ["includeInactive": "1"] : [:]
+            let list: RecurringList = try await app.cachedGet("/api/recurring-invoices", query: query, force: force)
             state.succeed(list)
+            app.rememberPainted(list, "/api/recurring-invoices", query: query)
         } catch is CancellationError {
         } catch {
             state.fail(error)

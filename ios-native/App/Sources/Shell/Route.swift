@@ -188,8 +188,8 @@ struct RouteScreen: View {
         case .purchaseInvoices: PurchaseInvoicesView()
         case .purchaseInvoice(let id): PurchaseInvoiceDetailView(purchaseInvoiceId: id)
         case .statement(let id): StatementDetailView(statementId: id)
-        case .recurringInvoices: RecurringInvoicesView()
-        case .periods: PeriodsView()
+        case .recurringInvoices: RecurringInvoicesView(preview: app.lastPainted("/api/recurring-invoices"))
+        case .periods: PeriodsView(preview: app.periodsPreview(month: PeriodClose.startMonth(nil, current: MonthKey.current())))
         case .ledger: LedgerView()
         case .workQueue: WorkQueueView()
         case .privacy: PrivacyView()
@@ -201,11 +201,12 @@ struct RouteScreen: View {
             EmailImportView { app.profileChanged($0) }
         case .receiptsFiltered(let month, let tab): ReceiptsView(month: month, tab: ReceiptTab(rawValue: tab) ?? .all, drilled: true)
         case .bankFeedFiltered(let month, let onlyOpen, let focus): BankFeedView(month: month, onlyOpen: onlyOpen, focusTransactionId: focus)
-        case .newInvoice: MyyntiView(openNewInvoice: true)
+        case .newInvoice: MyyntiView(openNewInvoice: true, preview: app.salesPreview())
         case .reports: RaportitView()
-        case .invoices: MyyntiView()
+        case .invoices: MyyntiView(preview: app.salesPreview())
         case .statements: StatementsView()
-        case .monthClose(let month): PeriodsView(month: month)
+        case .monthClose(let month):
+            PeriodsView(month: month, preview: app.periodsPreview(month: PeriodClose.startMonth(month, current: MonthKey.current())))
         case .receiptsCategory(let period, let tab, let category):
             ReceiptsView(month: period, tab: ReceiptTab(rawValue: tab) ?? .all, category: category, drilled: true)
         case .receiptsMissingVat(let period):
@@ -213,7 +214,8 @@ struct RouteScreen: View {
         case .emailInbox: EmailInboxView()
         case .bankHub: BankHubView()
         case .invoicesFiltered(let month, let status, let customerId):
-            MyyntiView(scope: InvoiceScope(month: month, customerId: customerId), status: SalesFilter(rawValue: status) ?? .all)
+            let scope = InvoiceScope(month: month, customerId: customerId), filter = SalesFilter(rawValue: status) ?? .all
+            MyyntiView(scope: scope, status: filter, preview: app.salesPreview(scope: scope, filter: filter))
         case .purchaseInvoicesFiltered(let status): PurchaseInvoicesView(status: PurchaseFilter(rawValue: status))
         case .recurringPurchases: RecurringPurchasesView()
         case .purchaseMatch: PurchaseMatchView()

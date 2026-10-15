@@ -32,6 +32,23 @@ public enum AssistantCooldown {
         public var id: String { label }
     }
 
+    /// The limited mode's shortcut row under the conversation, kept at hand after each reply.
+    public enum ShortcutRow: Equatable, Sendable {
+        case none
+        /// Laid out but not shown, while a reply is on its way.
+        case reserved
+        case shown
+    }
+
+    /// Where the conversation ends in that row. It stands under the messages, never above them,
+    /// and takes its place as soon as a question is sent: the reply landing then only fades the
+    /// row in, and nothing above it moves (motion audit chat-send).
+    public static func shortcutRow(available: Bool?, messageCount: Int, replying: Bool, lastRole: String?) -> ShortcutRow {
+        guard available == false, messageCount > 0 else { return .none }
+        if replying { return .reserved }
+        return lastRole == "assistant" ? .shown : .none
+    }
+
     /// The shortcuts that always work, model or not.
     public static let shortcuts = [
         Shortcut(label: "Yhdistä pankki", message: "Mistä voin yhdistää pankkini?"),

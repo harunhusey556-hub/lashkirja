@@ -87,11 +87,8 @@ struct ReceiptsView: View {
         var initial: ReceiptListQuery
         remembers = !drilled
         if drilled || !month.isEmpty || tab != .all || !category.isEmpty {
-            initial = ReceiptListQuery()
-            initial.month = month
-            initial.tab = tab
-            initial.category = category
-            initial.missingVat = missingVat
+            // The query Raportit warms the cache with (ReportDrill.receiptQuery).
+            initial = .drilled(month: month, tab: tab, category: category, missingVat: missingVat)
         } else {
             initial = ReceiptListQuery(remembered: UserDefaults.standard.string(forKey: Self.filterKey) ?? "")
         }
@@ -601,7 +598,17 @@ struct ReceiptsView: View {
         let asked = query
         let listQuery = ReceiptListPaging.firstQuery(asked, loadedRows: receipts.value?.count ?? 0)
         let countsQuery = asked.countsQuery()
-        if receipts.value == nil, let cached: ReceiptList = await app.cachedValue("/api/receipts", query: listQuery), asked == query {
+        // The four answers as last painted, in memory: no await before the first rows (w41 perf
+        // walk: the four awaits on the cache below took 0.35-0.85 s before anything showed).
+        if receipts.value == nil, let cached: ReceiptList = app.lastPainted("/api/receipts", query: listQuery),
+           let q: ReceiptList = app.lastPainted("/api/receipts", query: ReceiptListQuery.pendingQueue()),
+           let r: ReceiptList = app.lastPainted("/api/receipts", query: ReceiptListQuery.rejectedQueue()) {
+            if let c: ReceiptCounts = app.lastPainted("/api/receipts/counts", query: countsQuery) { counts = c.counts }
+            applyPending(q)
+            applyRejected(r)
+            applyList(cached, tab: asked.tab)
+            timing.painted(fromCache: true)
+        } else if receipts.value == nil, let cached: ReceiptList = await app.cachedValue("/api/receipts", query: listQuery), asked == query {
             if let c: ReceiptCounts = await app.cachedValue("/api/receipts/counts", query: countsQuery) { counts = c.counts }
             if let q: ReceiptList = await app.cachedValue("/api/receipts", query: ReceiptListQuery.pendingQueue()) { applyPending(q) }
             if let r: ReceiptList = await app.cachedValue("/api/receipts", query: ReceiptListQuery.rejectedQueue()) { applyRejected(r) }
@@ -635,6 +642,10 @@ struct ReceiptsView: View {
         guard asked == query else { return }
         if let countsList { counts = countsList.counts }
         applyList(list, tab: asked.tab)
+        app.rememberPainted(list, "/api/receipts", query: listQuery)
+        if let pendingList { app.rememberPainted(pendingList, "/api/receipts", query: ReceiptListQuery.pendingQueue()) }
+        if let rejectedList { app.rememberPainted(rejectedList, "/api/receipts", query: ReceiptListQuery.rejectedQueue()) }
+        if let countsList { app.rememberPainted(countsList, "/api/receipts/counts", query: countsQuery) }
         failure = nil
         timing.dataReady()
     }

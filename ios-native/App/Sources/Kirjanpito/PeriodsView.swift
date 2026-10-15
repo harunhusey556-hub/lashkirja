@@ -41,8 +41,17 @@ struct PeriodsView: View {
     }
 
     /// `month` opens the checklist on that month (Koti's status card); none opens on last month.
-    init(month: String? = nil) {
-        _month = State(initialValue: PeriodClose.startMonth(month, current: MonthKey.current()))
+    /// `preview` (the app's `periodsPreview` for that month) is on screen in the first frame: painted
+    /// from `loadMonth` instead, two awaits on the cache came first and the first data showed
+    /// 1.6-2 s after the tap (w41 perf walk).
+    init(month: String? = nil, preview: PeriodsPreview? = nil) {
+        let start = PeriodClose.startMonth(month, current: MonthKey.current())
+        _month = State(initialValue: start)
+        guard let preview, preview.status.month == start else { return }
+        var shown = ScreenLoad<PeriodMonthStatus>()
+        shown.succeed(preview.status)
+        _status = State(initialValue: shown)
+        _vat = State(initialValue: preview.vat)
     }
 
     var body: some View {
@@ -361,17 +370,14 @@ struct PeriodsView: View {
             }
             try Task.checkCancellation()
             status.succeed(data)
+            app.rememberPeriods(PeriodsPreview(status: data, vat: vat))
         } catch is CancellationError {
         } catch {
             status.fail(error)
         }
     }
 
-    private func vatFacts(_ report: AlvReport) -> PeriodClose.Vat {
-        PeriodClose.vat(filedAt: report.filing?.filedAt, paidAt: report.filing?.paidAt,
-                        filedAmount: report.filing?.filedAmount,
-                        amount: report.field308.amount, isRefund: report.field308.isRefund)
-    }
+    private func vatFacts(_ report: AlvReport) -> PeriodClose.Vat { PeriodsPreview.facts(report) }
 
     private func closeMonth() async {
         guard let data = status.value, !closing else { return }
@@ -561,5 +567,36 @@ struct PeriodsView: View {
         } catch {
             lockedThrough.fail(error)
         }
+    }
+}
+
+/// What Kuukauden sulku opens on before its own load: a month's checklist with its VAT row.
+struct PeriodsPreview {
+    let status: PeriodMonthStatus
+    let vat: (key: String, facts: PeriodClose.Vat, report: AlvReport)?
+
+    /// The VAT row's facts from the period's ALV return, as the screen shows them.
+    static func facts(_ report: AlvReport) -> PeriodClose.Vat {
+        PeriodClose.vat(filedAt: report.filing?.filedAt, paidAt: report.filing?.paidAt,
+                        filedAmount: report.filing?.filedAmount,
+                        amount: report.field308.amount, isRefund: report.field308.isRefund)
+    }
+}
+
+extension AppModel {
+    /// The checklist (and its VAT row) last painted for `month`; nil when there is none, or when its
+    /// VAT row is not known (the row would pop in under the sections, motion kirjanpito-periods-open).
+    func periodsPreview(month: String) -> PeriodsPreview? {
+        guard let status: PeriodMonthStatus = lastPainted("/api/dashboard/month", query: ["month": month]) else { return nil }
+        guard status.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: month, kind: status.vatPeriod) else {
+            return PeriodsPreview(status: status, vat: nil)
+        }
+        guard let report: AlvReport = lastPainted("/api/alv", query: ["period": period]) else { return nil }
+        return PeriodsPreview(status: status, vat: (period, PeriodsPreview.facts(report), report))
+    }
+
+    func rememberPeriods(_ preview: PeriodsPreview) {
+        rememberPainted(preview.status, "/api/dashboard/month", query: ["month": preview.status.month])
+        if let vat = preview.vat { rememberPainted(vat.report, "/api/alv", query: ["period": vat.key]) }
     }
 }
