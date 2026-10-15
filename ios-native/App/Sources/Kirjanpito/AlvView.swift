@@ -97,7 +97,7 @@ struct AlvView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("ALV-ilmoitus")
-        .refreshable { await load() }
+        .refreshable { await fetch(force: true) }
         .task(id: period) {
             failure = nil
             notice = nil
@@ -346,13 +346,21 @@ struct AlvView: View {
     /// An answer (or failure) is shown only while its period (and so its kind) is still on screen
     /// and no later load has started: a slow pull-to-refresh or a load from before a period
     /// change must not put another period's figures under this one's heading.
-    private func load() async {
+    private func load() async { await fetch(force: false) }
+
+    /// Through the app's cache (KirjanpitoView warms the return that is due): a period seen before
+    /// paints at once instead of a spinner its figures then replace.
+    private func fetch(force: Bool) async {
         let asked = period
         loadGeneration += 1
         let mine = loadGeneration
+        if state.value == nil, let cached: AlvReport = await app.cachedValue("/api/alv", query: ["period": asked]),
+           asked == period, mine == loadGeneration {
+            state.succeed(cached)
+        }
         state.begin()
         do {
-            let report: AlvReport = try await app.api.get("/api/alv", query: ["period": asked])
+            let report: AlvReport = try await app.cachedGet("/api/alv", query: ["period": asked], force: force)
             guard asked == period, mine == loadGeneration else { return }
             state.succeed(report)
         }
@@ -377,7 +385,7 @@ struct AlvView: View {
             Haptics.success()
             failure = nil
             notice = done
-            await load()
+            await fetch(force: true)
         } catch is CancellationError {
         } catch {
             guard asked == period else { return }

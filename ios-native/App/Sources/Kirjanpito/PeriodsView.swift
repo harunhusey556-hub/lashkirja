@@ -341,6 +341,10 @@ struct PeriodsView: View {
         if status.value?.month != key {
             status.restart()
             if let cached: PeriodMonthStatus = await app.cachedValue("/api/dashboard/month", query: ["month": key]), month == key {
+                if cached.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: key, kind: cached.vatPeriod),
+                   let report: AlvReport = await app.cachedValue("/api/alv", query: ["period": period]) {
+                    vat = (period, vatFacts(report), report)
+                }
                 status.succeed(cached)
             }
         }
@@ -348,21 +352,27 @@ struct PeriodsView: View {
         do {
             let data: PeriodMonthStatus = try await app.cachedGet("/api/dashboard/month", query: ["month": key], force: force)
             try Task.checkCancellation()
-            status.succeed(data)
+            // The VAT row's figures before the month's sections show: one swap, not the sections
+            // and then the row and the note above it changing (motion audit kirjanpito-periods-open).
             if data.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: key, kind: data.vatPeriod) {
-                if let report: AlvReport = try? await app.api.get("/api/alv", query: ["period": period]) {
-                    let facts = PeriodClose.vat(filedAt: report.filing?.filedAt, paidAt: report.filing?.paidAt,
-                                                filedAmount: report.filing?.filedAmount,
-                                                amount: report.field308.amount, isRefund: report.field308.isRefund)
-                    vat = (period, facts, report)
+                if let report: AlvReport = try? await app.cachedGet("/api/alv", query: ["period": period], force: force) {
+                    vat = (period, vatFacts(report), report)
                 }
             } else {
                 vat = nil
             }
+            try Task.checkCancellation()
+            status.succeed(data)
         } catch is CancellationError {
         } catch {
             status.fail(error)
         }
+    }
+
+    private func vatFacts(_ report: AlvReport) -> PeriodClose.Vat {
+        PeriodClose.vat(filedAt: report.filing?.filedAt, paidAt: report.filing?.paidAt,
+                        filedAmount: report.filing?.filedAmount,
+                        amount: report.field308.amount, isRefund: report.field308.isRefund)
     }
 
     private func closeMonth() async {
