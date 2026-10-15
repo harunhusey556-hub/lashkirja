@@ -43,6 +43,8 @@ final class CaptureQueueModel {
     /// Said for a few seconds after a single file is saved as a bill ("Tallennettu · ostolasku luotu, …").
     private(set) var notice: String?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
+    /// Rows whose "Kuitti ⇄ Ostolasku" is on its way: their switch waits, so two taps never cross.
+    private(set) var switchingKind: Set<String> = []
 
     let transactionId: String?
     /// Called after each receipt is saved (and matched); set by the screen.
@@ -264,7 +266,8 @@ final class CaptureQueueModel {
         }
         do {
             let outcome = try await save(draft, saveDuplicateAnyway: true)
-            queue.markSaved(id, autoApproved: outcome.approved, duplicate: outcome.duplicate, invoiceNote: outcome.invoiceNote)
+            queue.markSaved(id, autoApproved: outcome.approved, duplicate: outcome.duplicate, invoiceNote: outcome.invoiceNote,
+                            receiptId: outcome.receiptId, kind: outcome.kind)
             // A lone file has no list of rows to read the outcome from, so it is also said aloud.
             if queue.rows.count == 1 { announce(outcome.invoiceNote) }
             onSaved?()
@@ -300,8 +303,9 @@ final class CaptureQueueModel {
     }
 
     /// A receipt saved from the form (or a bank row linked to the receipt its file already was).
-    func saved(_ rowId: String, autoApproved: Bool? = false, invoiceNote: String? = nil) {
-        queue.markSaved(rowId, autoApproved: autoApproved, invoiceNote: invoiceNote)
+    func saved(_ rowId: String, autoApproved: Bool? = false, invoiceNote: String? = nil,
+               receiptId: String? = nil, kind: ReceiptDocumentKind? = nil) {
+        queue.markSaved(rowId, autoApproved: autoApproved, invoiceNote: invoiceNote, receiptId: receiptId, kind: kind)
         onSaved?()
         persist()
         // A bank row takes one receipt: once it is saved the match is done.
@@ -325,6 +329,27 @@ final class CaptureQueueModel {
         if single { closeRequested = true; return }
         say(UploadQueueStatus.skipped.label)
         step = .queue
+    }
+
+    /// "Kuitti ⇄ Ostolasku" on a saved row: the AI's decision turned around on the server
+    /// (`POST /api/receipts/[id]/kind`). The row then says what the document is; the toast says what
+    /// was done, or why not (a paid ostolasku, a closed month).
+    func switchKind(_ rowId: String) async {
+        guard let row = queue.row(rowId), row.canSwitchKind, let receiptId = row.receiptId, let current = row.kind,
+              !switchingKind.contains(rowId), let api = app?.api else { return }
+        let asked = current.other
+        switchingKind.insert(rowId)
+        defer { switchingKind.remove(rowId) }
+        do {
+            let change: ReceiptKindChange = try await api.send("POST", "/api/receipts/\(receiptId)/kind", body: ReceiptKindBody(asked))
+            queue.markKind(rowId, kind: change.kind, invoiceNote: change.invoiceNote)
+            say(change.message(asked: asked))
+            Haptics.success()
+        } catch is CancellationError {
+        } catch {
+            say(error.userMessage)
+            Haptics.error()
+        }
     }
 
     /// "Tallennettu · ostolasku luotu, eräpäivä 14.10.2026" for a few seconds; nothing for a plain receipt.

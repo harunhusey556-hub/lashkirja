@@ -27,12 +27,17 @@ struct CaptureFlow: View {
     /// Called after each receipt is saved (and matched). Not called when the flow is cancelled.
     var onSaved: (() -> Void)? = nil
 
-    /// `opensCamera`: a missing-receipt action goes straight to the camera; "+" → "Lisää kuitti"
+    /// Presented over a sheet ("+"): closing goes through the sheet, whose dismissal takes this cover
+    /// down with it in one movement. Dismissing the cover and then the sheet showed two (owner, 2026-10-15).
+    let onClose: (() -> Void)?
+
+    /// `opensCamera`: a missing-receipt action goes straight to the camera; "+" → "Lisää tiedosto"
     /// opens this page so the owner picks camera, photos or files. Kuitit's "Jatka" opens on the
     /// unfinished files instead.
-    init(transactionId: String?, onSaved: (() -> Void)? = nil, opensCamera: Bool = true) {
+    init(transactionId: String?, onSaved: (() -> Void)? = nil, opensCamera: Bool = true, onClose: (() -> Void)? = nil) {
         self.transactionId = transactionId
         self.onSaved = onSaved
+        self.onClose = onClose
         let model = transactionId == nil ? CaptureQueueModel.shared : CaptureQueueModel(transactionId: transactionId)
         _model = State(initialValue: model)
         _showCamera = State(initialValue: opensCamera && CaptureFlow.cameraAvailable && !model.resuming)
@@ -43,7 +48,12 @@ struct CaptureFlow: View {
     @State private var opened = false
     @State private var showCamera: Bool
     @State private var showFiles = false
+    /// The photo library, opened from the queue's "Lisää tiedostoja" menu.
+    @State private var showPhotos = false
     @State private var photos: [PhotosPickerItem] = []
+    /// Set by `close`: the queue is let go only once the cover is gone, so it never turns into the
+    /// empty picker page while it slides down.
+    @State private var closing = false
     @State private var confirmDiscard = false
     @State private var confirmDropUnsaved = false
     /// The form on screen has changes the owner made (`ReceiptEditor`).
@@ -86,8 +96,9 @@ struct CaptureFlow: View {
                 case .queue:
                     queueList
                 case .edit(let rowId, let draft):
-                    ReceiptEditor(model: model, rowId: rowId, draft: draft, preview: model.previews[rowId], dirty: $formDirty) { autoApproved, invoiceNote in
-                        model.saved(rowId, autoApproved: autoApproved, invoiceNote: invoiceNote)
+                    ReceiptEditor(model: model, rowId: rowId, draft: draft, preview: model.previews[rowId], dirty: $formDirty) { outcome in
+                        model.saved(rowId, autoApproved: outcome.approved, invoiceNote: outcome.invoiceNote,
+                                    receiptId: outcome.receiptId, kind: outcome.kind)
                     }
                     .id(rowId)
                 }
@@ -110,8 +121,14 @@ struct CaptureFlow: View {
                 model.open(app: app)
             }
             .navigationBarTitleDisplayMode(.inline)
+            .onDisappear {
+                if closing { model.screenClosed() }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { leadingButton }
+                if showsMoreMenu {
+                    ToolbarItem(placement: .topBarTrailing) { moreMenu }
+                }
             }
             .discardGuard(dirty: guarded, busy: false, asking: $confirmDiscard) { discard() }
             .confirmSheet(
@@ -146,6 +163,7 @@ struct CaptureFlow: View {
             .fileImporter(isPresented: $showFiles, allowedContentTypes: Self.fileTypes, allowsMultipleSelection: !single) { result in
                 importFiles(result)
             }
+            .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: single ? 1 : ReceiptUploadQueue.maxPick, matching: .images)
             .onChange(of: photos) { _, items in
                 guard !items.isEmpty else { return }
                 // Cleared so that picking the same photos again after a failure still fires.
@@ -197,73 +215,131 @@ struct CaptureFlow: View {
         Button { showFiles = true } label: { Label("Valitse tiedosto", systemImage: "doc").frame(maxWidth: .infinity, minHeight: 44) }
             .buttonStyle(.bordered)
         // UI tests only (Debug + `-LKUITest`): the simulator has no camera to take a picture with.
-        if UITestHooks.active {
-            Button {
-                add([(ReceiptUploadQueue.Pick(name: UITestHooks.fixtureName, size: nil), .camera(UITestHooks.fixtureReceipt()))])
-            } label: { Label("Testikuitti", systemImage: "testtube.2").frame(maxWidth: .infinity, minHeight: 44) }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("capture-fixture")
-        }
+        if UITestHooks.active { fixtureButton }
     }
 
+    private var fixtureButton: some View {
+        Button {
+            add([(ReceiptUploadQueue.Pick(name: UITestHooks.fixtureName, size: nil), .camera(UITestHooks.fixtureReceipt()))])
+        } label: { Label("Testikuitti", systemImage: "testtube.2").frame(maxWidth: .infinity, minHeight: 44) }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("capture-fixture")
+    }
+
+    /// Nothing is ever inserted above the rows or taken from between them while files finish (owner,
+    /// 2026-10-15: the list jumped when the review ended). Before, "Lähetys jatkuu…" sat above the rows
+    /// and went away the moment the last file finished, pulling every row up by its height, and
+    /// "Peruuta lähetys" left the section at the same time. The notices now live in the footer under
+    /// the rows, the occasional actions in the "…" menu, and the one action section below is there
+    /// from the start: when the queue settles only its title changes.
     private var queueList: some View {
         List {
-            if queue.offlineCount > 0 {
-                Text(OfflineReceiptRules.offlineNotice).font(.footnote).foregroundStyle(Theme.ink)
-                    .listRowBackground(Theme.accentSoft)
-            }
-            if !single && queue.isWorking {
-                Text("Lähetys jatkuu, vaikka suljet tämän näkymän. Kesken olevat kuitit löytyvät Kuiteista.")
-                    .font(.footnote).foregroundStyle(Theme.ink2)
-            }
             Section {
                 ForEach(queue.rows.prefix(limit.visible(queue.rows.count))) { row in queueRow(row) }
                 ShowMoreButton(limit: $limit, total: queue.rows.count)
-                if queue.isWorking {
-                    Button("Peruuta lähetys") { cancelUploads() }.foregroundStyle(Theme.ink)
-                }
-                if queue.hasFailed {
-                    Button("Yritä epäonnistuneet") { model.retryFailed() }.foregroundStyle(Theme.accent)
-                }
-                if !single && droppable > 0 {
-                    Button("Hylkää tallentamattomat", role: .destructive) { confirmDropUnsaved = true }
-                        .foregroundStyle(Theme.danger)
-                }
             } header: {
                 Text("Lähetysjono")
             } footer: {
-                // Same words as the web's upload summary.
-                if let summary = queue.summaryLine { Text(summary) }
+                queueFooter
             }
-            if queue.isFinished {
-                Section {
-                    // The queue has settled: the review queue and the list are one tap away.
-                    if let title = queue.reviewButtonTitle {
-                        Button { openReceipts() } label: { Text(title).frame(maxWidth: .infinity, minHeight: 44).font(.headline) }
-                            .buttonStyle(.bordered)
-                            .listRowBackground(Color.clear)
+            Section {
+                // One primary action: the review queue once something waits there, else "Valmis".
+                // A bank-row match closes by itself when saved, so it has none while it works.
+                if !single || queue.isFinished {
+                    Button { if queue.reviewButtonTitle != nil { openReceipts() } else { close() } } label: {
+                        Text(primaryTitle)
+                            .contentTransition(.opacity)
+                            .frame(maxWidth: .infinity, minHeight: 44).font(.headline)
                     }
-                    if queue.savedCount > 0 {
-                        Button { openReceipts() } label: { Text(ReceiptUploadQueue.receiptsButtonTitle).frame(maxWidth: .infinity, minHeight: 44).font(.headline) }
-                            .buttonStyle(.bordered)
-                            .listRowBackground(Color.clear)
-                    }
-                    Button { close() } label: { Text("Valmis").frame(maxWidth: .infinity, minHeight: 44).font(.headline) }
-                        .buttonStyle(.primary)
-                        .listRowBackground(Color.clear)
+                    .buttonStyle(.primary)
+                    .motion(.snappy, value: primaryTitle)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
-            }
-            // Matching a bank row: another pick only once the first one is out of the way.
-            if !single || !queue.holdsWork {
-                Section {
-                    pickButtons.listRowBackground(Color.clear).listRowSeparator(.hidden)
-                    if let importFailure { Text(importFailure).font(.footnote).foregroundStyle(Theme.danger) }
-                } header: {
-                    Text("Lisää")
+                // Matching a bank row: another pick only once the first one is out of the way.
+                if !single || !queue.holdsWork {
+                    addMoreMenu
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+                // UI tests only (Debug + `-LKUITest`): the simulator has no camera to take a picture with.
+                if UITestHooks.active {
+                    fixtureButton.listRowBackground(Color.clear).listRowSeparator(.hidden)
+                }
+                if let importFailure {
+                    Text(importFailure).font(.footnote).foregroundStyle(Theme.danger).listRowSeparator(.hidden)
                 }
             }
         }
         .scrollContentBackground(.hidden)
+    }
+
+    private var primaryTitle: String { queue.reviewButtonTitle ?? "Valmis" }
+
+    /// Under the rows: the offline notice, then "Lähetys jatkuu…" while files go and the web's upload
+    /// summary once they are through. Both lines are always laid out and only one is shown, so the
+    /// swap is a fade and the footer keeps its height.
+    private var queueFooter: some View {
+        let working = !single && queue.isWorking
+        let summary = queue.summaryLine
+        return VStack(alignment: .leading, spacing: 6) {
+            if queue.offlineCount > 0 {
+                Text(OfflineReceiptRules.offlineNotice).foregroundStyle(Theme.ink)
+            }
+            ZStack(alignment: .topLeading) {
+                Text(single ? " " : "Lähetys jatkuu, vaikka suljet tämän näkymän. Kesken olevat kuitit löytyvät Kuiteista.")
+                    .opacity(working ? 1 : 0)
+                    .accessibilityHidden(!working)
+                Text(summary ?? " ")
+                    .opacity(working ? 0 : 1)
+                    .accessibilityHidden(working || summary == nil)
+            }
+            .motion(.easeInOut(duration: 0.2), value: working)
+        }
+    }
+
+    /// "Lisää tiedostoja": camera, photos or files in one compact row instead of three big buttons.
+    private var addMoreMenu: some View {
+        Menu {
+            if Self.cameraAvailable {
+                Button { showCamera = true } label: { Label("Kuvaa", systemImage: "camera") }
+            }
+            Button { showPhotos = true } label: { Label("Valitse kuvista", systemImage: "photo.on.rectangle") }
+            Button { showFiles = true } label: { Label("Valitse tiedosto", systemImage: "doc") }
+        } label: {
+            Label("Lisää tiedostoja", systemImage: "plus.circle")
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .foregroundStyle(Theme.accent)
+        }
+    }
+
+    /// The occasional actions of the queue, out of the list so that none of them comes or goes
+    /// between the rows and the primary action.
+    private var hasMoreActions: Bool {
+        (!single && queue.savedCount > 0) || queue.isWorking || queue.hasFailed || (!single && droppable > 0)
+    }
+
+    private var showsMoreMenu: Bool {
+        guard case .queue = model.step else { return false }
+        return hasMoreActions
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            if !single && queue.savedCount > 0 {
+                Button { openReceipts() } label: { Label(ReceiptUploadQueue.receiptsButtonTitle, systemImage: "doc.text.magnifyingglass") }
+            }
+            if queue.hasFailed {
+                Button { model.retryFailed() } label: { Label("Yritä epäonnistuneet", systemImage: "arrow.clockwise") }
+            }
+            if queue.isWorking {
+                Button { cancelUploads() } label: { Label("Peruuta lähetys", systemImage: "stop.circle") }
+            }
+            if !single && droppable > 0 {
+                Button(role: .destructive) { confirmDropUnsaved = true } label: { Label("Hylkää tallentamattomat", systemImage: "trash") }
+            }
+        } label: { Image(systemName: "ellipsis.circle") }
+        .accessibilityLabel("Toiminnot")
     }
 
     private func queueRow(_ row: UploadQueueRow) -> some View {
@@ -272,7 +348,13 @@ struct CaptureFlow: View {
                 Text(row.name).lineLimitUnlessLarge().truncationMode(.middle)
                 Spacer(minLength: 8)
                 if row.status == .uploading || row.status == .processing || row.status == .saving { ProgressView().controlSize(.small) }
-                Text(row.status.label).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
+                // A saved document says what the AI made of it, on the line the status had, so the
+                // row keeps its height; one tap turns it around (`CaptureQueueModel.switchKind`).
+                if row.canSwitchKind, let kind = row.kind {
+                    kindSwitch(row, kind: kind)
+                } else {
+                    Text(row.status.label).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
+                }
             }
             if let progress = row.progress, row.status != .ready {
                 Text(progress).font(.caption).foregroundStyle(Theme.ink2)
@@ -297,6 +379,29 @@ struct CaptureFlow: View {
                     .foregroundStyle(Theme.accent)
             }
         }
+    }
+
+    /// "Kuitti ⇄ Ostolasku": the decided kind, and the tap that changes it. While the server works the
+    /// switch only fades; nothing is swapped in or out of the row.
+    private func kindSwitch(_ row: UploadQueueRow, kind: ReceiptDocumentKind) -> some View {
+        let busy = model.switchingKind.contains(row.id)
+        return Button {
+            Haptics.selection()
+            Task { await model.switchKind(row.id) }
+        } label: {
+            Label(kind.title, systemImage: "arrow.left.arrow.right")
+                .labelStyle(.titleAndIcon)
+                .contentTransition(.opacity)
+        }
+        .font(.caption.bold())
+        .buttonStyle(.borderless)
+        .foregroundStyle(Theme.accent)
+        .disabled(busy)
+        .opacity(busy ? 0.5 : 1)
+        .motion(.snappy, value: kind)
+        .motion(.easeOut(duration: 0.15), value: busy)
+        .accessibilityLabel(kind.title)
+        .accessibilityHint(kind.switchTitle)
     }
 
     // MARK: Picking
@@ -381,8 +486,10 @@ struct CaptureFlow: View {
     }
 
     /// "Näytä tarkistettavat" and "Siirry kuitteihin": Kuitit, whose review queue sits on top of the list.
+    /// One movement (owner, 2026-10-15: several screens went by): the tab and Kuitit are put in place
+    /// behind this cover without animation, then the cover (with the "+" sheet under it) goes down once.
     private func openReceipts() {
-        app.pendingRoute = PendingRoute(tab: .kirjanpito, route: .receipts)
+        app.pendingRoute = PendingRoute(tab: .kirjanpito, route: .receipts, animated: false)
         close()
     }
 
@@ -393,8 +500,10 @@ struct CaptureFlow: View {
         // Opened from Kuitit's "Jatka" (MainTabView's cover has no reload of its own): the lists
         // show what was saved meanwhile.
         if queue.savedCount > 0 { app.dataVersion += 1 }
-        model.screenClosed()
-        dismiss()
+        // `model.screenClosed()` runs in onDisappear: done here it emptied the queue and the cover
+        // showed the picker page on its way down.
+        closing = true
+        if let onClose { onClose() } else { dismiss() }
     }
 }
 
@@ -412,9 +521,10 @@ struct ReceiptEditor: View {
     let preview: URL?
     /// True while the fields differ from the reading: only then does "Takaisin" ask first.
     @Binding var dirty: Bool
-    /// Called with the server's approval (true/false, or nil from a server that did not say) and
-    /// what it did with a bill ("ostolasku luotu, eräpäivä 14.10.2026"; nil for a plain receipt).
-    let done: (Bool?, String?) -> Void
+    /// Called with the save's outcome: the server's approval (nil from a server that did not say), what
+    /// it did with a bill ("ostolasku luotu, eräpäivä 14.10.2026"), and the receipt and kind the
+    /// queue row's "Kuitti ⇄ Ostolasku" needs.
+    let done: (ReceiptSaving.Outcome) -> Void
     @State private var form: ReceiptForm
     /// The form as it opened (with the default date filled in): what "dirty" compares with.
     @State private var baseline: ReceiptForm
@@ -422,13 +532,12 @@ struct ReceiptEditor: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var duplicate = false
-    @State private var savedId: String?
-    /// Kept with `savedId`, so a retry that only repeats the match still reports the approval.
-    @State private var savedAutoApproved: Bool? = false
-    @State private var savedInvoiceNote: String?
+    /// The save that went through: a retry after a failed match only repeats the match, and still
+    /// reports the approval.
+    @State private var savedOutcome: ReceiptSaving.Outcome?
     @State private var customCategory: Bool
 
-    init(model: CaptureQueueModel, rowId: String, draft: ReceiptDraft, preview: URL?, dirty: Binding<Bool>, done: @escaping (Bool?, String?) -> Void) {
+    init(model: CaptureQueueModel, rowId: String, draft: ReceiptDraft, preview: URL?, dirty: Binding<Bool>, done: @escaping (ReceiptSaving.Outcome) -> Void) {
         let form = ReceiptForm(draft: draft)
         self.model = model
         self.rowId = rowId
@@ -582,7 +691,7 @@ struct ReceiptEditor: View {
         struct Match: Encodable { let transactionId: String; let receiptId: String }
         // A retry after a failed match only repeats the match, never the save.
         var request: ReceiptDraft?
-        if savedId == nil {
+        if savedOutcome == nil {
             switch form.makeDraft(uploadId: uploadId, forceDuplicate: forceDuplicate) {
             case .invalid(let found):
                 errors = found
@@ -600,26 +709,23 @@ struct ReceiptEditor: View {
         failure = nil
         defer { busy = false }
         do {
-            let receiptId: String
-            if let savedId {
-                receiptId = savedId
+            let outcome: ReceiptSaving.Outcome
+            if let savedOutcome {
+                outcome = savedOutcome
             } else if let request {
-                let outcome = try await model.save(request, saveDuplicateAnyway: false)
-                receiptId = outcome.receiptId
-                savedId = receiptId
-                savedAutoApproved = outcome.approved
-                savedInvoiceNote = outcome.invoiceNote
+                outcome = try await model.save(request, saveDuplicateAnyway: false)
+                savedOutcome = outcome
                 duplicate = false
             } else {
                 return
             }
             if let transactionId {
-                let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Match(transactionId: transactionId, receiptId: receiptId))
+                let _: Ignored = try await app.api.send("POST", "/api/matching/confirm", body: Match(transactionId: transactionId, receiptId: outcome.receiptId))
             }
             Haptics.success()
-            done(savedAutoApproved, savedInvoiceNote)
+            done(outcome)
         } catch is CancellationError {
-        } catch let error as LKError where error.isDuplicate && savedId == nil {
+        } catch let error as LKError where error.isDuplicate && savedOutcome == nil {
             duplicate = true
             failure = error.message
         } catch {
