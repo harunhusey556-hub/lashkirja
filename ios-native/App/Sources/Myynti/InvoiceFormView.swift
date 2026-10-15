@@ -565,10 +565,17 @@ struct InvoiceFormView: View {
         let catalogList = Task { try? await api.get("/api/catalog") as CatalogList }
         let profile = Task { await app.cachedProfile() }
         let number = Task { await fetchNextNumber() }
+        // The first line needs only the seller's VAT, and Koti has the profile in memory by now:
+        // the form opens with its line instead of the line popping in after the slowest of the
+        // four loads (motion audit lasku-new).
+        if let profile = await profile.value { sellerRegistered = profile.vatRegistered }
+        if existing == nil, draft.lines.isEmpty {
+            draft.lines = [.new(sellerRegistered: sellerRegistered)]
+            seedPriceTexts(blankZero: true)
+        }
         if let list = await customerList.value { customers = list.customers.filter { $0.archivedAt == nil } }
         // The form works without the catalog; "Lisää tuotteista" just stays hidden.
         if let list = await catalogList.value { catalog = list.items }
-        if let profile = await profile.value { sellerRegistered = profile.vatRegistered }
         // Only a hint: a failed read leaves the title as it was.
         nextNumber = await number.value
         if let existing {
