@@ -60,8 +60,14 @@ struct MainTabView: View {
             showAssistant = false
             showAdd = false
             showNewInvoice = false
-            tab = pending.tab
-            paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
+            // Behind a cover (the capture's "Näytä tarkistettavat") the push would be a second
+            // movement after the cover's own: the screen is simply there when the cover goes.
+            var placing = Transaction()
+            placing.disablesAnimations = !pending.animated
+            withTransaction(placing) {
+                tab = pending.tab
+                paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
+            }
         }
         // A Home Screen quick action or App Intent: the same sheets the "+" tab and the assistant
         // button open. `initial` catches one that arrived before the tabs were on screen.
