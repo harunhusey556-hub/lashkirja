@@ -49,7 +49,7 @@ public struct PrefetchRequest: Sendable, Equatable {
 }
 
 /// What is asked for right after sign-in (and on coming back to the app once the figures are
-/// stale): Koti, Kuitit page 1 with its counts and review queues, and the Pankki hub. The tab a
+/// stale): Koti, Kuitit page 1 with its counts and review queues, Myynti's list, Raportit's year and the Pankki hub. The tab a
 /// screen opens on then paints from the cache instead of waiting on the server.
 public enum LaunchPrefetch {
     /// Koti's month and the Kuitit filters the owner left (`ReceiptListQuery.remembered`).
@@ -61,6 +61,13 @@ public enum LaunchPrefetch {
             PrefetchRequest(path: "/api/receipts/counts", query: kuitit.countsQuery()),
             PrefetchRequest(path: "/api/receipts", query: ReceiptListQuery.pendingQueue()),
             PrefetchRequest(path: "/api/receipts", query: ReceiptListQuery.rejectedQueue()),
+            // Myynti's first screen (no chip, no search): otherwise its first visit is a spinner
+            // the list then replaces. Counts as the screen asks for them, in memory only.
+            PrefetchRequest(path: "/api/invoices", query: SalesListQuery.query(scope: InvoiceScope(), filter: .all, search: "")),
+            PrefetchRequest(path: "/api/invoices/counts", query: InvoiceScope().query, persist: false),
+            // Raportit's year (RaportitView asks for the whole calendar year): its first visit was
+            // a 3 s spinner and then the figures pushed the rest of the page down.
+            PrefetchRequest(path: "/api/reports/profit-loss", query: ["from": "\(month.prefix(4))-01", "to": "\(month.prefix(4))-12"], persist: false),
             PrefetchRequest(path: "/api/bank-accounts"),
             PrefetchRequest(path: "/api/statements/counts"),
             // The hub's rows: the largest answer, so it goes last and is written to disk only

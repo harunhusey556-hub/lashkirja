@@ -384,7 +384,7 @@ struct AlvView: View {
             Haptics.success()
             failure = nil
             notice = done
-            await load()
+            await load(force: true)
         } catch is CancellationError {
         } catch {
             guard asked == period else { return }

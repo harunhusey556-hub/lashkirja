@@ -258,7 +258,7 @@ struct CustomerDetailView: View {
         }) {
             InvoiceFormView(existing: nil, presetCustomerId: customerId, onCreated: { id in createdId = id })
         }
-        .navigationDestination(item: $openedInvoiceId) { id in InvoiceDetailView(invoiceId: id) }
+        .navigationDestination(item: $openedInvoiceId) { id in InvoiceDetailView(invoiceId: id, preview: app.invoicePreview(id)) }
         .sheet(isPresented: $showMerge) {
             CustomerMergeSheet(keepId: customerId, others: others) {
                 notice = "Asiakkaat yhdistettiin. Kaksoiskappale arkistoitiin."

@@ -17,7 +17,8 @@ API=http://127.0.0.1:$PROXY_PORT
 CORES=$(sysctl -n hw.ncpu)
 
 quiet=0
-while true; do
+# A CI runner is not shared, and its own booted simulator keeps a 3-core load above the bar.
+while [ "${LK_DEDICATED_MAC:-}" != 1 ]; do
   load=$(sysctl -n vm.loadavg | awk '{print int($2)}')
   # Another project's xcodebuild (the binary itself, not a grep or this script) means wait.
   if ps -axo args= | grep -E '^[^ ]*/xcodebuild ' | grep -vq -- "$APP"; then quiet=0; else quiet=$((quiet+1)); fi
@@ -40,6 +41,19 @@ rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
     for r in "$SH"/*.req(N); do n=${r:r}; xcrun simctl io "$U" screenshot "$n.png" >/dev/null 2>&1; rm -f "$r"; done
     for o in "$SH"/*.openurl(N); do xcrun simctl openurl "$U" "$(cat "$o")" >/dev/null 2>&1; rm -f "$o"; done
     for c in "$SH"/*.contentsize(N); do xcrun simctl ui "$U" content_size "$(cat "$c")" >/dev/null 2>&1; rm -f "$c"; done
+    # Motion audit: <name>.rec holds seconds to record. <name>.recording gets the epoch times the
+    # recording really started (simctl says so) and stopped; the test acts only once it exists.
+    for v in "$SH"/*.rec(N); do
+      n=${v:r}
+      xcrun simctl io "$U" recordVideo --codec h264 --force "$n.mov" 2>"$n.reclog" &
+      rp=$!
+      for i in {1..150}; do grep -q "Recording started" "$n.reclog" 2>/dev/null && break; sleep 0.1; done
+      python3 -c 'import time; print("%.3f" % time.time())' > "$n.recording"
+      sleep "$(cat "$v")"
+      kill -INT $rp 2>/dev/null; wait $rp 2>/dev/null
+      python3 -c 'import time; print("%.3f" % time.time())' >> "$n.recording"
+      rm -f "$v" "$n.reclog"
+    done
     sleep 0.3
   done ) &
 W=$!

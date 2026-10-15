@@ -1,0 +1,156 @@
+name: iOS motion gate
+
+# PR #14's motion gate (docs/quality/SIMULATOR.md §4). On one runner, one simulator and one demo
+# API: MotionAuditTests on native with the audit instrument laid on (baseline) once, then on this
+# branch twice. Before every walk the demo DB is seeded afresh, the app is uninstalled and the API
+# is warmed, so no walk inherits another's data or cache. scripts/sim/motion-gate.py: a row is
+# NEW FAIL when it PASSes in the baseline and FAILs in both branch runs.
+# Artifact motion-gate-<suite>: {baseline,pr-run1,pr-run2}/motion-report.{json,md} and gate.md.
+on:
+  push:
+    branches: ["fix/w33-motion-audit"]
+    paths: [".github/workflows/ios-motion-gate.yml"]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Commit measured as the baseline"
+        required: false
+        default: "origin/native"
+      suites:
+        description: 'JSON list: "all" (one run of the whole class) or MotionAuditTests method names, one runner each'
+        required: false
+        default: '["all"]'
+
+env:
+  # Only the audit instrument (walk, probe, analyzer), no fixes: laid on the baseline so it can be walked.
+  INSTRUMENT: "8d40b95 518364f bdd6ce0 7eeb72b e0b0ebd 485206f"
+  DATABASE_URL: "file:${{ github.workspace }}/app/motion-demo.db"
+  SESSION_SECRET: "ci-only-secret-not-used-anywhere-real-32plus"
+  CLOUD_AI_ENABLED: "false"
+  ENABLEBANKING_ENABLED: "false"
+  MAIL_TRANSPORT: "json"
+
+jobs:
+  gate:
+    name: Motion gate (${{ matrix.suite }})
+    runs-on: macos-26
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(inputs.suites || '["all"]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tools
+        run: |
+          brew install xcodegen
+          xcodebuild -version
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q numpy pillow imageio-ffmpeg
+          echo "PY=$RUNNER_TEMP/venv/bin/python" >> "$GITHUB_ENV"
+          echo "FFMPEG=$("$RUNNER_TEMP/venv/bin/python" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Demo API build
+        working-directory: app
+        run: |
+          set -euo pipefail
+          npm ci
+          npx prisma generate
+          npm run build
+      - name: Simulator
+        run: |
+          DEST=$(xcrun simctl list devices available -j | python3 -c 'import sys,json
+          d=json.load(sys.stdin)["devices"]
+          ph=[x for k,v in sorted(d.items(), reverse=True) if "iOS" in k for x in v if x["name"].startswith("iPhone")]
+          # The analyzer reads frames at 402 pt wide: an iPhone 16 Pro / 17 Pro first.
+          pro=[x for x in ph if x["name"] in ("iPhone 16 Pro", "iPhone 17 Pro")]
+          print((pro or ph)[0]["udid"] if ph else "")')
+          echo "Simulator: $DEST"
+          xcrun simctl list devices | grep "$DEST"
+          echo "SIM_UDID=$DEST" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEST" || true
+          xcrun simctl bootstatus "$DEST" -b
+      - name: Baseline tree
+        env:
+          BASE: ${{ inputs.base || 'origin/native' }}
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/baseline" "$BASE"
+          git -C "$RUNNER_TEMP/baseline" -c user.name=ci -c user.email=ci@localhost cherry-pick $INSTRUMENT
+          # The walk, probe and analyzer exactly as on this branch, so all three walks are driven alike.
+          for f in scripts/sim ios-native/App/Tests/LashKirjaUITests/MotionAuditTests.swift ios-native/App/Sources/Observe/MotionProbe.swift; do
+            rm -rf "$RUNNER_TEMP/baseline/$f"; cp -R "$f" "$RUNNER_TEMP/baseline/$f"
+          done
+          echo "baseline: $(git rev-parse "$BASE") + instrument"
+          echo "branch: $(git rev-parse HEAD)"
+      - name: Walks (baseline, pr-run1, pr-run2)
+        env:
+          SUITE: ${{ matrix.suite }}
+          LK_DEDICATED_MAC: "1"
+        run: |
+          # Errors are handled where they matter: a walk that fails some steps still has a report.
+          set +e -u
+          OUT="$GITHUB_WORKSPACE/motion-gate"
+          API_PID=
+          fresh_api() {
+            [ -n "$API_PID" ] && { kill "$API_PID" 2>/dev/null; wait "$API_PID" 2>/dev/null; }
+            pkill -f "next start -H 127.0.0.1 -p 3999" 2>/dev/null; sleep 2
+            (cd app && rm -f motion-demo.db motion-demo.db-journal && npx prisma migrate deploy > /dev/null && npx tsx scripts/demo-seed.ts --ci > /dev/null) || { echo "::error::demo seed failed"; exit 1; }
+            (cd app && exec npx next start -H 127.0.0.1 -p 3999) > "$OUT/api-$1.log" 2>&1 &
+            API_PID=$!
+            for i in $(seq 1 60); do curl -s -o /dev/null "http://127.0.0.1:3999/login" && break; sleep 1; done
+            bash scripts/sim/warm-api.sh http://127.0.0.1:3999 > "$OUT/warm-$1.txt"
+            grep -vc "^200 " "$OUT/warm-$1.txt" | xargs echo "warm-up non-200 responses:"
+          }
+          walk() {  # <variant> <tree>
+            variant=$1; tree=$2; tag="motion-$variant"
+            echo "::group::$variant"
+            fresh_api "$variant"
+            # A fresh install: the previous walk's disk cache must not paint this walk's screens.
+            xcrun simctl uninstall "$SIM_UDID" fi.tiyouba.lashkirja 2>/dev/null || true
+            only=MotionAuditTests; [ "$SUITE" = all ] || only="MotionAuditTests/$SUITE"
+            start=$(date +%s)
+            zsh "$tree/scripts/sim/run-ui.sh" "$SIM_UDID" "$only" "$tag"
+            echo "$variant walk: $(( $(date +%s) - start )) s"
+            sh="$tree/sim-shots/$tag"
+            # Where the app could not write to the host path, the probe log is in its container.
+            [ -s "$sh/probe.log" ] || { c=$(xcrun simctl get_app_container "$SIM_UDID" fi.tiyouba.lashkirja data 2>/dev/null) && cp "$c/tmp/motion-probe.log" "$sh/probe.log"; } || true
+            mkdir -p "$OUT/$variant"
+            mv "$sh" "$OUT/$variant/$SUITE"
+            cp "$tree/build-sim/$tag.log" "$OUT/$variant/xcodebuild.log" 2>/dev/null || true
+            "$PY" scripts/sim/motion-audit.py "$OUT/$variant" | tail -5
+            echo "::endgroup::"
+          }
+          mkdir -p "$OUT"
+          walk baseline "$RUNNER_TEMP/baseline"
+          walk pr-run1 "$GITHUB_WORKSPACE"
+          walk pr-run2 "$GITHUB_WORKSPACE"
+          kill "$API_PID" 2>/dev/null
+          "$PY" scripts/sim/motion-gate.py "$OUT"/{baseline,pr-run1,pr-run2}/motion-report.json | tee "$OUT/gate.md"
+          { echo "## Motion gate ($SUITE)"; cat "$OUT/gate.md"; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: motion-gate-${{ matrix.suite }}
+          path: |
+            motion-gate/gate.md
+            motion-gate/*.log
+            motion-gate/*.txt
+            motion-gate/*/motion-report.*
+            motion-gate/*/xcodebuild.log
+            motion-gate/*/*/notes.txt
+            motion-gate/*/*/steps.json
+            motion-gate/*/*/probe.log
+            motion-gate/*/*/sheet-*.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: motion-gate-videos-${{ matrix.suite }}
+          retention-days: 7
+          path: motion-gate/*/*/*.mov

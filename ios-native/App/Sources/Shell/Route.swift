@@ -161,6 +161,7 @@ extension View {
         // Pushed screens use the small inline title: the large one costs a phone screen ~50 pt.
         navigationDestination(for: Route.self) { route in
             RouteScreen(route: route).navigationBarTitleDisplayMode(.inline)
+                .motionProbe(String(describing: route))
                 .onAppear { EventLog.shared.log(.screen(String(describing: route))) }
         }
     }
@@ -175,7 +176,7 @@ struct RouteScreen: View {
     var body: some View {
         switch route {
         case .placeholder(let title): PlaceholderScreen(title: title)
-        case .invoice(let id): InvoiceDetailView(invoiceId: id)
+        case .invoice(let id): InvoiceDetailView(invoiceId: id, preview: app.invoicePreview(id))
         case .customers: CustomersView()
         case .customer(let id): CustomerDetailView(customerId: id)
         case .receipts: ReceiptsView()

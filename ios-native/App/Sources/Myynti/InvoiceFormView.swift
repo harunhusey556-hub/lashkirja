@@ -558,15 +558,25 @@ struct InvoiceFormView: View {
         loaded = true
         // Customers, catalog and profile load side by side: the form is ready after one round trip,
         // none when Myynti already warmed them in the app's cache.
+        // Tasks, not `async let`: finishing these four async lets aborted the app in the Swift
+        // runtime (swift_task_dealloc from asyncLet_finish_after_task_completion) every time the
+        // form opened in the simulator motion audit (2026-10-15, two crash reports).
         let app = self.app
-        async let customerList: CustomerList? = try? app.cachedGet("/api/customers")
-        async let catalogList: CatalogList? = try? app.cachedGet("/api/catalog")
-        async let profile = app.cachedProfile()
-        async let number = fetchNextNumber()
-        if let list = await customerList { customers = list.customers.filter { $0.archivedAt == nil } }
+        let customerList = Task { try? await app.cachedGet("/api/customers") as CustomerList }
+        let catalogList = Task { try? await app.cachedGet("/api/catalog") as CatalogList }
+        let profile = Task { await app.cachedProfile() }
+        let number = Task { await fetchNextNumber() }
+        // The first line needs only the seller's VAT, and Koti has the profile in memory by now:
+        // the form opens with its line instead of the line popping in after the slowest of the
+        // four loads (motion audit lasku-new).
+        if let profile = await profile.value { sellerRegistered = profile.vatRegistered }
+        if existing == nil, draft.lines.isEmpty {
+            draft.lines = [.new(sellerRegistered: sellerRegistered)]
+            seedPriceTexts(blankZero: true)
+        }
+        if let list = await customerList.value { customers = list.customers.filter { $0.archivedAt == nil } }
         // The form works without the catalog; "Lisää tuotteista" just stays hidden.
-        if let list = await catalogList { catalog = list.items }
-        if let profile = await profile { sellerRegistered = profile.vatRegistered }
+        if let list = await catalogList.value { catalog = list.items }
         if let existing {
             draft.customerId = existing.customer.id
             draft.issueDate = existing.issueDate
@@ -590,7 +600,7 @@ struct InvoiceFormView: View {
         restoreKeptDraft()
         showDetails = !draft.notes.isEmpty
         // Only a hint, and the form does not wait for it: a failed read leaves the title as it was.
-        nextNumber = await number
+        nextNumber = await number.value
     }
 
     /// "Uusi lasku" again after closing an unsaved one: the owner continues where they left off.

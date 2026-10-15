@@ -20,14 +20,18 @@ struct AssistantView: View {
     var body: some View {
         NavigationStack(path: $path) {
             Group {
-                if let model {
+                // `app.chat` is made when the button is pressed (AppModel.prepareChat), so the sheet
+                // slides up on the conversation, not on a spinner the conversation then replaces.
+                if let model = model ?? app.chat {
                     conversation(model)
                 } else {
-                    ProgressView()
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .background(Theme.canvas)
-            .navigationTitle(model?.title ?? "Avustaja")
+            // The conversation's title with its fade-in (ChatModel.ready), not a beat before the
+            // conversation it names is on screen (motion audit koti-assistant-sheet).
+            .navigationTitle((model ?? app.chat).flatMap { $0.ready ? $0.title : nil } ?? "Avustaja")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -66,18 +70,9 @@ struct AssistantView: View {
         .perfReady("chat", model?.historyLoaded == true)
         .task {
             guard model == nil else { return }
-            if let existing = app.chat {
-                model = existing
-                await existing.reopen()
-                return
-            }
-            let m = ChatModel(app: app)
-            app.chat = m
+            let m = app.prepareChat()
             model = m
-            // Status and history load side by side.
-            async let status: Void = m.loadStatus()
-            await m.loadLatest()
-            await status
+            await m.reopen()
         }
     }
 
@@ -131,6 +126,10 @@ struct AssistantView: View {
                 .environment(\.openURL, OpenURLAction { url in openLink(url) })
             }
             .scrollDismissesKeyboard(.interactively)
+            // One fade-in when the first load has landed (ChatModel.ready), not the empty state
+            // and then the history replacing it (motion audit koti-assistant-sheet).
+            .opacity(model.ready ? 1 : 0)
+            .motion(.easeOut(duration: 0.2), value: model.ready)
             // Open on the latest message, and keep it in view when the keyboard shrinks the scroll view.
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(.bottom, for: .sizeChanges)
@@ -574,5 +573,18 @@ private struct ConversationsSheet: View {
             failure = error.userMessage
             Haptics.error()
         }
+    }
+}
+
+extension AppModel {
+    /// The assistant's model, made and its status and history asked for (side by side) as soon as
+    /// the owner asks for the assistant, before its sheet is on screen.
+    @discardableResult
+    func prepareChat() -> ChatModel {
+        if let chat { return chat }
+        let model = ChatModel(app: self)
+        chat = model
+        model.startPrefetch()
+        return model
     }
 }

@@ -25,6 +25,7 @@ struct LashKirjaApp: App {
         // MetricKit hands over the previous run's crash and hang reports shortly after launch.
         DiagnosticsObserver.shared.start(reporter: app.observer)
         HangWatchdog.shared.start()
+        MotionProbe.shared.start()
         // A quick action that launched the app is already waiting in QuickActions.
         QuickActions.attach { url in app.handle(url: url) }
     }

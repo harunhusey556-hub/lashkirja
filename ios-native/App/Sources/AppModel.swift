@@ -34,6 +34,10 @@ final class AppModel {
     /// The Kuitit rows last listed, by id: a receipt opens showing its row at once while the
     /// detail loads. Not observed: no screen redraws when it changes.
     @ObservationIgnored private var receiptRows: [String: Receipt] = [:]
+    /// Invoice details as last loaded (Myynti warms its first rows), by id, with the `dataVersion`
+    /// they were loaded at: an invoice opens on them in its first frame, before any await. Not
+    /// observed, like `receiptRows`.
+    @ObservationIgnored private var invoiceDetails: [String: (version: Int, preview: InvoicePreview)] = [:]
     /// Ids deleted but not yet confirmed by the server: lists leave them out at once, so a delete
     /// does not wait on the server's answer (removing a tiliote can take seconds).
     private(set) var removedIds: Set<String> = []
@@ -258,6 +262,19 @@ final class AppModel {
     }
 
     func receiptPreview(_ id: String) -> Receipt? { receiptRows[id] }
+
+    /// A detail as `cachedGet` answered it (with an overdue one's reminder), for `invoicePreview`.
+    /// Bounded like `receiptRows`.
+    func rememberInvoiceDetail(_ detail: InvoiceDetailResponse, reminder: ReminderPreview?) {
+        if invoiceDetails.count >= 200 { invoiceDetails.removeAll() }
+        invoiceDetails[detail.invoice.id] = (dataVersion, InvoicePreview(detail: detail, reminder: reminder))
+    }
+
+    /// Nil once anything changed in the app since it was loaded: the cache's answer is newer then.
+    func invoicePreview(_ id: String) -> InvoicePreview? {
+        guard let entry = invoiceDetails[id], entry.version == dataVersion else { return nil }
+        return entry.preview
+    }
 
     /// After sign-in and on coming back after a while: Koti, Kuitit page 1 with its counts and
     /// queues, and the Pankki hub load side by side with exactly the screens' queries, so the tab
@@ -505,6 +522,7 @@ final class AppModel {
         let resources = self.resources
         Task { await resources.clear() }
         receiptRows = [:]
+        invoiceDetails = [:]
         versions.endSession()
         // This owner's figures must not show to the next one.
         bankHubMemory = nil
@@ -540,4 +558,10 @@ struct PendingCapture: Identifiable, Equatable {
     let id = UUID()
     /// The bank row to match; nil for a plain "Kuvaa kuitti" (quick action).
     let transactionId: String?
+}
+
+/// What an invoice opens on before its own load: the detail and, when overdue, the reminder.
+struct InvoicePreview {
+    let detail: InvoiceDetailResponse
+    let reminder: ReminderPreview?
 }

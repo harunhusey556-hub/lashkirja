@@ -17,9 +17,10 @@ struct MainTabView: View {
                 Tab(item.title, systemImage: item.symbol, value: item) {
                     NavigationStack(path: path(item)) {
                         root(item)
+                            .motionProbe("tab.\(item)")
                             .toolbar {
                                 ToolbarItemGroup(placement: .topBarTrailing) {
-                                    Button { Perf.beginOpen("chat"); showAssistant = true } label: { Image(systemName: "bubble.left") }
+                                    Button { Perf.beginOpen("chat"); app.prepareChat(); showAssistant = true } label: { Image(systemName: "bubble.left") }
                                         .accessibilityLabel("Avustaja")
                                     Button { Perf.beginOpen("asetukset"); showSettings = true } label: { Image(systemName: "person.crop.circle") }
                                         .accessibilityLabel("Asetukset")
@@ -38,9 +39,9 @@ struct MainTabView: View {
         // Less gap between sections, so more fits on a phone. Rows keep the system's 44 pt minimum,
         // the smallest comfortable touch target.
         .listSectionSpacing(.compact)
-        .sheet(isPresented: $showAdd) { AddSheet() }
-        .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]) }
-        .sheet(isPresented: $showAssistant) { AssistantView() }
+        .sheet(isPresented: $showAdd) { AddSheet().motionProbe("add-sheet") }
+        .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]).motionProbe("settings-sheet") }
+        .sheet(isPresented: $showAssistant) { AssistantView().motionProbe("assistant") }
         // Skipping ("Ohita nyt") keeps them away for a day; Koti then offers to resume them.
         .fullScreenCover(isPresented: Bindable(OnboardingGate.shared).isPresented) { OnboardingView() }
         // "Kuvaa kuitti" on a notification: the camera for that bank row, whatever tab is showing.
@@ -62,8 +63,11 @@ struct MainTabView: View {
             showNewInvoice = false
             // Behind a cover (the capture's "Näytä tarkistettavat") the push would be a second
             // movement after the cover's own: the screen is simply there when the cover goes.
+            // Another tab likewise: switch and push in one unanimated step, so a closing sheet
+            // reveals the destination itself, not the tab's root and then a push (motion audit
+            // bad-link-over-sheet). On the same tab an animated route pushes as usual.
             var placing = Transaction()
-            placing.disablesAnimations = !pending.animated
+            placing.disablesAnimations = !pending.animated || pending.tab != tab
             if let row = pending.route.perfRow { Perf.beginOpen(row) }
             withTransaction(placing) {
                 tab = pending.tab
@@ -86,6 +90,7 @@ struct MainTabView: View {
                 showNewInvoice = true
             case .assistant:
                 Perf.beginOpen("chat")
+                app.prepareChat()
                 showAssistant = true
             }
         }

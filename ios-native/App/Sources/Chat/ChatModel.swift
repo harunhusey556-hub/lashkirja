@@ -66,8 +66,34 @@ final class ChatModel {
 
     init(app: AppModel) { self.app = app }
 
+    /// The first load, started by `AppModel.prepareChat` before the sheet slides up.
+    private var prefetch: Task<Void, Never>?
+    /// The first history and status have landed: until then the conversation area stays empty,
+    /// so an owner with history never sees "Miten voin auttaa?" replaced by their messages.
+    private(set) var ready = false
+
+    func startPrefetch() {
+        prefetch = Task {
+            async let status: Void = loadStatus()
+            await loadLatest()
+            await status
+            ready = true
+        }
+        // Offline the history can take a minute to fail: the conversation shows after 1.5 s anyway.
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            ready = true
+        }
+    }
+
     /// Opening the sheet again: the same conversation, refreshed unless it is new or still streaming.
     func reopen() async {
+        // Opened right after the prefetch started: that load is the fresh one, not a second request.
+        if let prefetch {
+            self.prefetch = nil
+            await prefetch.value
+            return
+        }
         async let status: Void = loadStatus()
         // A receipt still uploading (or waiting for a retry) lives only here: a reload would drop it.
         if conversationId != nil && !streaming && pendingReceipts.isEmpty { await loadLatest() }

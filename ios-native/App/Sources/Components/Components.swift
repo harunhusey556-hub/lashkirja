@@ -69,10 +69,10 @@ struct ScreenStateView<Value, Content: View>: View {
         // One place for every screen that loads data: the swap between loading, failure and
         // content - and the height change that comes with it - eases instead of cutting, so a
         // finished load never flashes or jumps. The owner asked for this to hold app-wide.
-        .animation(.snappy, value: phase)
+        .motion(.snappy, value: phase)
         // The refresh-failure banner arrives and leaves above the content: it must ease in too,
         // or the content below it jumps by the banner's height.
-        .animation(.snappy, value: state.banner != nil)
+        .motion(.snappy, value: state.banner != nil)
     }
 
     /// Only what the switch distinguishes; animation keys must be Equatable and cheap.
