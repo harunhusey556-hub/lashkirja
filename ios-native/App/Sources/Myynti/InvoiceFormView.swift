@@ -556,17 +556,21 @@ struct InvoiceFormView: View {
         guard !loaded else { return }
         loaded = true
         // Customers, catalog and profile load side by side: the form is ready after one round trip.
+        // Tasks, not `async let`: finishing these four async lets aborted the app in the Swift
+        // runtime (swift_task_dealloc from asyncLet_finish_after_task_completion) every time the
+        // form opened in the simulator motion audit (2026-10-15, two crash reports).
         let api = app.api
-        async let customerList: CustomerList? = try? api.get("/api/customers")
-        async let catalogList: CatalogList? = try? api.get("/api/catalog")
-        async let profile = app.cachedProfile()
-        async let number = fetchNextNumber()
-        if let list = await customerList { customers = list.customers.filter { $0.archivedAt == nil } }
+        let app = self.app
+        let customerList = Task { try? await api.get("/api/customers") as CustomerList }
+        let catalogList = Task { try? await api.get("/api/catalog") as CatalogList }
+        let profile = Task { await app.cachedProfile() }
+        let number = Task { await fetchNextNumber() }
+        if let list = await customerList.value { customers = list.customers.filter { $0.archivedAt == nil } }
         // The form works without the catalog; "Lisää tuotteista" just stays hidden.
-        if let list = await catalogList { catalog = list.items }
-        if let profile = await profile { sellerRegistered = profile.vatRegistered }
+        if let list = await catalogList.value { catalog = list.items }
+        if let profile = await profile.value { sellerRegistered = profile.vatRegistered }
         // Only a hint: a failed read leaves the title as it was.
-        nextNumber = await number
+        nextNumber = await number.value
         if let existing {
             draft.customerId = existing.customer.id
             draft.issueDate = existing.issueDate
