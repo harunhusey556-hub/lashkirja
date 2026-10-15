@@ -50,9 +50,18 @@ final class OwnerScreensTests: WalkTestCase {
     /// The element tree at a failure: what was on screen, not only a picture of it.
     func tree(_ name: String) { keep(name + "-tree", app.debugDescription) }
 
+    /// Asks `exists` itself rather than through an `XCTNSPredicateExpectation`. On a loaded CI host one
+    /// `exists` took 1.6–4.3 s and the predicate waiter spent up to 3.4 s more capturing a debug
+    /// description, so it sampled once in 5 s and gave up on a sheet the recording shows gone 2 s
+    /// after Peruuta (runs 38676562693, 38695044302). As with `waitForExistence`, which answered
+    /// "Toiminnot" after 13.9 s in the same run, the last answer counts: one is taken after the deadline.
     func waitGone(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
-        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
-        return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !element.exists { return true }
+            usleep(250_000)
+        }
+        return !element.exists
     }
 
     /// Kirjanpito → "Kuitit, 28 kuittia" (as StabilityTests.openHubRow).
