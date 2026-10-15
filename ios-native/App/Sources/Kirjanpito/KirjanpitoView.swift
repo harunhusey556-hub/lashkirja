@@ -58,12 +58,17 @@ struct KirjanpitoView: View {
             await load()
         }
         .task(id: app.dataVersion) {
-            // Kuukauden sulku's first month and lock, warmed so that screen opens on its content.
+            // Kuukauden sulku's and Ostolaskut's first screens, warmed so they open on their content.
             let app = self.app
             Task {
                 let month = PeriodClose.startMonth(nil, current: MonthKey.current())
                 _ = try? await app.cachedGet("/api/dashboard/month", query: ["month": month]) as PeriodMonthStatus
                 _ = try? await app.cachedGet("/api/period-lock") as PeriodLockState
+                // Ostolaskut's first screen (no chip) and the rows above its list.
+                _ = try? await app.cachedGet("/api/purchase-invoices", persist: true) as PurchaseInvoiceTaggedList
+                _ = try? await app.cachedGet("/api/purchase-invoices/counts") as PurchaseInvoiceCountsResponse
+                _ = try? await app.cachedGet("/api/recurring-purchases") as RecurringPurchaseList
+                _ = try? await app.cachedGet("/api/purchase-invoices/match") as PurchaseSuggestionList
             }
             guard counts == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.

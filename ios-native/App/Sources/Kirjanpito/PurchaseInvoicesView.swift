@@ -387,6 +387,9 @@ struct PurchaseInvoicesView: View {
             state.succeed(cached.list)
             recurringIds = cached.recurringIds
             if let cachedCounts: PurchaseInvoiceCountsResponse = await app.cachedValue("/api/purchase-invoices/counts") { counts = cachedCounts.counts }
+            // The rows above the list too, or they arrive later and push it down.
+            if let cachedRecurring: RecurringPurchaseList = await app.cachedValue("/api/recurring-purchases") { recurringCount = cachedRecurring.activeCount }
+            if let cachedPending: PurchaseSuggestionList = await app.cachedValue("/api/purchase-invoices/match") { suggestions = cachedPending.suggestions.filter(\.canAccept) }
             timing.painted(fromCache: true)
         }
         state.begin()
@@ -398,20 +401,26 @@ struct PurchaseInvoicesView: View {
         async let pending: PurchaseSuggestionList? = try? app.cachedGet("/api/purchase-invoices/match")
         do {
             let tagged: PurchaseInvoiceTaggedList = try await app.cachedGet("/api/purchase-invoices", query: query, persist: query.isEmpty)
+            // The list and the rows above it (Toistuvat, suggestions) land in one update: shown
+            // apart, the recurring row arrived a beat later and pushed the list down 18 pt
+            // (motion audit kirjanpito-purchases-open). They load side by side, so this waits
+            // only for the slowest.
+            let fresh = (counts: await freshCounts, recurring: await recurring, pending: await pending)
             state.succeed(tagged.list)
             recurringIds = tagged.recurringIds
             failure = nil
+            if let response = fresh.counts { counts = response.counts }
+            recurringCount = fresh.recurring.map { $0.activeCount }
+            if let list = fresh.pending { suggestions = list.suggestions.filter(\.canAccept) }
             timing.dataReady()
         } catch is CancellationError {
             return
         } catch {
             state.fail(error)
+            if let response = await freshCounts { counts = response.counts }
+            recurringCount = await recurring.map { $0.activeCount }
+            if let list = await pending { suggestions = list.suggestions.filter(\.canAccept) }
         }
-        if let response = await freshCounts {
-            counts = response.counts
-        }
-        recurringCount = await recurring.map { $0.activeCount }
-        if let list = await pending { suggestions = list.suggestions.filter(\.canAccept) }
     }
 
     private func runBankMatch() async {
