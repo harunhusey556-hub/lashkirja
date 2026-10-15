@@ -17,7 +17,8 @@ API=http://127.0.0.1:$PROXY_PORT
 CORES=$(sysctl -n hw.ncpu)
 
 quiet=0
-while true; do
+# A CI runner is not shared, and its own booted simulator keeps a 3-core load above the bar.
+while [ "${LK_DEDICATED_MAC:-}" != 1 ]; do
   load=$(sysctl -n vm.loadavg | awk '{print int($2)}')
   # Another project's xcodebuild (the binary itself, not a grep or this script) means wait.
   if ps -axo args= | grep -E '^[^ ]*/xcodebuild ' | grep -vq -- "$APP"; then quiet=0; else quiet=$((quiet+1)); fi
