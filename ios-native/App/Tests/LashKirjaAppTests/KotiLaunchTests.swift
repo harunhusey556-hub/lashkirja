@@ -43,14 +43,17 @@ final class KotiLaunchTests: XCTestCase {
 
     func testKotiHasItsLastDashboardWhenTheTabsAppear() async throws {
         let app = try await launchedApp(user: "koti-launch-1", onDisk: dashboard(month: MonthKey.current()))
-        // What Koti would find at the moment the phase turns signed in (the tabs are built then).
-        var atSignIn: Dashboard??
+        // What Koti finds as the phase turns signed in (the tabs are built then). Observation calls
+        // this before the change, while `kotiPreview` still sees the launch phase: the look is
+        // queued right behind the assignment, ahead of `start`'s next await.
+        var atSignIn: Task<Dashboard?, Never>?
         withObservationTracking { _ = app.phase } onChange: {
-            MainActor.assumeIsolated { atSignIn = .some(app.kotiPreview()) }
+            MainActor.assumeIsolated { atSignIn = Task { @MainActor in app.kotiPreview() } }
         }
         await app.start()
         guard case .signedIn = app.phase else { return XCTFail("the stored session did not open the app") }
-        let shown = try XCTUnwrap(atSignIn ?? nil, "Koti had no dashboard when the tabs appeared: its first frame was a spinner")
+        let look = try XCTUnwrap(atSignIn, "the phase never changed")
+        let shown = try XCTUnwrap(await look.value, "Koti had no dashboard when the tabs appeared: its first frame was a spinner")
         XCTAssertEqual(shown.month, MonthKey.current())
         XCTAssertEqual(shown.income, 120)
     }
