@@ -16,6 +16,7 @@ import LashKirjaCore
 /// (W39: a section that came or went in one frame made the list below it jump).
 struct QueuedReceiptsCard: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.listMotion) private var listMotion
     @State private var queue = OfflineReceiptQueueModel.shared
     @State private var capture = CaptureQueueModel.shared
     @State private var connectivity = Connectivity.shared
@@ -125,7 +126,7 @@ struct QueuedReceiptsCard: View {
             }
         }
         .transition(.opacity)
-        .motion(capture.visible ? nil : .snappy, value: sectionsKey)
+        .motion(capture.visible ? nil : listMotion.animation(.snappy), value: sectionsKey)
     }
 
     /// The owner's own taps change the card in one frame, as before: removing the section that holds

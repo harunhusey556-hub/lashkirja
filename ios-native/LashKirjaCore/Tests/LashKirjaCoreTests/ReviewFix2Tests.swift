@@ -14,7 +14,7 @@ private struct Thing: Decodable {}
     let t = FakeTransport([HTTPResponse(status: 401, headers: apiHeader, body: Data(#"{"error":"Nykyinen salasana on väärä."}"#.utf8))])
     let c = APIClient(baseURL: base, transport: t, tokens: FixedToken(value: "T"), sleep: { _ in })
     let flag = Flag()
-    await c.setOnUnauthorized { await flag.set() }
+    await c.setOnUnauthorized { _ in await flag.set() }
     await #expect(throws: LKError.self) { let _: Thing = try await c.send("POST", "/api/auth/password", body: EmptyBody()) }
     #expect(await flag.value == false)
 }
@@ -24,7 +24,7 @@ private struct Thing: Decodable {}
         let t = FakeTransport([HTTPResponse(status: 401, headers: apiHeader, body: Data(body.utf8))])
         let c = APIClient(baseURL: base, transport: t, tokens: FixedToken(value: "T"), sleep: { _ in })
         let flag = Flag()
-        await c.setOnUnauthorized { await flag.set() }
+        await c.setOnUnauthorized { _ in await flag.set() }
         await #expect(throws: LKError.self) { let _: Thing = try await c.get("/x") }
         #expect(await flag.value, "body: \(body)")
     }

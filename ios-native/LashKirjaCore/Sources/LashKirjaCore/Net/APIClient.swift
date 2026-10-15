@@ -16,7 +16,9 @@ public actor APIClient {
     private let transport: HTTPTransport
     private let tokens: TokenProvider
     private let sleep: @Sendable (UInt64) async -> Void
-    public private(set) var onUnauthorized: (@Sendable () async -> Void)?
+    /// Told the token a refused request (401) was sent with, so the session ends only if that
+    /// token is still the one in use when the handler runs.
+    public private(set) var onUnauthorized: (@Sendable (String) async -> Void)?
     /// Told the path of every write the server accepted, so the app can mark what it shows as
     /// out of date without each screen remembering to.
     public private(set) var onWrite: (@Sendable (String) async -> Void)?
@@ -38,7 +40,7 @@ public actor APIClient {
         self.sleep = sleep
     }
 
-    public func setOnUnauthorized(_ handler: (@Sendable () async -> Void)?) { onUnauthorized = handler }
+    public func setOnUnauthorized(_ handler: (@Sendable (String) async -> Void)?) { onUnauthorized = handler }
     public func setOnWrite(_ handler: (@Sendable (String) async -> Void)?) { onWrite = handler }
     public func setOnReachability(_ handler: (@Sendable (Bool) async -> Void)?) { onReachability = handler }
 
@@ -189,7 +191,7 @@ public actor APIClient {
             if response.status >= 500 { noteUnexpected(method, path, response.status, decodeError: false) }
             if failure.endsSession, let sentToken, let handler = onUnauthorized,
                await tokens.currentToken() == sentToken {
-                await handler()
+                await handler(sentToken)
             }
             throw failure
         }

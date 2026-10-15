@@ -229,3 +229,76 @@ private actor FailingTokenStore: TokenStore {
     #expect(AuthService.notSavedMessage == "Kirjautumista ei voitu tallentaa laitteelle.")
     #expect(await auth.currentToken() == nil)
 }
+
+private let refused = json(#"{"error":{"code":"UNAUTHORIZED","message":"Kirjaudu uudelleen"}}"#, 401)
+private let t3Body = tokenBody.replacingOccurrences(of: "T1", with: "T3").replacingOccurrences(of: "u1", with: "u2")
+
+@Test func staleUnauthorizedDoesNotEndANewerSession() async throws {
+    let (auth, store, _) = await make([json(t3Body)])
+    try await store.save(dueToken)
+    await auth.endSession()
+    _ = try await auth.login(email: "b@b.fi", password: "pw")
+    // The 401 answers a request sent with T1, the session before this sign-in.
+    #expect(await auth.handleUnauthorized(sentToken: "T1") == false)
+    #expect(await store.load()?.token == "T3")
+    #expect(await auth.currentToken() == "T3")
+}
+
+@Test func currentSessionUnauthorizedSignsOut() async throws {
+    let (auth, store, _) = await make([json(tokenBody)])
+    _ = try await auth.login(email: "a@b.fi", password: "pw")
+    #expect(await auth.handleUnauthorized(sentToken: "T1"))
+    #expect(await store.load() == nil)
+    #expect(await auth.currentToken() == nil)
+}
+
+@Test func storedSessionUnauthorizedSignsOutBeforeTheTokenIsCached() async throws {
+    let (auth, store, _) = await make([])
+    try await store.save(dueToken)
+    #expect(await auth.handleUnauthorized(sentToken: "T1"))
+    #expect(await store.load() == nil)
+    #expect(await auth.currentToken() == nil)
+}
+
+/// The client's check passes while T1 is current, but a sign-in lands before its handler asks
+/// AuthService to end the session: the new session must survive.
+@Test func signInBetweenTheClientCheckAndTheHandlerKeepsTheNewSession() async throws {
+    let store = InMemoryTokenStore()
+    let transport = FakeTransport([refused, json(t3Body)])
+    let auth = AuthService(store: store, now: { fixedNow })
+    let client = APIClient(baseURL: URL(string: "https://example.test")!, transport: transport, tokens: auth, sleep: { _ in })
+    await auth.bind(client)
+    try await store.save(dueToken)
+    let dropped = Box()
+    await client.setOnUnauthorized { sentToken in
+        await auth.endSession()
+        _ = try? await auth.login(email: "b@b.fi", password: "pw")
+        await dropped.set(await auth.handleUnauthorized(sentToken: sentToken))
+    }
+    await #expect(throws: LKError.self) { let _: Ignored = try await client.get("/api/receipts") }
+    #expect(transport.requests[0].value(forHTTPHeaderField: "Authorization") == "Bearer T1")
+    #expect(await dropped.value == false)
+    #expect(await store.load()?.token == "T3")
+    #expect(await auth.currentToken() == "T3")
+}
+
+/// A 401 for the request's own session still reaches the handler with the token it was sent with.
+@Test func currentSessionUnauthorizedReachesTheHandlerWithItsToken() async throws {
+    let store = InMemoryTokenStore()
+    let transport = FakeTransport([refused])
+    let auth = AuthService(store: store, now: { fixedNow })
+    let client = APIClient(baseURL: URL(string: "https://example.test")!, transport: transport, tokens: auth, sleep: { _ in })
+    await auth.bind(client)
+    try await store.save(dueToken)
+    let dropped = Box()
+    await client.setOnUnauthorized { sentToken in await dropped.set(await auth.handleUnauthorized(sentToken: sentToken)) }
+    await #expect(throws: LKError.self) { let _: Ignored = try await client.get("/api/receipts") }
+    #expect(await dropped.value == true)
+    #expect(await store.load() == nil)
+    #expect(await auth.currentToken() == nil)
+}
+
+private actor Box {
+    var value: Bool?
+    func set(_ new: Bool) { value = new }
+}

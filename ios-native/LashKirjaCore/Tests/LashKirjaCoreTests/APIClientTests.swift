@@ -69,7 +69,7 @@ actor Flag { var value = false; func set() { value = true } }
     let t = FakeTransport([HTTPResponse(status: 401, headers: ["x-lashkirja-api-version": "1"], body: Data(#"{"error":"Ei kirjautunut"}"#.utf8))])
     let c = APIClient(baseURL: base, transport: t, tokens: FixedToken(value: "old"), sleep: noSleep)
     let flag = Flag()
-    await c.setOnUnauthorized { await flag.set() }
+    await c.setOnUnauthorized { _ in await flag.set() }
     await #expect(throws: LKError.self) { let _: Me = try await c.get("/x") }
     #expect(await flag.value)
 }
