@@ -66,12 +66,21 @@ final class ChatModel {
 
     /// The first load, started by `AppModel.prepareChat` before the sheet slides up.
     private var prefetch: Task<Void, Never>?
+    /// The first history and status have landed: until then the conversation area stays empty,
+    /// so an owner with history never sees "Miten voin auttaa?" replaced by their messages.
+    private(set) var ready = false
 
     func startPrefetch() {
         prefetch = Task {
             async let status: Void = loadStatus()
             await loadLatest()
             await status
+            ready = true
+        }
+        // Offline the history can take a minute to fail: the conversation shows after 1.5 s anyway.
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            ready = true
         }
     }
 

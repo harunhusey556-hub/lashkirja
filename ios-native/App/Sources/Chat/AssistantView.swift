@@ -121,6 +121,10 @@ struct AssistantView: View {
                 .environment(\.openURL, OpenURLAction { url in openLink(url) })
             }
             .scrollDismissesKeyboard(.interactively)
+            // One fade-in when the first load has landed (ChatModel.ready), not the empty state
+            // and then the history replacing it (motion audit koti-assistant-sheet).
+            .opacity(model.ready ? 1 : 0)
+            .motion(.easeOut(duration: 0.2), value: model.ready)
             // Open on the latest message, and keep it in view when the keyboard shrinks the scroll view.
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(.bottom, for: .sizeChanges)

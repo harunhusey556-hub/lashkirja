@@ -11,7 +11,13 @@ final class KotiModel {
     @ObservationIgnored private weak var app: AppModel?
     /// The owner's profile, kept by AppModel: its ALV-verokausi picks the return the status card names.
     private let profile: () async -> Profile?
-    var month: String = MonthKey.current()
+    /// The month on screen. A step to another month changes it only when that month's dashboard
+    /// is there: the title, the cards and the tasks switch together, never October's tasks under
+    /// a September title (motion audit koti-prev-month).
+    private(set) var month: String = MonthKey.current()
+    /// The month asked for while its dashboard loads.
+    private var pendingMonth: String?
+    private var targetMonth: String { pendingMonth ?? month }
     private(set) var state = ScreenLoad<Dashboard>()
     /// Rows the owner just acted on: gone from the list at once, back if undone or failed,
     /// and not brought back by a reload while the action is still waiting or on its way.
@@ -39,12 +45,12 @@ final class KotiModel {
 
     func load() async {
         let generation = loads.next()
-        let month = self.month
+        let month = self.targetMonth
         let timing = ScreenTiming("Koti")
         let query = ["month": month]
         if state.value?.month != month, let app, let cached: Dashboard = await app.cachedValue("/api/dashboard", query: query),
-           loads.isCurrent(generation), month == self.month {
-            state.succeed(cached)
+           loads.isCurrent(generation), month == self.targetMonth {
+            show(month, cached)
             timing.painted(fromCache: true)
         }
         state.begin()
@@ -60,9 +66,9 @@ final class KotiModel {
             } else {
                 dashboard = try await api.get("/api/dashboard", query: query)
             }
-            guard loads.isCurrent(generation), month == self.month else { return }
+            guard loads.isCurrent(generation), month == self.targetMonth else { return }
             hidden.reloaded(present: dashboard.items.map(\.id), loadGeneration: generation)
-            state.succeed(dashboard)
+            show(month, dashboard)
             timing.dataReady()
             if let jobs = await jobsList, loads.isCurrent(generation) {
                 failedJobs = JobsQueue.failedCount(jobs.jobs, connections: await connections, dismissedLocally: JobDismissals.ids)
@@ -71,10 +77,23 @@ final class KotiModel {
         } catch is CancellationError {
             return
         } catch {
-            guard loads.isCurrent(generation), month == self.month else { return }
+            guard loads.isCurrent(generation), month == self.targetMonth else { return }
+            // The month asked for is the one whose failure shows.
+            if self.month != month {
+                self.month = month
+                pendingMonth = nil
+                state.restart()
+            }
             // With a dashboard shown it stays, under a banner saying the refresh failed.
             state.fail(error)
         }
+    }
+
+    /// The month and its dashboard in one update.
+    private func show(_ month: String, _ dashboard: Dashboard) {
+        if self.month != month { self.month = month }
+        if pendingMonth == month { pendingMonth = nil }
+        state.succeed(dashboard)
     }
 
     /// The status card's ALV-ilmoitus row (web `useVatDue`): the period from the profile's
@@ -106,17 +125,17 @@ final class KotiModel {
     }
 
     func step(_ delta: Int) async {
-        let next = MonthKey.shift(month, by: delta)
+        let next = MonthKey.shift(targetMonth, by: delta)
         guard next <= MonthKey.current() else { return }
-        month = next
+        pendingMonth = next
         Haptics.selection()
         await load()
     }
 
     /// A bar of Tulot ja menot: that month on Koti (the chart's months end at the current one).
     func show(month next: String) async {
-        guard next != month, next <= MonthKey.current() else { return }
-        month = next
+        guard next != targetMonth, next <= MonthKey.current() else { return }
+        pendingMonth = next
         Haptics.selection()
         await load()
     }
