@@ -20,7 +20,7 @@ struct MainTabView: View {
                             .motionProbe("tab.\(item)")
                             .toolbar {
                                 ToolbarItemGroup(placement: .topBarTrailing) {
-                                    Button { showAssistant = true } label: { Image(systemName: "bubble.left") }
+                                    Button { app.prepareChat(); showAssistant = true } label: { Image(systemName: "bubble.left") }
                                         .accessibilityLabel("Avustaja")
                                     Button { showSettings = true } label: { Image(systemName: "person.crop.circle") }
                                         .accessibilityLabel("Asetukset")
@@ -76,7 +76,7 @@ struct MainTabView: View {
             switch action {
             case .capture: app.pendingCapture = PendingCapture(transactionId: nil)
             case .newInvoice: showNewInvoice = true
-            case .assistant: showAssistant = true
+            case .assistant: app.prepareChat(); showAssistant = true
             }
         }
         .sheet(isPresented: $showNewInvoice) {

@@ -64,8 +64,25 @@ final class ChatModel {
 
     init(app: AppModel) { self.app = app }
 
+    /// The first load, started by `AppModel.prepareChat` before the sheet slides up.
+    private var prefetch: Task<Void, Never>?
+
+    func startPrefetch() {
+        prefetch = Task {
+            async let status: Void = loadStatus()
+            await loadLatest()
+            await status
+        }
+    }
+
     /// Opening the sheet again: the same conversation, refreshed unless it is new or still streaming.
     func reopen() async {
+        // Opened right after the prefetch started: that load is the fresh one, not a second request.
+        if let prefetch {
+            self.prefetch = nil
+            await prefetch.value
+            return
+        }
         async let status: Void = loadStatus()
         // A receipt still uploading (or waiting for a retry) lives only here: a reload would drop it.
         if conversationId != nil && !streaming && pendingReceipts.isEmpty { await loadLatest() }
