@@ -12,7 +12,7 @@ class WalkTestCase: XCTestCase {
     /// "Save Password?" sheet sits in the app's own element tree, not SpringBoard's (CI dump, 2026-10-15).
     func dismissSystemPrompts() {
         for label in ["Not Now", "Ei nyt"] {
-            for root in [springboard, app!] where root.buttons[label].exists { root.buttons[label].tap() }
+            probe { for root in [springboard, app!] where root.buttons[label].exists { root.buttons[label].tap() } }
         }
     }
     var savePasswordPrompt: XCUIElement {
@@ -30,8 +30,19 @@ class WalkTestCase: XCTestCase {
         _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         // On a fresh simulator the save offer comes seconds after the tab bar, over the first test's
         // taps (CI 2026-10-15: P0 A, P1 01, P2 A, Integration A). Only a sign-in brings it.
-        if signingIn { _ = savePasswordPrompt.waitForExistence(timeout: 10) }
+        if signingIn { probe { _ = savePasswordPrompt.waitForExistence(timeout: 10) } }
         sleep(1); dismissSystemPrompts()
+    }
+
+    /// Runs a look for a system prompt (SpringBoard's "Open", the password manager's "Not Now").
+    /// On a fresh simulator one snapshot can hang past XCTest's limit (CI 2026-10-15: P2 A setUp,
+    /// ~100 s on the Save Password probe while Koti first loaded, then the test body was skipped).
+    /// Only that snapshot timeout is let through; any other issue inside still fails the test.
+    func probe(_ body: () -> Void) {
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = false
+        options.issueMatcher = { $0.compactDescription.contains("Failed to get matching snapshots") }
+        XCTExpectFailure("a system prompt probe timed out evaluating its UI query", options: options, failingBlock: body)
     }
 
     func note(_ s: String) {
@@ -85,10 +96,18 @@ class WalkTestCase: XCTestCase {
         FileManager.default.createFile(atPath: name, contents: url.data(using: .utf8))
         for _ in 0..<40 where FileManager.default.fileExists(atPath: name) { usleep(250_000) }
         // simctl asks "Open in LashKirja?" for a custom scheme; a quick action or Siri does not.
+        // On a fresh simulator the first one can take over 15 s (CI 2026-10-15: P2 A shot the
+        // dialog still up after the test gave up), so the first link of a run waits longer.
         let open = springboard.buttons["Open"]
-        if open.waitForExistence(timeout: 5) { open.tap() }
+        let first = !WalkTestCase.linkOpened
+        WalkTestCase.linkOpened = true
+        probe { if open.waitForExistence(timeout: first ? 45 : 5) { open.tap() } }
         sleep(2)
+        // A dialog that came after the wait is still answered rather than left over the app.
+        probe { if open.exists { open.tap(); sleep(2) } }
     }
+    /// Set by the run's first `openURL`; one test process is one simulator session.
+    static var linkOpened = false
     /// Text size through the host (`simctl ui content_size`), e.g. "accessibility-extra-extra-extra-large".
     func contentSize(_ size: String) {
         let name = "\(shotDir)/\(UUID().uuidString).contentsize"
