@@ -464,12 +464,15 @@ final class MotionAuditTests: WalkTestCase {
         if let id = demoInvoiceId() {
             tab("Koti")
             press(app.buttons["Asetukset"].firstMatch); _ = app.navigationBars["Asetukset"].waitForExistence(timeout: 8); sleep(2)
-            let name = "\(shotDir)/\(UUID().uuidString).openurl"
-            FileManager.default.createFile(atPath: name, contents: "lashkirja://invoice/\(id)".data(using: .utf8))
-            let open = springboard.buttons["Open"]
-            if open.waitForExistence(timeout: 10) {
-                step("bad-link-over-sheet", from: "Asetukset sheet on Koti", to: "Lasku (Myynti)", seconds: 6) { open.tap(); return true }
-            } else { note("SKIP calibration/bad-link-over-sheet: no Open prompt") }
+            // iOS asks "Open in LashKirja?" only the first time on a device; after that the link
+            // opens straight away, so it is sent inside the recorded step.
+            step("bad-link-over-sheet", from: "Asetukset sheet on Koti", to: "Lasku (Myynti)", seconds: 7) {
+                let name = "\(shotDir)/\(UUID().uuidString).openurl"
+                FileManager.default.createFile(atPath: name, contents: "lashkirja://invoice/\(id)".data(using: .utf8))
+                let open = springboard.buttons["Open"]
+                if open.waitForExistence(timeout: 3) { open.tap() }
+                return true
+            }
             sleep(2)
             tab("Kirjanpito")
         }
