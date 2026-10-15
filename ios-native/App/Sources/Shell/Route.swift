@@ -176,7 +176,7 @@ struct RouteScreen: View {
     var body: some View {
         switch route {
         case .placeholder(let title): PlaceholderScreen(title: title)
-        case .invoice(let id): InvoiceDetailView(invoiceId: id)
+        case .invoice(let id): InvoiceDetailView(invoiceId: id, preview: app.invoicePreview(id))
         case .customers: CustomersView()
         case .customer(let id): CustomerDetailView(customerId: id)
         case .receipts: ReceiptsView()
