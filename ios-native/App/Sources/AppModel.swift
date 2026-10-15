@@ -112,7 +112,7 @@ final class AppModel {
                 self?.settleVersionSoon()
             }
         }
-        await api.setOnUnauthorized { [weak self] in await self?.sessionExpired() }
+        await api.setOnUnauthorized { [weak self] sentToken in await self?.sessionExpired(sentToken: sentToken) }
         let observer = self.observer
         await api.setOnUnexpectedFailure { method, path, status, decodeError in
             await observer.reportAPIFailure(method: method, path: path, status: status, decodeError: decodeError)
@@ -192,18 +192,19 @@ final class AppModel {
 
     /// The server refused the session (a 401, or a refused refresh). Waiting receipt photos stay
     /// on the device for when the same owner signs in again; nothing else of theirs stays.
-    func sessionExpired() async {
-        let had = await auth.handleUnauthorized()
+    /// A 401 for an earlier session (sent before a sign-in) leaves the current one alone.
+    func sessionExpired(sentToken: String) async {
+        guard await auth.handleUnauthorized(sentToken: sentToken) else { return }
         OfflineReceiptQueueModel.shared.detach()
         endLocalSession()
-        phase = .signedOut(notice: had ? "Istunto vanheni. Kirjaudu uudelleen." : nil)
+        phase = .signedOut(notice: "Istunto vanheni. Kirjaudu uudelleen.")
     }
 
     /// A 401 to a request made outside `api` (the assistant's stream and receipt upload): it ends
     /// the session only if it was sent with the token still in use, as `APIClient` does.
     func unauthorized(sentToken: String?) async {
-        guard let sentToken, await auth.currentToken() == sentToken else { return }
-        await sessionExpired()
+        guard let sentToken else { return }
+        await sessionExpired(sentToken: sentToken)
     }
 
     func background() {

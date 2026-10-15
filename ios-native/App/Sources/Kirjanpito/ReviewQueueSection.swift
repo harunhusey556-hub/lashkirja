@@ -6,6 +6,7 @@ import LashKirjaCore
 /// `RejectedReceipts.tsx`). A receipt without an amount or a vendor gets "Täydennä" and is left
 /// out of the bulk approval. List rows; shows nothing when both lists are empty.
 struct ReviewQueueSection: View {
+    @Environment(\.listMotion) private var listMotion
     let pending: [Receipt]
     let rejected: [Receipt]
     let rejectedTotal: Int
@@ -46,7 +47,7 @@ struct ReviewQueueSection: View {
             }
             // The last page arriving removes "Lataa lisää" at the foot of the list: it fades out
             // instead of vanishing, and the rows below don't jump.
-            .motion(.snappy, value: pendingHasMore)
+            .motion(listMotion.animation(.snappy), value: pendingHasMore)
         }
     }
 
@@ -132,7 +133,7 @@ struct ReviewQueueSection: View {
                         .accessibilityHidden(!loadingPending)
                 }
                 .foregroundStyle(Theme.accent)
-                .motion(.snappy, value: loadingPending)
+                .motion(listMotion.animation(.snappy), value: loadingPending)
             }
             .disabled(loadingPending)
             .transition(.opacity)
