@@ -179,6 +179,16 @@ public struct ReceiptSaveResult: Decodable, Sendable, Equatable {
             self.dueDate = dueDate
             self.isCreditNote = isCreditNote
         }
+
+        /// "ostolasku luotu, eräpäivä 14.10.2026" (or "hyvityslasku luotu"): the same words after a
+        /// save and after the queue row's "Kuitti ⇄ Ostolasku".
+        public var note: String {
+            if isCreditNote == true { return "hyvityslasku luotu" }
+            if let dueDate, APIDate.day(String(dueDate.prefix(10))) != nil {
+                return "ostolasku luotu, eräpäivä \(APIDate.displayDay(dueDate))"
+            }
+            return "ostolasku luotu"
+        }
     }
 
     public let receipt: Stored
@@ -212,14 +222,15 @@ public struct ReceiptSaveResult: Decodable, Sendable, Equatable {
     /// What the owner is told about the bill, after "Tallennettu ·": "ostolasku luotu, eräpäivä 14.10.2026".
     /// Nil for an ordinary receipt and for a reason the owner has nothing to do with.
     public var purchaseInvoiceNote: String? {
-        if let invoice = purchaseInvoice {
-            if invoice.isCreditNote == true { return "hyvityslasku luotu" }
-            if let due = invoice.dueDate, APIDate.day(String(due.prefix(10))) != nil {
-                return "ostolasku luotu, eräpäivä \(APIDate.displayDay(due))"
-            }
-            return "ostolasku luotu"
-        }
+        if let invoice = purchaseInvoice { return invoice.note }
         if purchaseInvoiceSkipped == "duplicate" { return "ostolaskua ei luotu, sama lasku on jo ostolaskuissa" }
         return nil
+    }
+
+    /// What the AI's reading made of the document, for the queue row's "Kuitti ⇄ Ostolasku": an
+    /// ostolasku when one was filed, else a kuitti. Nil for a credit note, which is no payable to switch.
+    public var filedKind: ReceiptDocumentKind? {
+        guard let invoice = purchaseInvoice else { return .receipt }
+        return invoice.isCreditNote == true ? nil : .invoice
     }
 }

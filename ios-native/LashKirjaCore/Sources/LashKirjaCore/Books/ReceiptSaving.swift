@@ -20,13 +20,17 @@ public enum ReceiptSaving {
         public let support: FlagSupport
         /// What the server did with a bill ("ostolasku luotu, eräpäivä 14.10.2026"); nil for a plain receipt.
         public let invoiceNote: String?
+        /// Kuitti or ostolasku, as the server filed it; nil for a sale and a credit note (no switch).
+        public let kind: ReceiptDocumentKind?
 
-        public init(receiptId: String, approved: Bool?, duplicate: Bool, support: FlagSupport, invoiceNote: String? = nil) {
+        public init(receiptId: String, approved: Bool?, duplicate: Bool, support: FlagSupport, invoiceNote: String? = nil,
+                    kind: ReceiptDocumentKind? = nil) {
             self.receiptId = receiptId
             self.approved = approved
             self.duplicate = duplicate
             self.support = support
             self.invoiceNote = invoiceNote
+            self.kind = kind
         }
     }
 
@@ -74,7 +78,9 @@ public enum ReceiptSaving {
                                approved: body.autoApprove ? result.approved : nil,
                                duplicate: duplicate,
                                support: learned,
-                               invoiceNote: result.purchaseInvoiceNote)
+                               invoiceNote: result.purchaseInvoiceNote,
+                               // A sale is never an ostolasku: it gets no switch.
+                               kind: draft.type == "tulo" ? nil : result.filedKind)
             } catch let error as LKError where saveDuplicateAnyway && error.isDuplicate && !body.forceDuplicate {
                 duplicate = true
                 body.forceDuplicate = true

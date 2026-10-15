@@ -46,6 +46,11 @@ public struct UploadQueueRow: Identifiable, Sendable, Equatable {
     /// Set on `saved`: what the server did with a bill ("ostolasku luotu, eräpäivä 14.10.2026");
     /// nil for a plain receipt.
     public var invoiceNote: String?
+    /// Set on `saved`: the receipt the row became, for its "Kuitti ⇄ Ostolasku".
+    public var receiptId: String?
+    /// Set on `saved`: kuitti or ostolasku, as the server filed it; nil where no switch is offered
+    /// (a sale, a credit note, a receipt linked to a bank row).
+    public var kind: ReceiptDocumentKind?
 
     /// Said under a saved row: what became of the receipt (as the web's upload list), and of the
     /// bill it was: "Hyväksytty automaattisesti · ostolasku luotu, eräpäivä 14.10.2026".
@@ -65,6 +70,9 @@ public struct UploadQueueRow: Identifiable, Sendable, Equatable {
 
     /// A save the server refused keeps what was read, so the form can take it from there.
     public var canOpenForm: Bool { status == .failed && draft != nil }
+
+    /// The saved row offers its one-tap "Kuitti ⇄ Ostolasku" (the AI's decision, the owner's word).
+    public var canSwitchKind: Bool { status == .saved && receiptId != nil && kind != nil }
 }
 
 /// The several-files-at-once upload of the new-receipt screen (web `useReceiptUploadQueue.ts`):
@@ -138,9 +146,12 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
         patch(id) { $0.status = .ready; $0.progress = "Odottaa tarkistusta"; $0.error = nil; $0.draft = draft }
     }
     /// `autoApproved` nil: the server did not say (`ReceiptSaving.Outcome.approved`).
-    public mutating func markSaved(_ id: String, autoApproved: Bool? = false, duplicate: Bool = false, invoiceNote: String? = nil) {
+    public mutating func markSaved(_ id: String, autoApproved: Bool? = false, duplicate: Bool = false, invoiceNote: String? = nil,
+                                   receiptId: String? = nil, kind: ReceiptDocumentKind? = nil) {
         patch(id) {
             $0.invoiceNote = invoiceNote
+            $0.receiptId = receiptId
+            $0.kind = kind
             $0.status = .saved
             $0.progress = nil
             $0.error = nil
@@ -149,6 +160,13 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
             $0.approvalKnown = autoApproved != nil
             $0.duplicate = duplicate
         }
+    }
+
+    /// "Kuitti ⇄ Ostolasku" went through: the row says what the document is now, and the bill's note
+    /// follows (gone for a kuitti). Only a saved row has a kind to change.
+    public mutating func markKind(_ id: String, kind: ReceiptDocumentKind, invoiceNote: String?) {
+        guard row(id)?.status == .saved else { return }
+        patch(id) { $0.kind = kind; $0.invoiceNote = invoiceNote }
     }
 
     /// A finished reading that the app saves itself, waiting for a free save slot.
