@@ -61,26 +61,38 @@ public struct PurchaseBankCandidateList: Decodable, Sendable {
         public var id: String { month }
     }
 
-    public let candidates: [PurchaseBankCandidate]
-    /// Hits before the server's cap of 30.
+    /// The rows loaded so far, best first (every page asked for, in order).
+    public private(set) var candidates: [PurchaseBankCandidate]
+    /// Every matching row on the server, across all pages.
     public let total: Int
     public let months: [MonthCount]
+    /// The server holds more rows after these (`?offset=` the loaded count). An older server that
+    /// capped the list at 30 sends nothing here, and its list simply ends.
+    public private(set) var hasMore: Bool
 
-    enum CodingKeys: String, CodingKey { case candidates, total, months }
+    enum CodingKeys: String, CodingKey { case candidates, total, months, hasMore }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         candidates = try c.decodeIfPresent([PurchaseBankCandidate].self, forKey: .candidates) ?? []
         total = try c.decodeIfPresent(Int.self, forKey: .total) ?? candidates.count
         months = try c.decodeIfPresent([MonthCount].self, forKey: .months) ?? []
+        hasMore = (try? c.decodeIfPresent(Bool.self, forKey: .hasMore)) ?? false
+    }
+
+    /// The next page added under the loaded rows; a row already shown is not shown twice.
+    public mutating func append(_ page: PurchaseBankCandidateList) {
+        let shown = Set(candidates.map(\.id))
+        candidates += page.candidates.filter { !shown.contains($0.id) }
+        hasMore = page.hasMore && !page.candidates.isEmpty
     }
 
     /// Month chips only help when there are many rows across several months.
     public var showsMonthChips: Bool { months.count > 1 && months.reduce(0) { $0 + $1.count } > ShowMore.defaultStep }
 
-    /// Said under the list when the server left rows out.
+    /// Said under the list only when an older server left rows out with no way to page to them.
     public var cappedNote: String? {
-        total > candidates.count ? "Näytetään \(candidates.count) parasta \(total) tapahtumasta. Tarkenna hakua tai valitse kuukausi." : nil
+        !hasMore && total > candidates.count ? "Näytetään \(candidates.count) parasta \(total) tapahtumasta. Tarkenna hakua tai valitse kuukausi." : nil
     }
 }
 
@@ -143,15 +155,25 @@ public struct PurchaseInvoiceCandidate: Decodable, Sendable, Identifiable, Hasha
 }
 
 public struct PurchaseInvoiceCandidateList: Decodable, Sendable {
-    public let candidates: [PurchaseInvoiceCandidate]
+    public private(set) var candidates: [PurchaseInvoiceCandidate]
     public let total: Int
+    /// The server holds more invoices after these; absent (false) from an older server.
+    public private(set) var hasMore: Bool
 
-    enum CodingKeys: String, CodingKey { case candidates, total }
+    enum CodingKeys: String, CodingKey { case candidates, total, hasMore }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         candidates = try c.decodeIfPresent([PurchaseInvoiceCandidate].self, forKey: .candidates) ?? []
         total = try c.decodeIfPresent(Int.self, forKey: .total) ?? candidates.count
+        hasMore = (try? c.decodeIfPresent(Bool.self, forKey: .hasMore)) ?? false
+    }
+
+    /// The next page added under the loaded invoices, none twice.
+    public mutating func append(_ page: PurchaseInvoiceCandidateList) {
+        let shown = Set(candidates.map(\.id))
+        candidates += page.candidates.filter { !shown.contains($0.id) }
+        hasMore = page.hasMore && !page.candidates.isEmpty
     }
 }
 

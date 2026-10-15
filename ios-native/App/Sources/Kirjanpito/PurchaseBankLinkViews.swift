@@ -142,53 +142,28 @@ struct PurchaseLinkConfirmView: View {
 
 /// Ostolasku → "Kohdista pankkitapahtumaan": the bank rows that may have paid it, best first.
 struct PurchaseBankLinkSheet: View {
-    @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let invoice: PurchaseInvoice
     var onLinked: (PurchaseInvoice) -> Void = { _ in }
 
-    @State private var state = ScreenLoad<PurchaseBankCandidateList>()
-    @State private var search = ""
-    @State private var month: String?
-    @State private var limit = ShowMore()
     @State private var target: PurchaseLinkPair?
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    LabeledContent(invoice.supplierName) { MoneyText(amount: invoice.open).fontWeight(.semibold) }
-                } footer: {
-                    Text("Valitse pankkitapahtuma, jolla tämä ostolasku maksettiin. Parhaat osumat ovat ylimpänä.")
-                }
-                switch state.display {
-                case .content(let list):
-                    if let banner = state.banner {
-                        Section { RefreshFailureBanner(failure: banner, retry: load) }
-                            .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets())
-                    }
-                    content(list)
-                case .failed(let failure):
-                    Section { LoadFailureView(failure: failure, retry: load) }
-                        .listRowBackground(Color.clear)
-                case .loading:
-                    ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
-                }
+            BankRowPickerList(
+                path: "/api/purchase-invoices/\(invoice.id)/payments/candidates",
+                emptyText: "Lähteviä maksuja, joita ei ole vielä kohdistettu, ei löytynyt laskun ajalta. Hae nimellä tai summalla."
+            ) {
+                LabeledContent(invoice.supplierName) { MoneyText(amount: invoice.open).fontWeight(.semibold) }
+            } footer: {
+                Text("Valitse pankkitapahtuma, jolla tämä ostolasku maksettiin. Parhaat osumat ovat ylimpänä.")
+            } pick: { candidate in
+                target = PurchaseLinkPair(invoice: invoice, row: candidate)
             }
-            .scrollContentBackground(.hidden)
-            .background(Theme.canvas)
-            .searchable(text: $search, prompt: "Nimi, viesti tai summa")
             .navigationTitle("Kohdista pankkitapahtumaan")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Sulje") { dismiss() } }
-            }
-            .task(id: "\(search)|\(month ?? "")") {
-                // Typing settles before the server is asked again.
-                if !search.isEmpty { try? await Task.sleep(nanoseconds: 350_000_000) }
-                guard !Task.isCancelled else { return }
-                await load()
             }
             .navigationDestination(item: $target) { pair in
                 PurchaseLinkConfirmView(pair: pair) { updated in
@@ -199,6 +174,54 @@ struct PurchaseBankLinkSheet: View {
         }
         .presentationDetents([.large])
     }
+}
+
+/// The searchable list of bank rows one document can be linked to, a server page at a time: the
+/// ostolasku's "Kohdista pankkitapahtumaan" and the kuitti's "Valitse muu pankkitapahtuma". Owner
+/// 2026-10-15: 599 rows stopped at 30 here, and a kuitti offered only the matcher's few. The
+/// search and the month chips ask the server, so they reach every row, not only the loaded ones.
+struct BankRowPickerList<Header: View, Footer: View>: View {
+    @Environment(AppModel.self) private var app
+    let path: String
+    let emptyText: String
+    @ViewBuilder let header: () -> Header
+    @ViewBuilder let footer: () -> Footer
+    let pick: (PurchaseBankCandidate) -> Void
+
+    @State private var state = ScreenLoad<PurchaseBankCandidateList>()
+    @State private var search = ""
+    @State private var month: String?
+    @State private var limit = ShowMore()
+    @State private var loadingMore = false
+
+    var body: some View {
+        List {
+            Section { header() } footer: { footer() }
+            switch state.display {
+            case .content(let list):
+                if let banner = state.banner {
+                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                }
+                content(list)
+            case .failed(let failure):
+                Section { LoadFailureView(failure: failure, retry: load) }
+                    .listRowBackground(Color.clear)
+            case .loading:
+                ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
+        .searchable(text: $search, prompt: "Nimi, viesti tai summa")
+        .task(id: "\(search)|\(month ?? "")") {
+            // Typing settles before the server is asked again.
+            if !search.isEmpty { try? await Task.sleep(nanoseconds: 350_000_000) }
+            guard !Task.isCancelled else { return }
+            await load()
+        }
+    }
 
     @ViewBuilder
     private func content(_ list: PurchaseBankCandidateList) -> some View {
@@ -206,10 +229,10 @@ struct PurchaseBankLinkSheet: View {
             Section {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        SectionChip(title: "Kaikki", selected: month == nil) { pick(nil) }
+                        SectionChip(title: "Kaikki", selected: month == nil) { pickMonth(nil) }
                         ForEach(list.months) { option in
                             SectionChip(title: monthTitle(option.month), count: option.count, selected: month == option.month) {
-                                pick(option.month)
+                                pickMonth(option.month)
                             }
                         }
                     }
@@ -224,22 +247,24 @@ struct PurchaseBankLinkSheet: View {
                 ContentUnavailableView {
                     Label(search.isEmpty ? "Ei sopivia pankkitapahtumia" : "Ei osumia", systemImage: "building.columns")
                 } description: {
-                    Text(search.isEmpty
-                         ? "Lähteviä maksuja, joita ei ole vielä kohdistettu, ei löytynyt laskun ajalta. Hae nimellä tai summalla."
-                         : "Kokeile toista hakusanaa tai summaa.")
+                    Text(search.isEmpty ? emptyText : "Kokeile toista hakusanaa tai summaa.")
                 }
             }
             .listRowBackground(Color.clear)
         } else {
             Section {
                 ForEach(list.candidates.prefix(limit.visible(list.candidates.count))) { candidate in
-                    Button { target = PurchaseLinkPair(invoice: invoice, row: candidate) } label: {
+                    Button { pick(candidate) } label: {
                         PurchaseBankCandidateRow(candidate: candidate)
                     }
                     .buttonStyle(.pressable)
                     .accessibilityHint("Avaa vahvistus")
                 }
-                ShowMoreButton(limit: $limit, total: list.candidates.count)
+                // Ten at a time; the next server page is asked for only by the button, never on scroll.
+                PagedShowMoreButton(limit: $limit, loaded: list.candidates.count, total: list.total, serverHasMore: list.hasMore, loading: loadingMore) {
+                    await loadMore()
+                    return state.value?.candidates.count ?? 0
+                }
             } header: {
                 Text("Pankkitapahtumat · \(list.total)")
             } footer: {
@@ -248,7 +273,7 @@ struct PurchaseBankLinkSheet: View {
         }
     }
 
-    private func pick(_ next: String?) {
+    private func pickMonth(_ next: String?) {
         month = next
         limit.reset()
     }
@@ -257,18 +282,40 @@ struct PurchaseBankLinkSheet: View {
         MonthKey.title(key, currentYear: String(MonthKey.current().prefix(4)))
     }
 
-    private func load() async {
-        state.begin()
+    private var query: [String: String] {
         var query: [String: String] = [:]
         let q = search.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty { query["q"] = q }
         if let month { query["month"] = month }
+        return query
+    }
+
+    private func load() async {
+        state.begin()
         do {
-            let list: PurchaseBankCandidateList = try await app.api.get(
-                "/api/purchase-invoices/\(invoice.id)/payments/candidates", query: query
-            )
+            let list: PurchaseBankCandidateList = try await app.api.get(path, query: query)
             state.succeed(list)
             limit.reset()
+        } catch is CancellationError {
+        } catch {
+            state.fail(error)
+        }
+    }
+
+    /// The next page under the loaded rows. A failure keeps the loaded rows (the banner says why).
+    private func loadMore() async {
+        guard !loadingMore, var list = state.value, list.hasMore else { return }
+        let asked = query
+        var paged = asked
+        paged["offset"] = String(list.candidates.count)
+        loadingMore = true
+        defer { loadingMore = false }
+        do {
+            let page: PurchaseBankCandidateList = try await app.api.get(path, query: paged)
+            // A search typed meanwhile has replaced the list: this page belonged to the old one.
+            guard asked == query else { return }
+            list.append(page)
+            state.succeed(list)
         } catch is CancellationError {
         } catch {
             state.fail(error)
@@ -307,6 +354,7 @@ struct PurchaseRowLinkView: View {
     @State private var state = ScreenLoad<PurchaseInvoiceCandidateList>()
     @State private var search = ""
     @State private var limit = ShowMore()
+    @State private var loadingMore = false
     @State private var target: PurchaseLinkPair?
 
     var body: some View {
@@ -343,7 +391,10 @@ struct PurchaseRowLinkView: View {
                             .buttonStyle(.pressable)
                             .accessibilityHint("Avaa vahvistus")
                         }
-                        ShowMoreButton(limit: $limit, total: list.candidates.count)
+                        PagedShowMoreButton(limit: $limit, loaded: list.candidates.count, total: list.total, serverHasMore: list.hasMore, loading: loadingMore) {
+                            await loadMore()
+                            return state.value?.candidates.count ?? 0
+                        }
                     } header: {
                         Text("Avoimet ostolaskut · \(list.total)")
                     }
@@ -368,15 +419,38 @@ struct PurchaseRowLinkView: View {
         }
     }
 
-    private func load() async {
-        state.begin()
+    private var query: [String: String] {
         var query = ["transactionId": row.id]
         let q = search.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty { query["q"] = q }
+        return query
+    }
+
+    private func load() async {
+        state.begin()
         do {
             let list: PurchaseInvoiceCandidateList = try await app.api.get("/api/matching/purchase-candidates", query: query)
             state.succeed(list)
             limit.reset()
+        } catch is CancellationError {
+        } catch {
+            state.fail(error)
+        }
+    }
+
+    /// The next server page of open invoices under the loaded ones (an owner with many open bills).
+    private func loadMore() async {
+        guard !loadingMore, var list = state.value, list.hasMore else { return }
+        let asked = query
+        var paged = asked
+        paged["offset"] = String(list.candidates.count)
+        loadingMore = true
+        defer { loadingMore = false }
+        do {
+            let page: PurchaseInvoiceCandidateList = try await app.api.get("/api/matching/purchase-candidates", query: paged)
+            guard asked == query else { return }
+            list.append(page)
+            state.succeed(list)
         } catch is CancellationError {
         } catch {
             state.fail(error)
@@ -508,6 +582,75 @@ struct PurchaseSuggestionsSheet: View {
         } catch {
             Haptics.error()
             failure = error.userMessage
+        }
+    }
+}
+
+/// Kuitti → "Valitse muu pankkitapahtuma": any free bank row of the receipt's direction, not only the
+/// matcher's suggestions (owner 2026-10-15). The server checks the row is the owner's and still free.
+struct ReceiptBankPickerSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let receipt: Receipt
+    let onLinked: () -> Void
+
+    @State private var picked: PurchaseBankCandidate?
+    @State private var submit = SubmitGuard()
+    @State private var failure: String?
+
+    var body: some View {
+        NavigationStack {
+            BankRowPickerList(
+                path: "/api/receipts/\(receipt.id)/bank-candidates",
+                emptyText: "Vapaita pankkitapahtumia ei löytynyt. Hae nimellä tai summalla."
+            ) {
+                LabeledContent(receipt.title) {
+                    if let amount = receipt.totalAmount { MoneyText(amount: amount).fontWeight(.semibold) }
+                }
+                if let failure { Text(failure).font(.subheadline).foregroundStyle(Theme.danger) }
+            } footer: {
+                Text("Valitse pankkitapahtuma, jolla tämä kuitti maksettiin. Parhaat osumat ovat ylimpänä.")
+            } pick: { candidate in
+                picked = candidate
+            }
+            .navigationTitle("Valitse pankkitapahtuma")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Sulje") { dismiss() } }
+            }
+            .confirmSheet(presenting: $picked) { candidate in
+                ConfirmRequest(
+                    title: "Kohdistetaanko · \(candidate.title)?",
+                    message: [candidate.detail, Money.format(candidate.amount)].filter { !$0.isEmpty }.joined(separator: " · "),
+                    confirmTitle: "Kohdista",
+                    isDestructive: false,
+                    onConfirm: { Task { await link(candidate) } }
+                )
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private func link(_ candidate: PurchaseBankCandidate) async {
+        struct Body: Encodable { let transactionId: String; let receiptId: String }
+        guard submit.begin() != nil else { return }
+        failure = nil
+        var succeeded = false
+        defer { submit.finish(succeeded: succeeded) }
+        do {
+            let _: Ignored = try await app.api.send(
+                "POST", "/api/matching/confirm", body: Body(transactionId: candidate.transactionId, receiptId: receipt.id)
+            )
+            succeeded = true
+            Haptics.success()
+            app.dataVersion += 1
+            onLinked()
+            dismiss()
+        } catch is CancellationError {
+        } catch {
+            // The server's sentence: the row was taken meanwhile, or already paid an invoice.
+            failure = error.userMessage
+            Haptics.error()
         }
     }
 }
