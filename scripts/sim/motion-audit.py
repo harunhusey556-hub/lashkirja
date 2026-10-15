@@ -34,6 +34,7 @@ HOLD_S = 0.25           # an intermediate screen stands at least this long
 GESTURE_HOLD_S = 0.8    # ... in a drag-driven step, where XCTest's finger pauses mid-drag
 # Steps driven by a drag (edge swipe-back, a sheet pulled down): a frame held mid-drag is the
 # finger, not the app. Matched by id so a "before" run's steps.json reads the same way.
+REFRESH = re.compile(r"refresh|online-again")
 GESTURE = re.compile(r"swipe|chat-close|zip-close|^kirjanpito-.*-back$|^pankki-feed-back$")
 QUIET_S = 0.6           # no new frame for this long: the step's motion is over
 SHIFT_AREA = 0.015      # share of the screen that must change after settling to call it a shift
@@ -257,6 +258,10 @@ def main():
                     sheet = f"{suite}/sheet-{s['id']}.png"  # the run's directory
                     contact_sheet(os.path.join(out, sheet), res, tap_s)
                     row.update({k: res[k] for k in ("intermediate", "flash", "shift", "jank_dropped", "settle_ms", "frames")})
+                    # Pull-to-refresh: the list sliding back up when the refresh ends is the
+                    # system's rebound, not a shift; content popping in still counts.
+                    if REFRESH.search(s["id"]):
+                        row["shift"] = [x for x in row["shift"] if not (x["what"] == "move" and x["dy_pt"] < 0)]
                     row["sheet"] = sheet
                 else:
                     row["error"] = res["error"]
