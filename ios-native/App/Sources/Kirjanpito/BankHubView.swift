@@ -61,6 +61,8 @@ struct BankHubView: View {
         .background(Theme.canvas)
         .navigationTitle("Pankki")
         .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
+        // Pushed here, not through the tab's path ("Yhdistä pankki"): the wait starts here too.
+        .onChange(of: pushed) { _, route in if let row = route?.perfRow { Perf.beginOpen(row) } }
         .refreshable {
             // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
             gate.mark(version: app.refreshEverything())

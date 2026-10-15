@@ -136,7 +136,7 @@ struct MyyntiView: View {
         .navigationTitle(scope.isEmpty ? "Myynti" : "Laskut")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showNew = true } label: { Label("Uusi lasku", systemImage: "plus") }
+                Button { Perf.beginOpen("laskuUusi"); showNew = true } label: { Label("Uusi lasku", systemImage: "plus") }
             }
         }
         .sheet(isPresented: $showNew, onDismiss: openCreated) {
@@ -157,6 +157,7 @@ struct MyyntiView: View {
             openedNew = true
             showNew = true
         }
+        .perfReady("myynti", state.value != nil)
         .task(id: "\(app.dataVersion)|\(listKey)") {
             guard state.value == nil || gate.isDue(key: listKey, version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.

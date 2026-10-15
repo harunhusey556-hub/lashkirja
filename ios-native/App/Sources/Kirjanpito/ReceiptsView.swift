@@ -225,6 +225,7 @@ struct ReceiptsView: View {
             gate.mark(key: String(describing: query), version: app.refreshEverything())
             await load(force: true)
         }
+        .perfReady("kuitit", receipts.value != nil)
         .task(id: ReloadKey(query: query, version: app.dataVersion)) {
             guard receipts.value == nil || gate.isDue(key: String(describing: query), version: app.dataVersion) else { return }
             // Each save under the capture cover bumps the version: the list stays as it was behind

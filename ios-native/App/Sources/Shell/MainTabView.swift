@@ -20,9 +20,9 @@ struct MainTabView: View {
                             .motionProbe("tab.\(item)")
                             .toolbar {
                                 ToolbarItemGroup(placement: .topBarTrailing) {
-                                    Button { app.prepareChat(); showAssistant = true } label: { Image(systemName: "bubble.left") }
+                                    Button { Perf.beginOpen("chat"); app.prepareChat(); showAssistant = true } label: { Image(systemName: "bubble.left") }
                                         .accessibilityLabel("Avustaja")
-                                    Button { showSettings = true } label: { Image(systemName: "person.crop.circle") }
+                                    Button { Perf.beginOpen("asetukset"); showSettings = true } label: { Image(systemName: "person.crop.circle") }
                                         .accessibilityLabel("Asetukset")
                                 }
                             }
@@ -68,6 +68,7 @@ struct MainTabView: View {
             // bad-link-over-sheet). On the same tab an animated route pushes as usual.
             var placing = Transaction()
             placing.disablesAnimations = !pending.animated || pending.tab != tab
+            if let row = pending.route.perfRow { Perf.beginOpen(row) }
             withTransaction(placing) {
                 tab = pending.tab
                 paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
@@ -84,8 +85,13 @@ struct MainTabView: View {
             showNewInvoice = false
             switch action {
             case .capture: app.pendingCapture = PendingCapture(transactionId: nil)
-            case .newInvoice: showNewInvoice = true
-            case .assistant: app.prepareChat(); showAssistant = true
+            case .newInvoice:
+                Perf.beginOpen("laskuUusi")
+                showNewInvoice = true
+            case .assistant:
+                Perf.beginOpen("chat")
+                app.prepareChat()
+                showAssistant = true
             }
         }
         .sheet(isPresented: $showNewInvoice) {
@@ -110,7 +116,10 @@ struct MainTabView: View {
 
     private func path(_ item: AppTab) -> Binding<[Route]> {
         // A link to a screen already open further back returns to it instead of stacking a copy.
-        Binding(get: { paths[item] ?? [] }, set: { paths[item] = NavigationStackRule.collapse($0) })
+        Binding(get: { paths[item] ?? [] }, set: { next in
+            if next.count > (paths[item] ?? []).count, let row = next.last?.perfRow { Perf.beginOpen(row) }
+            paths[item] = NavigationStackRule.collapse(next)
+        })
     }
 
     /// "Lisää" is an action, not a place: it opens the add sheet and stays on the current tab.
@@ -121,7 +130,11 @@ struct MainTabView: View {
             showAdd = true
             return
         }
-        if next != tab { Haptics.selection() }
+        if next != tab {
+            Haptics.selection()
+            Perf.beginTab(next.perfRow)
+            app.warmNext(from: next)
+        }
         EventLog.shared.log(.screen("tab.\(next)"))
         tab = next
     }

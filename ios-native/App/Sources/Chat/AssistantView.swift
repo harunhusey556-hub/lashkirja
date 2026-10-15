@@ -67,6 +67,7 @@ struct AssistantView: View {
                 if case .success(let url) = result { prepare { await ChatReceiptPrep.file(url) } }
             }
         }
+        .perfReady("chat", model?.historyLoaded == true)
         .task {
             guard model == nil else { return }
             let m = app.prepareChat()
@@ -79,7 +80,9 @@ struct AssistantView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    if model.messages.isEmpty {
+                    // Not while the stored conversation is still on its way: the greeting would
+                    // flash and then give way to the messages.
+                    if model.messages.isEmpty, model.historyLoaded || model.failure != nil {
                         VStack(spacing: 8) {
                             Image(systemName: "sparkles").font(.largeTitle).foregroundStyle(Theme.accent)
                             Text("Miten voin auttaa?").font(.headline).foregroundStyle(Theme.ink)

@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var app
     @State private var profile: Profile?
     @State private var profileFailure: String?
+    @State private var profileAsked = false
     @State private var lockEnabled = AppLock.shared.isEnabled
     @State private var confirmLogout = false
     @State private var savingAutoLink = false
@@ -12,8 +13,7 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-            // The profile Koti already loaded paints at once; without it the sections below would
-            // be pushed down by these when the server answered.
+            // The profile AppModel already holds (the launch prefetch read it) shows at once.
             if let profile = profile ?? app.profile {
                 Section {
                     NavigationLink { ProfileForm(original: profile, section: .person) { saved($0) } } label: {
@@ -81,9 +81,16 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Asetukset")
-        .task { await loadProfile() }
         // The lock lives outside SwiftUI state; read it again when coming back from its screen.
         .onAppear { lockEnabled = AppLock.shared.isEnabled }
+        .perfReady("asetukset", profile ?? app.profile != nil)
+        .task {
+            // Once per opening: the server's profile replaces the one shown, in place.
+            guard !profileAsked else { return }
+            profileAsked = true
+            if profile == nil { profile = app.profile }
+            await loadProfile()
+        }
         .confirmSheet(isPresented: $confirmLogout, title: "Kirjaudutaanko ulos?", confirmTitle: "Kirjaudu ulos") {
             Task { await app.logout() }
         }

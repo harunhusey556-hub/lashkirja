@@ -11,6 +11,8 @@ final class ChatModel {
     var conversationId: String?
     var title = "Avustaja"
     private(set) var messages: [ChatMessage] = []
+    /// The stored conversation has been read once (it may be empty).
+    private(set) var historyLoaded = false
     /// Where the current question stands (see `ChatTurn`); a failed one offers "Yritä uudelleen".
     private(set) var turn: ChatTurn = .idle
     var streaming: Bool { turn.isBusy }
@@ -137,9 +139,20 @@ final class ChatModel {
         do {
             var query: [String: String] = [:]
             if let conversationId { query["conversationId"] = conversationId }
-            let history: ChatHistory = try await app.api.get("/api/ai/chat", query: query)
+            // First open: the latest conversation as Koti's prefetch left it, at once. The server's
+            // always follows (a chat is not marked stale by the app's writes).
+            if !historyLoaded, conversationId == nil, messages.isEmpty,
+               let cached: ChatHistory = await app.cachedValue("/api/ai/chat", query: query),
+               loads.isCurrent(generation), !streaming, pendingReceipts.isEmpty, !historyLoaded {
+                messages = cached.messages.uniquedById()
+                historyLoaded = true
+                conversationId = cached.conversation?.id
+                title = cached.conversation?.title ?? "Avustaja"
+            }
+            let history: ChatHistory = try await app.cachedGet("/api/ai/chat", query: query, force: true)
             guard loads.isCurrent(generation), !streaming, pendingReceipts.isEmpty else { return }
             messages = history.messages.uniquedById()
+            historyLoaded = true
             conversationId = history.conversation?.id
             title = history.conversation?.title ?? "Avustaja"
         } catch is CancellationError {

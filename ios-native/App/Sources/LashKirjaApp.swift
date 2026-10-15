@@ -17,6 +17,7 @@ struct LashKirjaApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        Perf.beginLaunch()
         let app = AppModel()
         _app = State(initialValue: app)
         // Before launch finishes: a notification tap that launched the app must find its delegate.

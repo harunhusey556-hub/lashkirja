@@ -1,0 +1,110 @@
+name: iOS perf walk
+
+# The w35 timing walk (PerfWalkTests): the instrumented base (native + signposts only) and this
+# branch, one after the other on the same runner and simulator, against the same throwaway demo
+# API. Each walk: a warm-up launch, then three launches through every tab and the measured
+# screens. Figures: the artifact's <variant>/medians.txt (scripts/sim/perf-medians.py).
+on:
+  push:
+    branches: ["fix/w35-preload-perf"]
+    paths: [".github/workflows/ios-perf-walk.yml", "scripts/sim/perf-medians.py", "ios-native/App/Tests/LashKirjaUITests/PerfWalkTests.swift"]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Commit measured as 'before' (native + signposts)"
+        required: false
+        default: "4d1f218"
+      instrumentation:
+        description: "Signpost-only commits laid on the base (space-separated)"
+        required: false
+        default: "c84046c"
+
+jobs:
+  walk:
+    name: Perf walk (before / after)
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tools
+        run: |
+          brew install xcodegen xcbeautify
+          xcodebuild -version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Demo API
+        working-directory: app
+        env:
+          DATABASE_URL: "file:${{ github.workspace }}/app/perf-demo.db"
+          SESSION_SECRET: "ci-only-secret-not-used-anywhere-real-32plus"
+          CLOUD_AI_ENABLED: "false"
+          ENABLEBANKING_ENABLED: "false"
+          MAIL_TRANSPORT: "json"
+        run: |
+          set -euo pipefail
+          npm ci
+          npx prisma generate
+          rm -f perf-demo.db
+          npx prisma migrate deploy
+          npx tsx scripts/demo-seed.ts --ci
+          npm run build
+          nohup npx next start -H 127.0.0.1 -p 3999 > api-server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null "http://127.0.0.1:3999/login"; then break; fi
+            sleep 1
+          done
+          curl -s -o /dev/null -w "GET /login -> %{http_code}\n" "http://127.0.0.1:3999/login"
+      - name: Simulator
+        run: |
+          DEST=$(xcrun simctl list devices available -j | python3 -c 'import sys,json
+          d=json.load(sys.stdin)["devices"]
+          ids=[x["udid"] for k,v in sorted(d.items(), reverse=True) if "iOS" in k for x in v if x["name"].startswith("iPhone")]
+          print(ids[0] if ids else "")')
+          echo "Simulator: $DEST"
+          echo "SIM_UDID=$DEST" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEST" || true
+          xcrun simctl bootstatus "$DEST" -b
+      - name: Walk before and after
+        env:
+          BASE: ${{ inputs.base || '4d1f218' }}
+          INSTRUMENTATION: ${{ inputs.instrumentation || 'c84046c' }}
+        run: |
+          set -u
+          git worktree add --detach "$RUNNER_TEMP/before" "$BASE"
+          # Signpost hooks added after the base: the same intervals in both variants, no fixes.
+          for c in $INSTRUMENTATION; do git -C "$RUNNER_TEMP/before" cherry-pick --no-commit "$c"; done
+          # The base gets this branch's walk, so both variants are driven the same way.
+          cp ios-native/App/Tests/LashKirjaUITests/PerfWalkTests.swift "$RUNNER_TEMP/before/ios-native/App/Tests/LashKirjaUITests/"
+          for variant in before after; do
+            if [ "$variant" = before ]; then src="$RUNNER_TEMP/before"; else src="$GITHUB_WORKSPACE"; fi
+            out="$GITHUB_WORKSPACE/build-perf/$variant"
+            mkdir -p "$out"
+            # A fresh install: the other variant's disk cache must not paint this one's screens.
+            xcrun simctl uninstall "$SIM_UDID" fi.tiyouba.lashkirja || true
+            (cd "$src/ios-native/App" && xcodegen generate)
+            start=$(date '+%Y-%m-%d %H:%M:%S')
+            (cd "$src/ios-native/App" && set -o pipefail && TEST_RUNNER_LK_SHOT_DIR="$out" xcodebuild test \
+              -project LashKirja.xcodeproj -scheme LashKirja-UITests -destination "id=$SIM_UDID" \
+              -derivedDataPath "$RUNNER_TEMP/dd-$variant" -only-testing:LashKirjaUITests/PerfWalkTests \
+              CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
+              API_BASE_URL=http://127.0.0.1:3999 | xcbeautify --renderer github-actions) || echo "::warning::walk $variant did not pass"
+            xcrun simctl spawn "$SIM_UDID" log show --start "$start" --style ndjson \
+              --predicate 'subsystem == "fi.lashkirja.perf" AND category == "Waits"' > "$out/perf.ndjson"
+            echo "== $variant"
+            python3 scripts/sim/perf-medians.py "$out"
+            grep -E "MISS|FAIL" "$out/notes.txt" || true
+          done
+          { echo "## Before"; echo '```'; cat build-perf/before/medians.txt; echo '```'
+            echo "## After"; echo '```'; cat build-perf/after/medians.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-walk
+          path: |
+            build-perf
+            app/api-server.log

@@ -29,7 +29,7 @@ struct AddSheet: View {
                 Button { importing = true } label: { Label("Tuo tiliote", systemImage: "square.and.arrow.down") }
                     .disabled(busy)
                 // A sales invoice to a customer; a supplier's bill comes in through "Lisää tiedosto".
-                Button { newInvoice = true } label: { Label("Uusi myyntilasku", systemImage: "doc.text") }
+                Button { Perf.beginOpen("laskuUusi"); newInvoice = true } label: { Label("Uusi myyntilasku", systemImage: "doc.text") }
                 if hasMailbox == false {
                     Button { openEmailImport() } label: { Label("Yhdistä sähköposti", systemImage: "envelope.badge") }
                         .disabled(busy)

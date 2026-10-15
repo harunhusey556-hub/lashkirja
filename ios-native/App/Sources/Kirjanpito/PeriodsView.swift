@@ -50,13 +50,13 @@ struct PeriodsView: View {
             monthPicker
             if let data = status.value, data.month == month {
                 if let banner = status.banner {
-                    Section { RefreshFailureBanner(failure: banner, retry: loadMonth) }
+                    Section { RefreshFailureBanner(failure: banner, retry: { await loadMonth() }) }
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
                 monthSections(data)
             } else {
-                ScreenStateView(state: status, retry: loadMonth) { (_: PeriodMonthStatus) in EmptyView() }
+                ScreenStateView(state: status, retry: { await loadMonth() }) { (_: PeriodMonthStatus) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
             lockSections
@@ -65,9 +65,10 @@ struct PeriodsView: View {
         .background(Theme.canvas)
         .navigationTitle("Kuukauden sulku")
         .refreshable {
-            await fetchMonth(force: true)
-            await fetchLock(force: true)
+            await loadMonth(force: true)
+            await loadLock(force: true)
         }
+        .perfReady("kaudet", status.value != nil)
         .task(id: "\(month)|\(app.dataVersion)") { await loadMonth() }
         .task(id: app.dataVersion) { await loadLock() }
         .fullScreenCover(item: $captureFor, onDismiss: { Task { await loadMonth() } }) { target in
@@ -331,22 +332,19 @@ struct PeriodsView: View {
         return PeriodClose.confirmMessage(facts(data), earlierOpen: earlierOpen)
     }
 
-    private func loadMonth() async { await fetchMonth(force: false) }
-
-    /// Through the app's cache (KirjanpitoView warms the first month): a month seen before paints
-    /// at once instead of a spinner that the month's sections then push down.
-    private func fetchMonth(force: Bool) async {
+    private func loadMonth(force: Bool = false) async {
         let key = month
         // Another month's figures must not stay under this month's heading while it loads.
-        if status.value?.month != key {
-            status.restart()
-            if let cached: PeriodMonthStatus = await app.cachedValue("/api/dashboard/month", query: ["month": key]), month == key {
-                if cached.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: key, kind: cached.vatPeriod),
-                   let report: AlvReport = await app.cachedValue("/api/alv", query: ["period": period]) {
-                    vat = (period, vatFacts(report), report)
-                }
-                status.succeed(cached)
+        if status.value?.month != key { status.restart() }
+        // The month's last checklist at once (Kirjanpito warms it), with its VAT row from the same
+        // cache so the row does not push the sections down later; the server's replaces both in place.
+        if status.value == nil, let cached: PeriodMonthStatus = await app.cachedValue("/api/dashboard/month", query: ["month": key]),
+           key == month, status.value == nil {
+            if cached.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: key, kind: cached.vatPeriod),
+               let report: AlvReport = await app.cachedValue("/api/alv", query: ["period": period]) {
+                vat = (period, vatFacts(report), report)
             }
+            status.succeed(cached)
         }
         status.begin()
         do {
@@ -444,13 +442,13 @@ struct PeriodsView: View {
                 precheckSection(precheck)
             }
             if let banner = lockedThrough.banner {
-                Section { RefreshFailureBanner(failure: banner, retry: loadLock) }
+                Section { RefreshFailureBanner(failure: banner, retry: { await loadLock() }) }
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
             }
         case .failed(let failure):
             Section {
-                LoadFailureView(failure: failure, retry: loadLock)
+                LoadFailureView(failure: failure, retry: { await loadLock() })
                     .listRowBackground(Color.clear)
             } header: {
                 Text("Suljetut kaudet")
@@ -551,9 +549,7 @@ struct PeriodsView: View {
         }
     }
 
-    private func loadLock() async { await fetchLock(force: false) }
-
-    private func fetchLock(force: Bool) async {
+    private func loadLock(force: Bool = false) async {
         if lockedThrough.value == nil, let cached: PeriodLockState = await app.cachedValue("/api/period-lock") {
             lockedThrough.succeed(cached)
         }
