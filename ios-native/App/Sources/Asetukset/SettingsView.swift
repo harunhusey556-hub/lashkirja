@@ -127,7 +127,7 @@ struct SettingsView: View {
     /// PATCH /api/profile answers without the mailboxes; keep the ones already loaded.
     private func saved(_ new: Profile) {
         var merged = new
-        if merged.imapAccounts == nil { merged.imapAccounts = profile?.imapAccounts }
+        if merged.imapAccounts == nil { merged.imapAccounts = (profile ?? app.profile)?.imapAccounts }
         profile = merged
         app.profileChanged(merged)
     }

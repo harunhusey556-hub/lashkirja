@@ -453,6 +453,9 @@ private func list(_ ids: [String], extra: String = "") -> ReceiptList {
         #expect(requests.contains(PrefetchRequest(path: "/api/receipts/counts", query: kuitit.countsQuery())))
         #expect(requests.contains(PrefetchRequest(path: "/api/receipts", query: ["reviewStatus": "pending", "kind": "receipt"])))
         #expect(requests.contains(PrefetchRequest(path: "/api/receipts", query: ["reviewStatus": "rejected"])))
+        #expect(requests.contains(PrefetchRequest(path: "/api/invoices", query: [:])))
+        #expect(requests.contains(PrefetchRequest(path: "/api/invoices/counts", query: [:], persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/reports/profit-loss", query: ["from": "2026-01", "to": "2026-12"], persist: false)))
         #expect(requests.contains(PrefetchRequest(path: "/api/bank-accounts")))
         #expect(requests.last == PrefetchRequest(path: "/api/statements"))
     }

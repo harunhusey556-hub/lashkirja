@@ -336,30 +336,41 @@ struct PeriodsView: View {
         let key = month
         // Another month's figures must not stay under this month's heading while it loads.
         if status.value?.month != key { status.restart() }
-        // The month's last checklist at once (Kirjanpito warms it); the server's replaces it in place.
+        // The month's last checklist at once (Kirjanpito warms it), with its VAT row from the same
+        // cache so the row does not push the sections down later; the server's replaces both in place.
         if status.value == nil, let cached: PeriodMonthStatus = await app.cachedValue("/api/dashboard/month", query: ["month": key]),
            key == month, status.value == nil {
+            if cached.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: key, kind: cached.vatPeriod),
+               let report: AlvReport = await app.cachedValue("/api/alv", query: ["period": period]) {
+                vat = (period, vatFacts(report), report)
+            }
             status.succeed(cached)
         }
         status.begin()
         do {
             let data: PeriodMonthStatus = try await app.cachedGet("/api/dashboard/month", query: ["month": key], force: force)
             try Task.checkCancellation()
-            status.succeed(data)
+            // The VAT row's figures before the month's sections show: one swap, not the sections
+            // and then the row and the note above it changing (motion audit kirjanpito-periods-open).
             if data.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: key, kind: data.vatPeriod) {
                 if let report: AlvReport = try? await app.cachedGet("/api/alv", query: ["period": period], force: force) {
-                    let facts = PeriodClose.vat(filedAt: report.filing?.filedAt, paidAt: report.filing?.paidAt,
-                                                filedAmount: report.filing?.filedAmount,
-                                                amount: report.field308.amount, isRefund: report.field308.isRefund)
-                    vat = (period, facts, report)
+                    vat = (period, vatFacts(report), report)
                 }
             } else {
                 vat = nil
             }
+            try Task.checkCancellation()
+            status.succeed(data)
         } catch is CancellationError {
         } catch {
             status.fail(error)
         }
+    }
+
+    private func vatFacts(_ report: AlvReport) -> PeriodClose.Vat {
+        PeriodClose.vat(filedAt: report.filing?.filedAt, paidAt: report.filing?.paidAt,
+                        filedAmount: report.filing?.filedAmount,
+                        amount: report.field308.amount, isRefund: report.field308.isRefund)
     }
 
     private func closeMonth() async {

@@ -41,6 +41,19 @@ struct InvoiceDetailView: View {
     /// The credit note made by the credit sheet: pushed once the sheet has closed.
     @State private var creditedId: String?
 
+    /// `preview` (the app's `invoicePreview`) is on screen in the first frame: painted from `load`
+    /// instead, after an await, the push showed a spinner first (motion audit lasku-open).
+    init(invoiceId: String, preview: InvoicePreview? = nil) {
+        self.invoiceId = invoiceId
+        guard let preview else { return }
+        var shown = ScreenLoad<Invoice>()
+        shown.succeed(preview.detail.invoice)
+        _state = State(initialValue: shown)
+        _duplicates = State(initialValue: preview.detail.paymentDuplicates ?? [])
+        _reminder = State(initialValue: preview.reminder)
+        _tab = State(initialValue: InvoiceDetailLayout.initialTab(overdue: preview.detail.invoice.displayStatus == .overdue))
+    }
+
     enum SheetKind: Identifiable { case payment, card, send, pdf, edit, reminder, reminderPdf, close, credit; var id: Self { self } }
     enum ConfirmKind: Identifiable, Hashable { case delete, markSent, refund(Invoice.Payment); var id: Self { self } }
 
@@ -128,7 +141,7 @@ struct InvoiceDetailView: View {
             }
         }
         .confirmSheet(presenting: $confirm) { kind in confirmRequest(kind) }
-        .navigationDestination(item: $pushedId) { id in InvoiceDetailView(invoiceId: id) }
+        .navigationDestination(item: $pushedId) { id in InvoiceDetailView(invoiceId: id, preview: app.invoicePreview(id)) }
     }
 
     private func confirmRequest(_ kind: ConfirmKind) -> ConfirmRequest {
@@ -462,9 +475,15 @@ struct InvoiceDetailView: View {
     private func load(force: Bool) async {
         let timing = ScreenTiming("Lasku")
         let path = "/api/invoices/\(invoiceId)"
+        if state.value != nil { timing.painted(fromCache: true) }
         if state.value == nil, let cached: InvoiceDetailResponse = await app.cachedValue(path) {
             state.succeed(cached.invoice)
             duplicates = cached.paymentDuplicates ?? []
+            // The reminder tab and its button come with the cached invoice, not a beat later.
+            if cached.invoice.displayStatus == .overdue,
+               let preview: ReminderPreviewResponse = await app.cachedValue("\(path)/reminders") {
+                reminder = preview.reminder
+            }
             timing.painted(fromCache: true)
         }
         state.begin()
@@ -474,13 +493,15 @@ struct InvoiceDetailView: View {
             timing.dataReady()
             duplicates = response.paymentDuplicates ?? []
             prefetchPdf(response.invoice)
-            await loadCardPayments(response.invoice)
+            // The reminder first: it decides the opening tab's content and the main button.
             if response.invoice.displayStatus == .overdue {
                 await loadReminder()
             } else {
                 reminder = nil
                 reminderFailed = false
             }
+            app.rememberInvoiceDetail(response, reminder: reminder)
+            await loadCardPayments(response.invoice)
         } catch is CancellationError {
         } catch {
             state.fail(error)
@@ -627,7 +648,7 @@ struct InvoiceDetailView: View {
 
     private func loadReminder() async {
         do {
-            let response: ReminderPreviewResponse = try await app.api.get("/api/invoices/\(invoiceId)/reminders")
+            let response: ReminderPreviewResponse = try await app.cachedGet("/api/invoices/\(invoiceId)/reminders")
             reminder = response.reminder
             reminderFailed = false
         } catch is CancellationError {

@@ -145,7 +145,7 @@ struct MyyntiView: View {
         .sheet(isPresented: $showMatch) {
             BankMatchSheet { message in notice = message }
         }
-        .navigationDestination(item: $openedInvoiceId) { id in InvoiceDetailView(invoiceId: id) }
+        .navigationDestination(item: $openedInvoiceId) { id in InvoiceDetailView(invoiceId: id, preview: app.invoicePreview(id)) }
         .navigationDestination(item: $shortcut) { target in
             switch target {
             case .customers: CustomersView()
@@ -287,6 +287,7 @@ struct MyyntiView: View {
             let list: InvoiceList = try await app.cachedGet("/api/invoices", query: listQuery, persist: listQuery.isEmpty)
             state.succeed(list)
             timing.dataReady()
+            warmDetails(list.invoices)
             app.indexForSpotlight(list.invoices.compactMap {
                 SpotlightEntry.invoice(id: $0.id, number: $0.number, customerName: $0.customer.name,
                                        gross: $0.gross, statusLabel: $0.displayStatus.label)
@@ -295,6 +296,23 @@ struct MyyntiView: View {
         catch is CancellationError {}
         catch { state.fail(error) }
         if let fresh = await fresh { counts = fresh }
+    }
+
+    /// The first rows' details (and an overdue one's reminder) into the cache and the app's
+    /// previews, so opening one paints the invoice at once instead of a spinner the detail then replaces.
+    private func warmDetails(_ invoices: [Invoice]) {
+        let app = self.app
+        let first = Array(visible(invoices).prefix(5))
+        Task {
+            for invoice in first {
+                let detail: InvoiceDetailResponse? = try? await app.cachedGet("/api/invoices/\(invoice.id)")
+                var reminder: ReminderPreviewResponse?
+                if invoice.displayStatus == .overdue {
+                    reminder = try? await app.cachedGet("/api/invoices/\(invoice.id)/reminders")
+                }
+                if let detail { app.rememberInvoiceDetail(detail, reminder: reminder?.reminder) }
+            }
+        }
     }
 
     /// Per-status counts for the chips; counted by the server, so the list's row cap cannot skew them.

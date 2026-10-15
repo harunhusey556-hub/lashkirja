@@ -59,6 +59,22 @@ struct KirjanpitoView: View {
         }
         .perfReady("kirjanpito", counts != nil)
         .task(id: app.dataVersion) {
+            // Kuukauden sulku's, ALV-ilmoitus's and Ostolaskut's first screens, warmed so they open on their content.
+            let app = self.app
+            Task {
+                let month = PeriodClose.startMonth(nil, current: MonthKey.current())
+                _ = try? await app.cachedGet("/api/dashboard/month", query: ["month": month]) as PeriodMonthStatus
+                _ = try? await app.cachedGet("/api/period-lock") as PeriodLockState
+                // The return AlvView opens on with no period given (its F13 rule).
+                let vatKind = VatKind(profile: await app.cachedProfile()?.vatPeriod)
+                let vatPeriod = VatDue.nextDueKey(today: APIDate.dayString(Date()), kind: vatKind)
+                _ = try? await app.cachedGet("/api/alv", query: ["period": vatPeriod]) as AlvReport
+                // Ostolaskut's first screen (no chip) and the rows above its list.
+                _ = try? await app.cachedGet("/api/purchase-invoices", persist: true) as PurchaseInvoiceTaggedList
+                _ = try? await app.cachedGet("/api/purchase-invoices/counts") as PurchaseInvoiceCountsResponse
+                _ = try? await app.cachedGet("/api/recurring-purchases") as RecurringPurchaseList
+                _ = try? await app.cachedGet("/api/purchase-invoices/match") as PurchaseSuggestionList
+            }
             guard counts == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion
