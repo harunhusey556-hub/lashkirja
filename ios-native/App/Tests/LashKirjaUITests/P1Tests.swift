@@ -49,4 +49,25 @@ final class P1Tests: WalkTestCase {
         app.buttons["Avustaja"].firstMatch.tap(); taps += 1; sleep(2)
         measure("open AI assistant", reached: app.textFields.firstMatch.exists || app.textViews.firstMatch.exists)
     }
+    /// P1 01's flake (OPEN-ISSUES row 20b): the tap on "Uusi lasku" landing while Myynti is still
+    /// painting its first list. No settling time after the tab, and the form opened a second time
+    /// after it was closed, so a tap that was swallowed once cannot hide behind the next one.
+    func test10_NewInvoiceRightAfterTheTab() {
+        app.tabBars.buttons["Myynti"].firstMatch.tap(); taps += 1
+        let new = app.buttons["Uusi lasku"].firstMatch
+        XCTAssertTrue(new.waitForExistence(timeout: 15), "no Uusi lasku on Myynti")
+        new.tap(); taps += 1
+        let form = app.navigationBars["Uusi lasku"]
+        let first = form.waitForExistence(timeout: 15)
+        check("Uusi lasku opens on the first tap right after the tab", first)
+        XCTAssertTrue(first, "the first tap on Uusi lasku did not open the form")
+        app.navigationBars["Uusi lasku"].buttons["Peruuta"].firstMatch.tap()
+        if app.buttons["Hylkää muutokset"].waitForExistence(timeout: 2) { app.buttons["Hylkää muutokset"].tap() }
+        XCTAssertTrue(form.waitForNonExistence(timeout: 10), "the form did not close")
+        new.tap(); taps += 1
+        let second = form.waitForExistence(timeout: 15)
+        check("Uusi lasku opens again after the form was closed", second)
+        XCTAssertTrue(second, "the second tap on Uusi lasku did not open the form")
+        measure("create invoice right after the tab (Myynti)", reached: first && second)
+    }
 }
