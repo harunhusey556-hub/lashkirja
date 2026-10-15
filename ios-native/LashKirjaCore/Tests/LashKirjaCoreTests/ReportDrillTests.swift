@@ -12,6 +12,25 @@ import Foundation
     #expect(ReportDrill.target(kind: .expense, category: "Luokittelematon", year: "2026") == .receipts(period: "2026", tab: "meno", category: ""))
 }
 
+/// raportit-drill-open: Raportit warms the cache with exactly the query the pushed Kuitit asks
+/// first (Route.forDrill → ReceiptsView(month:tab:category:drilled:) → `.drilled`), so the list
+/// paints with the push. Another query would miss the cache and swap grey rows for the answer.
+@Test func aReceiptsDrillWarmsTheListItOpens() throws {
+    let category = ReportDrill.target(kind: .expense, category: "tarvikkeet", year: "2026")
+    #expect(category.receiptQuery == .drilled(month: "2026", tab: .meno, category: "tarvikkeet"))
+    #expect(ReportDrill.receipts(period: "2026", tab: "", category: "").receiptQuery == .drilled(month: "2026"))
+    #expect(ReportDrill.receiptsMissingVat(period: "2026").receiptQuery == .drilled(month: "2026", missingVat: true))
+    let query = try #require(category.receiptQuery)
+    #expect(ReceiptListPaging.firstQuery(query)["month"] == "2026")
+    #expect(ReceiptListPaging.firstQuery(query)["category"] == "tarvikkeet")
+    // A drilled list remembers nothing of the last visit's filters.
+    #expect(query.search.isEmpty && query.sort == .dateDesc && query.source == .all && !query.missingVat)
+    // Invoices and the other lists are not Kuitit.
+    #expect(ReportDrill.invoices(period: "2026", status: .all).receiptQuery == nil)
+    #expect(ReportDrill.bankFeed(month: "2026-01").receiptQuery == nil)
+    #expect(ReportDrill.purchaseInvoices.receiptQuery == nil)
+}
+
 private func row(_ name: String, count: Int) -> ProfitLoss.Category {
     ProfitLoss.Category(category: name, gross: 0, vat: 0, net: 0, count: count)
 }

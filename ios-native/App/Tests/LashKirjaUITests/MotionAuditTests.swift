@@ -112,12 +112,13 @@ final class MotionAuditTests: WalkTestCase {
 
     // MARK: Moves (each returns whether it could act, never waits for the result)
 
-    func element(_ pred: String, _ arg: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(format: pred, arg)).firstMatch
+    func element(_ pred: String, _ arg: String, in scope: XCUIElement? = nil) -> XCUIElement {
+        (scope ?? app).descendants(matching: .any).matching(NSPredicate(format: pred, arg)).firstMatch
     }
-    /// A visible element by label, scrolled to beforehand (outside the recording), or nil.
-    func find(_ pred: String, _ arg: String, scrolls: Int = 6) -> XCUIElement? {
-        let e = element(pred, arg)
+    /// A visible element by label (only under `scope` when given), scrolled to beforehand (outside
+    /// the recording), or nil.
+    func find(_ pred: String, _ arg: String, scrolls: Int = 6, in scope: XCUIElement? = nil) -> XCUIElement? {
+        let e = element(pred, arg, in: scope)
         _ = e.waitForExistence(timeout: 10)
         for attempt in 0...scrolls {
             // Without scrolling (toolbar buttons, sheets) any hittable match will do.
@@ -276,8 +277,11 @@ final class MotionAuditTests: WalkTestCase {
             return true
         }
         sleep(2)
-        if let drill = find("label BEGINSWITH %@", "Myynti", scrolls: 2) {
-            step("raportit-drill-open", from: "Raportit", to: "drill-down", seconds: 5) { press(drill) }
+        // A figure of the report, looked for in its list: over the whole app "Myynti" found the tab
+        // bar's button, and the step measured a tab switch instead of a drill-down.
+        if let drill = find("label BEGINSWITH %@", "Menot", scrolls: 2, in: app.collectionViews.firstMatch) {
+            step("raportit-drill-open", from: "Raportit", to: "drill-down", seconds: 5,
+                 reached: { self.app.tabBars.buttons["Raportit"].isSelected && self.backButton() != nil }) { press(drill) }
             sleep(2)
             step("raportit-drill-swipeback", from: "drill-down", to: "Raportit") { edgeSwipeBack(); return true }
         }
