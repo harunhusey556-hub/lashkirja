@@ -8,12 +8,13 @@ final class PerfWalkTests: WalkTestCase {
     func testPerfWalk() {
         // Round 0 is the warm-up (first launch after install, cold server): not a figure.
         for round in 0...3 {
+            // When the round starts: perf-walk.sh files the app's log lines under it.
+            note("ROUND \(round) \(Date().timeIntervalSince1970)")
             app.terminate()
             app.launch()
             _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
             // As an owner would: a moment on Koti before the first tap.
             sleep(3)
-            note("ROUND \(round)")
             walk()
         }
     }
