@@ -4,7 +4,8 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { buildReceiptMatchViews } from "@/lib/matching";
 import { centsToEuros, eurosToCents } from "@/lib/money";
-import { isoDateSchema, isoDateToUtc, nonnegativeMoneySchema } from "@/lib/validation";
+import { isoDateSchema, isoDateToUtc, moneySchema } from "@/lib/validation";
+import { creditSigned, creditSignedVatLines } from "@/lib/ai";
 import {
   noStoreJson,
   rejectCrossSite,
@@ -26,16 +27,18 @@ import {
 import { fileReceiptAsPurchaseInvoice } from "@/lib/purchase-invoices";
 import { euroConversionForSave, withFxRecorded } from "@/lib/fx-rates";
 
+// Signed: a credit note may arrive with its printed minus. Only a credit note
+// may be negative (checked against the stored reading below).
 const vatLineSchema = z.object({
   rate: z.number().finite().min(0).max(100),
-  amount: nonnegativeMoneySchema,
+  amount: moneySchema,
 });
 
 const saveSchema = z.object({
   uploadId: z.string().uuid(),
   vendor: z.string().trim().max(300).nullish(),
   date: isoDateSchema.nullish(),
-  totalAmount: nonnegativeMoneySchema.nullish(),
+  totalAmount: moneySchema.nullish(),
   vatDetails: z.array(vatLineSchema).max(20).nullish(),
   category: z.string().trim().max(100).nullish(),
   notes: z.string().trim().max(500).nullish(),
@@ -43,7 +46,7 @@ const saveSchema = z.object({
   reference: z.string().trim().max(40).nullish(),
   invoiceNumber: z.string().trim().max(40).nullish(),
   currency: currencySchema.optional(),
-  originalAmount: nonnegativeMoneySchema.nullish(),
+  originalAmount: moneySchema.nullish(),
   vatTreatment: z.enum(PURCHASE_VAT_TREATMENTS).optional(),
   forceDuplicate: z.boolean().default(false),
   // W8: the upload queue asks the server to approve a complete reading in the
@@ -62,7 +65,18 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   // Let ZodError bubble up to the global error handler
   const parsed = saveSchema.parse(await req.json());
-  const body = parsed;
+
+  // The stored reading says whether this is a credit note. The form shows its
+  // amounts as positive sizes; it is booked negative whichever way they arrive.
+  const staged = await prisma.upload.findFirst({
+    where: { id: parsed.uploadId, userId: session.userId!, purpose: "receipt" },
+    select: { extractedJson: true },
+  });
+  const creditNote = storedDocumentKind(staged?.extractedJson ?? null).isCreditNote;
+  const negative = [parsed.totalAmount, parsed.originalAmount, ...(parsed.vatDetails ?? []).map((line) => line.amount)]
+    .some((amount) => amount != null && amount < 0);
+  if (negative && !creditNote) throw new ValidationError("Negatiivinen summa kirjataan vain hyvityslaskulle.");
+  const body = creditNote ? amountSizes(parsed) : parsed;
 
   // The form refuses a VAT larger than the total or an unknown rate; an API client is held to the same rule.
   const vatProblem = vatLinesProblem(body.vatDetails ?? [], body.totalAmount);
@@ -75,7 +89,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     const existingDuplicate = await findLookAlikeReceipt(prisma, session.userId!, {
       vendor: sanitizeText(body.vendor),
       date: isoDateToUtc(body.date),
-      totalAmountCents: eurosToCents(body.totalAmount),
+      totalAmountCents: creditSigned(eurosToCents(body.totalAmount), creditNote),
     });
     if (existingDuplicate) {
       return NextResponse.json({ 
@@ -91,10 +105,6 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   // printed or the ECB's. Looked up before the transaction: no network inside a write lock.
   let fx: Awaited<ReturnType<typeof euroConversionForSave>> = null;
   if (body.totalAmount == null) {
-    const staged = await prisma.upload.findFirst({
-      where: { id: body.uploadId, userId: session.userId!, purpose: "receipt" },
-      select: { extractedJson: true },
-    });
     fx = await euroConversionForSave(body, staged?.extractedJson ?? null);
   }
 
@@ -128,14 +138,19 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       const recorded = fx ? withFxRecorded(upload.extractedJson, fx) : null;
       if (recorded) await db.upload.update({ where: { id: upload.id }, data: { extractedJson: recorded } });
 
+      const foreign = foreignColumns(body, upload.extractedJson);
       const created = await db.receipt.create({
         data: {
           userId: session.userId!,
           uploadId: upload.id,
           vendor: sanitizeText(body.vendor),
           date: body.date ? isoDateToUtc(body.date) : null,
-          totalAmountCents: fx ? eurosToCents(fx.totalAmount) : body.totalAmount == null ? null : eurosToCents(body.totalAmount),
-          vatDetails: body.vatDetails?.length ? JSON.stringify(body.vatDetails) : null,
+          totalAmountCents: fx
+            ? creditSigned(eurosToCents(fx.totalAmount), creditNote)
+            : body.totalAmount == null
+              ? null
+              : creditSigned(eurosToCents(body.totalAmount), creditNote),
+          vatDetails: body.vatDetails?.length ? JSON.stringify(creditSignedVatLines(body.vatDetails, creditNote)) : null,
           category: sanitizeText(body.category),
           // A look-alike the client chose to keep says so, or two identical rows wait side by side.
           notes: body.forceDuplicate ? withDuplicateNote(sanitizeText(body.notes)) : sanitizeText(body.notes),
@@ -149,7 +164,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           // never marks the user's own fields as uncertain (V11).
           confidence: upload.extractionSource === "manual" ? null : upload.confidence,
           rawText: upload.rawText,
-          ...foreignColumns(body, upload.extractedJson),
+          ...foreign,
+          originalAmountCents:
+            foreign.originalAmountCents == null ? null : creditSigned(foreign.originalAmountCents, creditNote),
         },
       });
       if (!body.autoApprove) return created;
@@ -161,6 +178,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         documentType: reading.documentType,
         // forceDuplicate = the client was told about a look-alike and insisted.
         duplicate: body.forceDuplicate,
+        isCreditNote: reading.isCreditNote,
       });
     });
 
@@ -250,3 +268,13 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 });
 
 class UploadClaimError extends Error {}
+
+/** A credit note's amounts as sizes, however they were sent; the sign is put back when the row is written. */
+function amountSizes<T extends z.infer<typeof saveSchema>>(body: T): T {
+  return {
+    ...body,
+    totalAmount: body.totalAmount == null ? body.totalAmount : Math.abs(body.totalAmount),
+    originalAmount: body.originalAmount == null ? body.originalAmount : Math.abs(body.originalAmount),
+    vatDetails: body.vatDetails?.map((line) => ({ ...line, amount: Math.abs(line.amount) })) ?? body.vatDetails,
+  };
+}

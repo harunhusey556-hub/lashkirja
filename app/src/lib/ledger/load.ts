@@ -64,7 +64,10 @@ export async function loadLedgerDocuments(userId: string, end: Date): Promise<So
       label: `${receipt.type === "tulo" ? "Tulo" : "Kuitti"} ${receipt.vendor ?? ""}`.trim(),
       type: receipt.type,
       category: receipt.category,
-      grossCents: Math.abs(receipt.totalAmountCents),
+      // Signed: a credit note's receipt (negative total and VAT lines) posts the mirror
+      // of a purchase, as the VAT return counts it. Its size with negative VAT lines
+      // booked a larger expense instead of a smaller one.
+      grossCents: receipt.totalAmountCents,
       vatLines: parseVatDetails(receipt.vatDetails),
       vatTreatment: receipt.vatTreatment,
       paidFromBank: Boolean(receipt.linkedTransaction || receipt.sourceTransactionId),

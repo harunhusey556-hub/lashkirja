@@ -2,7 +2,7 @@ import { ImapFlow, SearchObject } from "imapflow";
 import { simpleParser } from "mailparser";
 import { prisma } from "./db";
 import { decrypt } from "./encryption";
-import { extractReceipt, type ExtractedReceipt } from "./ai";
+import { creditSigned, creditSignedVatLines, extractReceipt, type ExtractedReceipt } from "./ai";
 import { fileReceiptAsPurchaseInvoice } from "./purchase-invoices";
 import { runMatching } from "./matching";
 import { writePrivateUpload } from "./storage";
@@ -173,6 +173,8 @@ export async function storeEmailDocument(input: {
     },
   });
 
+  const credit = extraction.isCreditNote;
+  const foreign = foreignFieldsFromExtraction(extraction);
   const receipt = await prisma.receipt.create({
     data: {
       userId,
@@ -180,8 +182,10 @@ export async function storeEmailDocument(input: {
       vendor: extraction.vendor,
       // The mail's send time is an instant; the receipt keeps the Helsinki day it arrived on.
       date: extraction.date ? new Date(extraction.date) : input.mailDate && helsinkiDayUtc(input.mailDate),
-      totalAmountCents: extraction.totalAmount ? Math.round(extraction.totalAmount * 100) : null,
-      vatDetails: extraction.vatDetails.length ? JSON.stringify(extraction.vatDetails) : null,
+      totalAmountCents: extraction.totalAmount ? creditSigned(Math.round(extraction.totalAmount * 100), credit) : null,
+      vatDetails: extraction.vatDetails.length
+        ? JSON.stringify(creditSignedVatLines(extraction.vatDetails, credit))
+        : null,
       category: extraction.category,
       notes: sameInvoice
         ? `Kaksoiskappale: sama osto kuin lasku ${sameInvoice.invoiceNumber} (${sameInvoice.vendor ?? "sama myyjä"}). Ei kirjata toiseen kertaan.`
@@ -197,7 +201,9 @@ export async function storeEmailDocument(input: {
       reviewStatus: isBill ? "pending" : "rejected",
       confidence: extraction.confidence,
       rawText: extraction.rawText,
-      ...foreignFieldsFromExtraction(extraction),
+      ...foreign,
+      originalAmountCents:
+        foreign.originalAmountCents == null ? null : creditSigned(foreign.originalAmountCents, credit),
     }
   });
 
