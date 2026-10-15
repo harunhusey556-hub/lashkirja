@@ -22,7 +22,7 @@ struct AlvView: View {
             periodSections
             if let r = state.value {
                 if let banner = state.banner {
-                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                    Section { RefreshFailureBanner(failure: banner, retry: { await load() }) }
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
@@ -91,7 +91,7 @@ struct AlvView: View {
                     if ReportDrill.alvScope(period).isEmpty { Text("Neljännesvuoden kuitit ja laskut avautuvat koko listana.") }
                 }
             } else {
-                ScreenStateView(state: state, retry: load) { (_: AlvReport) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: { await load() }) { (_: AlvReport) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)

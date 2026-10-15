@@ -50,13 +50,13 @@ struct PeriodsView: View {
             monthPicker
             if let data = status.value, data.month == month {
                 if let banner = status.banner {
-                    Section { RefreshFailureBanner(failure: banner, retry: loadMonth) }
+                    Section { RefreshFailureBanner(failure: banner, retry: { await loadMonth() }) }
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
                 monthSections(data)
             } else {
-                ScreenStateView(state: status, retry: loadMonth) { (_: PeriodMonthStatus) in EmptyView() }
+                ScreenStateView(state: status, retry: { await loadMonth() }) { (_: PeriodMonthStatus) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
             lockSections
@@ -431,13 +431,13 @@ struct PeriodsView: View {
                 precheckSection(precheck)
             }
             if let banner = lockedThrough.banner {
-                Section { RefreshFailureBanner(failure: banner, retry: loadLock) }
+                Section { RefreshFailureBanner(failure: banner, retry: { await loadLock() }) }
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
             }
         case .failed(let failure):
             Section {
-                LoadFailureView(failure: failure, retry: loadLock)
+                LoadFailureView(failure: failure, retry: { await loadLock() })
                     .listRowBackground(Color.clear)
             } header: {
                 Text("Suljetut kaudet")
