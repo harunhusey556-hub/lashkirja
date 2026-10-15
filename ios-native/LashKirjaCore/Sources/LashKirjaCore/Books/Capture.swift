@@ -28,6 +28,19 @@ public struct Extracted: Decodable, Sendable, Equatable {
     public let fxRate: Double?
     public let fxRateDate: String?
     public let fxSource: String?
+    /// The document is a credit note (hyvityslasku). `totalAmount` and the VAT rows stay positive
+    /// here, as the form shows them; the server books them negative when the reading is saved.
+    public let isCreditNote: Bool?
+    /// The number of the invoice the credit note corrects, when the document prints it.
+    public let creditsInvoiceNumber: String?
+
+    /// "Hyvityslasku" for a credit note's reading, nil otherwise.
+    public var creditNoteLabel: String? { isCreditNote == true ? CreditNoteText.label : nil }
+}
+
+/// The one Finnish name the app gives a credit note, read or saved.
+public enum CreditNoteText {
+    public static let label = "Hyvityslasku"
 }
 
 /// Per-field recognition scores, 0...1.
