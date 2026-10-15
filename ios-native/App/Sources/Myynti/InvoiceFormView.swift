@@ -719,13 +719,15 @@ struct InvoiceFormPreview {
 }
 
 extension AppModel {
-    /// Nil until the profile and both lists are in memory (Koti loads the profile; the launch and
-    /// Myynti's warm fill the lists): the form then opens after its loads, as before.
+    /// Nil until the seller's VAT status and both lists are in memory (the profile, or before it
+    /// loads Koti's dashboard read at launch, as Koti itself does; the warm after Koti and Myynti's
+    /// fill the lists): the form then opens after its loads, as before.
     func invoiceFormPreview() -> InvoiceFormPreview? {
-        guard let profile, case .signedIn(let user) = phase,
+        guard case .signedIn(let user) = phase,
+              let registered = profile?.vatRegistered ?? kotiPreview()?.vat?.registered,
               let customers: CustomerList = lastPainted("/api/customers"),
               let catalog: CatalogList = lastPainted("/api/catalog") else { return nil }
-        return InvoiceFormPreview(sellerRegistered: profile.vatRegistered,
+        return InvoiceFormPreview(sellerRegistered: registered,
                                   customers: customers.customers.filter { $0.archivedAt == nil },
                                   catalog: catalog.items,
                                   kept: SalesDraftStore.shared.entry(owner: user.userId)?.draft)
