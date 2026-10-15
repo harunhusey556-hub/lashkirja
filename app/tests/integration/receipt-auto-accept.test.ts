@@ -176,6 +176,9 @@ describe("POST /api/receipts/save with autoApprove", () => {
     const insisted = await save(cookie, saveBody(secondUpload, complete, { autoApprove: true, forceDuplicate: true }));
     expect(insisted.status).toBe(200);
     expect(insisted.body.receipt.reviewStatus).toBe("pending");
+    // The kept look-alike says so in the review queue (two identical Shell Polska rows, 2026-10-15).
+    expect(insisted.body.receipt.notes).toMatch(/^Mahdollinen kaksoiskappale/);
+    expect(first.body.receipt.notes ?? "").not.toMatch(/kaksoiskappale/);
   });
 
   it("without the flag the form's save is unchanged (the owner's own save approves)", async () => {

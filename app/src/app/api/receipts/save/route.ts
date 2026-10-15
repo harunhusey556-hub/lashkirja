@@ -18,6 +18,7 @@ import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
 import { currencySchema, foreignColumns } from "@/lib/foreign-purchase-input";
 import {
   findLookAlikeReceipt,
+  withDuplicateNote,
   matchAfterReceiptSave,
   settleAutoAccept,
   storedDocumentKind,
@@ -136,7 +137,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           totalAmountCents: fx ? eurosToCents(fx.totalAmount) : body.totalAmount == null ? null : eurosToCents(body.totalAmount),
           vatDetails: body.vatDetails?.length ? JSON.stringify(body.vatDetails) : null,
           category: sanitizeText(body.category),
-          notes: sanitizeText(body.notes),
+          // A look-alike the client chose to keep says so, or two identical rows wait side by side.
+          notes: body.forceDuplicate ? withDuplicateNote(sanitizeText(body.notes)) : sanitizeText(body.notes),
           type: body.type,
           reference: sanitizeText(body.reference),
           invoiceNumber: sanitizeText(body.invoiceNumber),

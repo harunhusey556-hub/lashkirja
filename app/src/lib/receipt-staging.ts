@@ -191,6 +191,14 @@ export function storedDocumentKind(
   }
 }
 
+/** Said on a look-alike that was kept anyway, so the review queue tells the two apart
+ * (two identical Shell Polska rows waited side by side, 2026-10-15). */
+export const DUPLICATE_NOTE = "Mahdollinen kaksoiskappale: samalla myyjällä, päivällä ja summalla on jo kuitti.";
+
+export function withDuplicateNote(notes: string | null): string {
+  return notes ? `${DUPLICATE_NOTE}\n${notes}` : DUPLICATE_NOTE;
+}
+
 /** A receipt the user already has with the same vendor, day and sum: the
  * duplicate signal the save route answers with 409 and auto-accept never
  * approves. `excludeId` leaves out the row being judged. */
@@ -302,6 +310,9 @@ export async function createPendingInboxReceipt(
     !isDateLocked(await getLockedThrough(input.userId, tx), receipt.date)
   ) {
     const lookAlike = await findLookAlikeReceipt(tx, input.userId, receipt, receipt.id);
+    if (lookAlike) {
+      receipt = await tx.receipt.update({ where: { id: receipt.id }, data: { notes: withDuplicateNote(receipt.notes) } });
+    }
     receipt = await settleAutoAccept(tx, receipt, { documentType: reading.documentType, duplicate: lookAlike != null });
   }
   // A photographed bill becomes an ostolasku like a saved one (the reading is
