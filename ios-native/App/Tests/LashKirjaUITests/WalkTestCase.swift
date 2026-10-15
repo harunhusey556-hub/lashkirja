@@ -85,10 +85,18 @@ class WalkTestCase: XCTestCase {
         FileManager.default.createFile(atPath: name, contents: url.data(using: .utf8))
         for _ in 0..<40 where FileManager.default.fileExists(atPath: name) { usleep(250_000) }
         // simctl asks "Open in LashKirja?" for a custom scheme; a quick action or Siri does not.
+        // On a fresh simulator the first one can take over 15 s (CI 2026-10-15: P2 A shot the
+        // dialog still up after the test gave up), so the first link of a run waits longer.
         let open = springboard.buttons["Open"]
-        if open.waitForExistence(timeout: 5) { open.tap() }
+        let first = !WalkTestCase.linkOpened
+        WalkTestCase.linkOpened = true
+        if open.waitForExistence(timeout: first ? 45 : 5) { open.tap() }
         sleep(2)
+        // A dialog that came after the wait is still answered rather than left over the app.
+        if open.exists { open.tap(); sleep(2) }
     }
+    /// Set by the run's first `openURL`; one test process is one simulator session.
+    static var linkOpened = false
     /// Text size through the host (`simctl ui content_size`), e.g. "accessibility-extra-extra-extra-large".
     func contentSize(_ size: String) {
         let name = "\(shotDir)/\(UUID().uuidString).contentsize"

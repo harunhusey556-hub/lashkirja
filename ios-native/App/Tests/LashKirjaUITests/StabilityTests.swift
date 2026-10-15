@@ -12,21 +12,55 @@ final class StabilityTests: WalkTestCase {
         check(step, app.state == .runningForeground)
     }
 
+    /// The list's "Näytä enemmän (N)" / "Näytä vähemmän" row, scrolled into view. A tap moves it below
+    /// the screen and a List keeps off-screen rows out of the tree, so `exists` right after a tap is
+    /// false while the list is still growing (CI 2026-10-15: both lists stopped after one tap).
+    func toggleRow(up: Bool = false) -> XCUIElement? {
+        let q = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ OR label == %@", "Näytä enemmän", "Näytä vähemmän"))
+        let w = app.windows.firstMatch
+        // A page being fetched reads "Ladataan…" for a moment.
+        _ = q.firstMatch.waitForExistence(timeout: 3)
+        for down in [!up, up] {
+            for _ in 0...12 {
+                let e = q.firstMatch
+                if e.exists && e.frame.minY > 30 && e.frame.maxY < w.frame.maxY - 60 { return e }
+                if down { w.swipeUp(velocity: .slow) } else { w.swipeDown(velocity: .slow) }
+                scrolls += 1
+            }
+        }
+        return nil
+    }
+
+    /// Rows behind "Näytä enemmän (N)" (0 when the title has no count); nil once the row folds.
+    func hiddenRows(_ row: XCUIElement) -> Int? {
+        row.label.hasPrefix("Näytä enemmän") ? Int(row.label.filter(\.isNumber)) ?? 0 : nil
+    }
+
     /// Taps "Näytä enemmän" until the list is fully open, then "Näytä vähemmän".
     func growAndFold(_ screen: String) {
-        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä enemmän")).firstMatch
         var opened = 0
-        for _ in 0..<4 {
-            guard tapLabel("label BEGINSWITH %@", "Näytä enemmän") else { break }
+        var hiddenAtStart = 0
+        // Bounded: the seed's longest list opens in three or four taps.
+        for _ in 0..<8 {
+            guard let row = toggleRow(), let hidden = hiddenRows(row) else { break }
+            if opened == 0 { hiddenAtStart = hidden }
+            row.tap(); taps += 1
             opened += 1
             sleep(1)
             assertResponsive("\(screen): Näytä enemmän #\(opened)")
-            if !more.exists { break }
         }
         XCTAssertGreaterThan(opened, 0, "\(screen): no Näytä enemmän (long list missing from the seed?)")
         if tapLabel("label BEGINSWITH %@", "Näytä vähemmän") {
             sleep(1)
             assertResponsive("\(screen): Näytä vähemmän")
+            // Folded back to the first rows: the rest hide again behind "Näytä enemmän (N)".
+            let folded = toggleRow(up: true).flatMap(hiddenRows)
+            check("\(screen): folded back to the first rows", (folded ?? 0) > 0)
+            XCTAssertNotNil(folded, "\(screen): no Näytä enemmän after folding")
+            XCTAssertGreaterThan(folded ?? 0, 0, "\(screen): folding hid no rows")
+            XCTAssertGreaterThanOrEqual(folded ?? 0, hiddenAtStart, "\(screen): fold left more rows open than at the start")
+        } else {
+            XCTFail("\(screen): list did not open fully to Näytä vähemmän in \(opened) taps")
         }
         shot("stability-\(screen)")
     }
