@@ -189,7 +189,7 @@ struct RouteScreen: View {
         case .purchaseInvoice(let id): PurchaseInvoiceDetailView(purchaseInvoiceId: id)
         case .statement(let id): StatementDetailView(statementId: id)
         case .recurringInvoices: RecurringInvoicesView(preview: app.lastPainted("/api/recurring-invoices"))
-        case .periods: PeriodsView()
+        case .periods: PeriodsView(preview: app.periodsPreview(month: PeriodClose.startMonth(nil, current: MonthKey.current())))
         case .ledger: LedgerView()
         case .workQueue: WorkQueueView()
         case .privacy: PrivacyView()
@@ -205,7 +205,8 @@ struct RouteScreen: View {
         case .reports: RaportitView()
         case .invoices: MyyntiView(preview: app.salesPreview())
         case .statements: StatementsView()
-        case .monthClose(let month): PeriodsView(month: month)
+        case .monthClose(let month):
+            PeriodsView(month: month, preview: app.periodsPreview(month: PeriodClose.startMonth(month, current: MonthKey.current())))
         case .receiptsCategory(let period, let tab, let category):
             ReceiptsView(month: period, tab: ReceiptTab(rawValue: tab) ?? .all, category: category, drilled: true)
         case .receiptsMissingVat(let period):

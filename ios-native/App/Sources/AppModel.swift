@@ -292,8 +292,9 @@ final class AppModel {
         lastPainted[ResourceKey(user: user.userId, path: path, query: query).id] = value
     }
 
-    /// Myynti's first screen (list and chip counts) and Toistuvat laskut, from the cache into
-    /// `lastPainted`. At launch (`replacing` false) a screen that already painted something keeps it;
+    /// Myynti's first screen (list and chip counts), Toistuvat laskut, the new-invoice form's
+    /// customers and catalog, and Kuitit's first screen (list, counts and both review queues, for
+    /// the filters the owner left), from the cache into `lastPainted`. At launch (`replacing` false) a screen that already painted something keeps it;
     /// after a prefetch the cache holds the newest answer, as every load goes through it.
     private func primePainted(replacing: Bool) async {
         let list = SalesListQuery.query(scope: InvoiceScope(), filter: .all, search: "")
@@ -307,6 +308,35 @@ final class AppModel {
         if let value: RecurringList = await cachedValue("/api/recurring-invoices") {
             primePainted(value, "/api/recurring-invoices", replacing: replacing)
         }
+        if let value: CustomerList = await cachedValue("/api/customers") {
+            primePainted(value, "/api/customers", replacing: replacing)
+        }
+        if let value: CatalogList = await cachedValue("/api/catalog") {
+            primePainted(value, "/api/catalog", replacing: replacing)
+        }
+        let kuitit = ReceiptListQuery(remembered: UserDefaults.standard.string(forKey: ReceiptsView.filterKey) ?? "")
+        for query in [ReceiptListPaging.firstQuery(kuitit), ReceiptListQuery.pendingQueue(), ReceiptListQuery.rejectedQueue()] {
+            if let value: ReceiptList = await cachedValue("/api/receipts", query: query) {
+                primePainted(value, "/api/receipts", query: query, replacing: replacing)
+            }
+        }
+        if let value: ReceiptCounts = await cachedValue("/api/receipts/counts", query: kuitit.countsQuery()) {
+            primePainted(value, "/api/receipts/counts", query: kuitit.countsQuery(), replacing: replacing)
+        }
+    }
+
+    /// Kuukauden sulku's month (the one it opens on) with its VAT row, from the cache into
+    /// `lastPainted` once Kirjanpito has warmed them.
+    private func primePeriods() async {
+        let month = PeriodClose.startMonth(nil, current: MonthKey.current())
+        guard let status: PeriodMonthStatus = await cachedValue("/api/dashboard/month", query: ["month": month]) else { return }
+        var vat: (key: String, facts: PeriodClose.Vat, report: AlvReport)?
+        if status.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: month, kind: status.vatPeriod) {
+            // The return due next (warmed above) is not always the one this month closes: asked for here.
+            guard let report: AlvReport = try? await cachedGet("/api/alv", query: ["period": period]) else { return }
+            vat = (period, PeriodsPreview.facts(report), report)
+        }
+        rememberPeriods(PeriodsPreview(status: status, vat: vat))
     }
 
     private func primePainted<T>(_ value: T, _ path: String, query: [String: String] = [:], replacing: Bool) {
@@ -353,6 +383,7 @@ final class AppModel {
                 let kind = VatKind(profile: await self.cachedProfile()?.vatPeriod)
                 let alv = VatDue.nextDueKey(today: APIDate.dayString(Date()), kind: kind)
                 await self.warmAll(NextPrefetch.kirjanpito(month: MonthKey.current(), alvPeriod: alv))
+                await self.primePeriods()
             case .myynti:
                 await self.warmAll(NextPrefetch.myynti())
                 await self.primePainted(replacing: true)
