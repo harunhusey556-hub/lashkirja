@@ -61,6 +61,47 @@ export interface ExtractedReceipt {
   fxRateDate?: string | null;
   /** Where the rate came from: "document" when printed, "ECB" when looked up. */
   fxSource?: "ECB" | "document" | null;
+  /**
+   * The document is a credit note (hyvityslasku): the model said so, the head of
+   * the document names it, or its total was printed negative. The amounts above
+   * stay positive, as the form shows them; every path that stores the reading
+   * books them negative (creditSigned), however the document printed them.
+   */
+  isCreditNote?: boolean;
+  /** The number of the invoice a credit note corrects ("Hyvitettävä lasku 1234"), when printed. */
+  creditsInvoiceNumber?: string | null;
+}
+
+/** Wording that names a document a credit note; looked for only in its head (namesCreditNote). */
+const CREDIT_NOTE_WORDING =
+  /(?<!\p{L})(?:hyvityslasku|hyvitys|kreditnota|kreditfaktura|credit[\s_-]*note|credit[\s_-]*memo|gutschrift)(?!\p{L})/iu;
+/** How far into the text the heading reaches: terms further down that merely mention credits do not count. */
+const CREDIT_NOTE_HEAD_CHARS = 400;
+const CREDIT_NOTE_NOTE = "Hyvityslasku: summa ja ALV kirjataan negatiivisina.";
+
+/** Whether the notes, the file name or the head of the text call the document a credit note. */
+export function namesCreditNote(document: {
+  notes?: string | null;
+  fileName?: string | null;
+  rawText?: string | null;
+}): boolean {
+  const head = [document.notes, document.fileName, document.rawText?.slice(0, CREDIT_NOTE_HEAD_CHARS)]
+    .filter(Boolean)
+    .join(" ");
+  return CREDIT_NOTE_WORDING.test(head);
+}
+
+/** An amount as it is booked: a credit note's is negative whether "-124,00" or "124,00 Hyvitys" was printed. */
+export function creditSigned(value: number, isCreditNote: boolean | undefined): number {
+  return isCreditNote && value !== 0 ? -Math.abs(value) : value;
+}
+
+/** A credit note's VAT lines as booked: negative like its total, so the VAT return deducts less. */
+export function creditSignedVatLines(
+  lines: Array<{ rate: number; amount: number }>,
+  isCreditNote: boolean | undefined
+): Array<{ rate: number; amount: number }> {
+  return isCreditNote ? lines.map((line) => ({ ...line, amount: creditSigned(line.amount, true) })) : lines;
 }
 
 export type DocumentType = "receipt" | "invoice" | "marketing" | "other";
@@ -111,6 +152,7 @@ export function unreadableExtraction(): ExtractedReceipt {
     provenance: "local-ocr",
     confidence: 0,
     unreadable: true,
+    isCreditNote: false,
   };
 }
 
@@ -150,10 +192,13 @@ Palauta VAIN validi JSON seuraavalla rakenteella (ei muuta tekstiä):
   "sellerCountry": "FI",
   "originalAmount": null,
   "fxRate": null,
-  "dueDate": null
+  "dueDate": null,
+  "isCreditNote": false,
+  "creditsInvoiceNumber": null
 }
 
 documentType: "kuitti" (ostokuitti tai maksukuitti), "lasku" (maksettava lasku), "markkinointi" (mainos, tarjous, uutiskirje, kampanja — vaikka siinä näkyisi hintoja) tai "muu" (esim. toimitusilmoitus, tiedote, salasanaviesti). Vain kuitti ja lasku kirjataan kirjanpitoon. dueDate = laskun eräpäivä (YYYY-MM-DD), vain jos se lukee dokumentissa, muuten null.
+Hyvityslasku: isCreditNote = true, jos dokumentti on hyvityslasku ("Hyvityslasku", "Hyvitys", "Kreditnota", "Kreditfaktura", "Credit note", "Credit memo") tai sen loppusumma on painettu negatiivisena. Toimittajan hyvityslasku on documentType "lasku", myymälän palautuskuitti "kuitti". Palauta totalAmount, vatDetails ja originalAmount POSITIIVISINA lukuina (sovellus kirjaa hyvityksen negatiivisena). invoiceNumber = hyvityslaskun oma numero; creditsInvoiceNumber = hyvitettävän alkuperäisen laskun numero (esim. "Hyvitettävä lasku", "Viittaa laskuun", "Alkuperäinen lasku", "Original invoice"), muuten null. Pelkkä maininta hyvityksistä maksuehdoissa ei tee laskusta hyvityslaskua: silloin isCreditNote = false.
 
 Kategoriat (käytä TARKALLEEN näitä id-arvoja category-kentässä):
 ${categoriesForAiPrompt()}${priorsHint}
@@ -685,11 +730,15 @@ export function normalizeAIResult(
   // A null the model returned stays null - a foreign bill with no euro printed
   // must not become a zero-euro receipt. Number(null) is 0, so check first.
   const total = parsed.totalAmount == null ? NaN : Number(parsed.totalAmount);
-  const totalAmount = Number.isFinite(total) && total >= 0 ? toCents(total) : null;
+  // A negative total is a credit note's, not a misreading: its size is kept and
+  // the sign moves to isCreditNote (before, the amount was dropped as null).
+  const totalAmount = Number.isFinite(total) ? toCents(Math.abs(total)) : null;
   // The total printed in the document's own currency: kept whole cents like
   // totalAmount, so a non-EUR bill is never left without its amount.
   const original = parsed.originalAmount == null ? NaN : Number(parsed.originalAmount);
-  const originalAmount = Number.isFinite(original) && original >= 0 ? toCents(original) : null;
+  const originalAmount = Number.isFinite(original) ? toCents(Math.abs(original)) : null;
+  const isCreditNote =
+    parsed.isCreditNote === true || parsed.isCreditNote === "true" || total < 0 || original < 0;
   const dueDate =
     typeof parsed.dueDate === "string" && isStrictIsoDate(parsed.dueDate) ? parsed.dueDate : null;
   // Only a rate the document printed; a null stays null (Number(null) is 0).
@@ -701,8 +750,9 @@ export function normalizeAIResult(
       if (!line || typeof line !== "object") return null;
       const rate = Number((line as Record<string, unknown>).rate);
       const amount = Number((line as Record<string, unknown>).amount);
-      if (!allowedRates.has(rate) || !Number.isFinite(amount) || amount < 0) return null;
-      return { rate, amount: toCents(amount) };
+      if (!allowedRates.has(rate) || !Number.isFinite(amount)) return null;
+      // A credit note's VAT may be printed negative; the sign is the total's (isCreditNote).
+      return { rate, amount: toCents(Math.abs(amount)) };
     })
     .filter((line): line is { rate: number; amount: number } => line !== null);
   return {
@@ -724,6 +774,8 @@ export function normalizeAIResult(
     originalAmount,
     dueDate,
     fxRate,
+    isCreditNote,
+    creditsInvoiceNumber: isCreditNote ? normalizeExtractedRef(parsed.creditsInvoiceNumber) : null,
   };
 }
 
@@ -1072,6 +1124,53 @@ function extractInvoiceNumber(lines: string[], text: string): string | null {
   return invoiceNumber;
 }
 
+/** The number of the invoice a credit note corrects, from its label ("Hyvitettävä lasku 1234", "Original invoice INV-1234"). */
+function extractCreditedInvoiceNumber(lines: string[]): string | null {
+  return findLabeledValue(
+    lines,
+    /hyvitett[äa]v[äa]\s+lasku|hyvitys\s+laskulle|viittaa\s+laskuun|alkuper[äa]inen\s+lasku|original\s+invoice|credited\s+invoice|refers\s+to\s+invoice/i,
+    INVOICE_VALUE_RE
+  );
+}
+
+/**
+ * A total line printed with a minus ("Yhteensä -124,00", "Maksettava 124,00-"):
+ * local OCR amounts carry no sign, so a credit note's total would otherwise read
+ * as a purchase. Discount and rounding lines are negative on ordinary receipts too.
+ */
+function printsNegativeTotal(lines: string[]): boolean {
+  return lines.some(
+    (line) =>
+      /yhteens[äa]|maksettava|loppusumma|summa|total/i.test(line) &&
+      !/alennus|s[äa][äa]st|etu|bonus|py[öo]ristys|discount|rounding/i.test(line) &&
+      /(?:^|[\s:])[-−–]\s?\d{1,3}(?:[ . ]\d{3})*,\d{2}(?!\d)|\d,\d{2}\s?[-−](?!\d)/.test(line)
+  );
+}
+
+/**
+ * The credit-note rule every reading passes through (enrichExtractedReceipt): the
+ * model's own answer is not trusted alone, so the wording in the head of the text
+ * and a total printed negative decide too. A credit note says so in its notes,
+ * which every screen shows, and names the invoice it corrects when that is printed.
+ */
+function withCreditNote(extracted: ExtractedReceipt): ExtractedReceipt {
+  const lines = (extracted.rawText ?? "").split("\n");
+  const isCreditNote =
+    extracted.isCreditNote === true ||
+    namesCreditNote({ notes: extracted.notes, rawText: extracted.rawText }) ||
+    printsNegativeTotal(lines);
+  if (!isCreditNote) return { ...extracted, isCreditNote: false, creditsInvoiceNumber: null };
+  return {
+    ...extracted,
+    isCreditNote: true,
+    creditsInvoiceNumber: extracted.creditsInvoiceNumber ?? extractCreditedInvoiceNumber(lines),
+    notes: extracted.notes?.includes(CREDIT_NOTE_NOTE)
+      ? extracted.notes
+      : // The save route takes at most 500 characters of notes.
+        [CREDIT_NOTE_NOTE, extracted.notes].filter(Boolean).join(" ").slice(0, 500),
+  };
+}
+
 const KNOWN_VAT_RATES = [25.5, 24, 14, 13.5, 10, 0];
 
 function extractSummaryTableTotals(lines: string[]): {
@@ -1276,7 +1375,8 @@ function ocrConfidence(
   return Math.min(0.95, Math.round(score * 100) / 100);
 }
 
-export function enrichExtractedReceipt(extracted: ExtractedReceipt): ExtractedReceipt {
+export function enrichExtractedReceipt(reading: ExtractedReceipt): ExtractedReceipt {
+  const extracted = withCreditNote(reading);
   if (isForeignPurchase(extracted)) {
     // The category hints are Finnish rates; a foreign document gets the owner's review instead.
     if (extracted.notes?.includes(FOREIGN_VAT_NOTE)) return extracted;

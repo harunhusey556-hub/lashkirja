@@ -88,6 +88,9 @@ async function persistExtraction(
         fxRate: extracted.fxRate ?? null,
         fxRateDate: extracted.fxRateDate ?? null,
         fxSource: extracted.fxSource ?? null,
+        // The save decides the sign from it, and files the credit against the invoice it names.
+        isCreditNote: extracted.isCreditNote === true,
+        creditsInvoiceNumber: extracted.creditsInvoiceNumber ?? null,
       }),
       // An unreadable file is typed in by hand: its receipt is "manual", not "ocr".
       extractionSource: extracted.unreadable ? "manual" : extracted.source === "ai" ? "ai" : "ocr",
