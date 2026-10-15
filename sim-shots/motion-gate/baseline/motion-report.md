@@ -1,6 +1,6 @@
 # Motion audit
 
-94 steps. FAIL: intermediate 1, flash 0, shift (video) 12, shift (probe) 13; crashes 0.
+94 steps. FAIL: intermediate 2, flash 0, shift (video) 8, shift (probe) 5; crashes 0.
 
 ## Calibration
 
@@ -17,119 +17,112 @@ Jank is not judged: the simulator writes ~4 frames a second, so 'dropped' counts
 
 | suite | step | from → to | kind | reached | intermediate | flash | shift video | shift probe | settle ms | dropped@60 | sheet |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| calibration | good-tab-kirjanpito | Koti → tab Kirjanpito | nav | NO | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-good-tab-kirjanpito.png) |
+| calibration | good-tab-kirjanpito | Koti → tab Kirjanpito | nav | NO | PASS | PASS | PASS | PASS | 4239 | 5 | [png](all/sheet-good-tab-kirjanpito.png) |
 | calibration | bad-link-over-sheet | Asetukset sheet on Koti → Lasku (Myynti) | nav | yes | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-bad-link-over-sheet.png) |
-| koti | koti-from-myynti-setup | launch → tab Koti | nav | yes | PASS | PASS | PASS | PASS | 1924 | 13 | [png](all/sheet-koti-from-myynti-setup.png) |
-| koti | koti-refresh | Koti → Koti | load | yes | n/a | PASS | FAIL | FAIL | 2447 | 52 | [png](all/sheet-koti-refresh.png) |
-| koti | koti-prev-month | Koti → Koti (previous month) | swap | yes | PASS | PASS | FAIL | FAIL | 2610 | 0 | [png](all/sheet-koti-prev-month.png) |
-| koti | koti-next-month | Koti (previous month) → Koti | swap | yes | PASS | PASS | PASS | PASS | 2467 | 7 | [png](all/sheet-koti-next-month.png) |
-| koti | koti-scroll | Koti → Koti | scroll | yes | PASS | PASS | n/a | PASS | 2693 | 86 | [png](all/sheet-koti-scroll.png) |
-| koti | koti-settings-sheet | Koti → Asetukset sheet | sheet | yes | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-koti-settings-sheet.png) |
-| koti | koti-settings-close | Asetukset sheet → Koti | sheet | yes | PASS | PASS | PASS | PASS | 2740 | 9 | [png](all/sheet-koti-settings-close.png) |
-| koti | koti-assistant-sheet | Koti → Avustaja | sheet | yes | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-koti-assistant-sheet.png) |
-| koti | koti-assistant-swipedown | Avustaja → Koti | sheet | yes | PASS | PASS | PASS | PASS | 2784 | 85 | [png](all/sheet-koti-assistant-swipedown.png) |
-| koti | koti-add-sheet | Koti → Lisää sheet | sheet | yes | PASS | PASS | FAIL | PASS | 627 | 2 | [png](all/sheet-koti-add-sheet.png) |
-| koti | koti-add-close | Lisää sheet → Koti | sheet | yes | PASS | PASS | PASS | PASS | 1005 | 3 | [png](all/sheet-koti-add-close.png) |
-| myynti | myynti-tab | Koti → tab Myynti | nav | yes | PASS | PASS | FAIL | PASS | 2029 | 5 | [png](all/sheet-myynti-tab.png) |
-| myynti | myynti-tab-revisit-koti | Myynti → tab Koti | nav | yes | PASS | PASS | PASS | PASS | 1371 | 6 | [png](all/sheet-myynti-tab-revisit-koti.png) |
-| myynti | myynti-tab-revisit | Koti → tab Myynti | nav | yes | PASS | PASS | PASS | PASS | 1108 | 3 | [png](all/sheet-myynti-tab-revisit.png) |
+| koti | koti-from-myynti-setup | launch → tab Koti | nav | yes | PASS | PASS | PASS | PASS | 1771 | 0 | [png](all/sheet-koti-from-myynti-setup.png) |
+| koti | koti-refresh | Koti → Koti | load | yes | n/a | PASS | PASS | PASS | 2395 | 61 | [png](all/sheet-koti-refresh.png) |
+| koti | koti-prev-month | Koti → Koti (previous month) | swap | yes | PASS | PASS | FAIL | PASS | 3214 | 0 | [png](all/sheet-koti-prev-month.png) |
+| koti | koti-next-month | Koti (previous month) → Koti | swap | yes | PASS | PASS | PASS | PASS | 3548 | 17 | [png](all/sheet-koti-next-month.png) |
+| koti | koti-scroll | Koti → Koti | scroll | yes | PASS | PASS | n/a | PASS | 2545 | 107 | [png](all/sheet-koti-scroll.png) |
+| koti | koti-settings-sheet | Koti → Asetukset sheet | sheet | yes | PASS | PASS | PASS | PASS | 4853 | 20 | [png](all/sheet-koti-settings-sheet.png) |
+| koti | koti-settings-close | Asetukset sheet → Koti | sheet | yes | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-koti-settings-close.png) |
+| koti | koti-assistant-sheet | Koti → Avustaja | sheet | yes | PASS | PASS | PASS | PASS | 3003 | 26 | [png](all/sheet-koti-assistant-sheet.png) |
+| koti | koti-assistant-swipedown | Avustaja → Koti | sheet | yes | PASS | PASS | PASS | PASS | 2870 | 85 | [png](all/sheet-koti-assistant-swipedown.png) |
+| koti | koti-add-sheet | Koti → Lisää sheet | sheet | yes | PASS | PASS | FAIL | PASS | 996 | 7 | [png](all/sheet-koti-add-sheet.png) |
+| koti | koti-add-close | Lisää sheet → Koti | sheet | yes | PASS | PASS | PASS | PASS | 2066 | 3 | [png](all/sheet-koti-add-close.png) |
+| myynti | myynti-tab | Koti → tab Myynti | nav | yes | PASS | PASS | PASS | PASS | 2954 | 10 | [png](all/sheet-myynti-tab.png) |
+| myynti | myynti-tab-revisit-koti | Myynti → tab Koti | nav | yes | PASS | PASS | FAIL | PASS | 1139 | 0 | [png](all/sheet-myynti-tab-revisit-koti.png) |
+| myynti | myynti-tab-revisit | Koti → tab Myynti | nav | yes | PASS | PASS | PASS | PASS | 1362 | 3 | [png](all/sheet-myynti-tab-revisit.png) |
 | myynti | myynti-refresh | Myynti → Myynti | load | yes | n/a | PASS | PASS | PASS | None | None | [png](all/sheet-myynti-refresh.png) |
-| myynti | myynti-customers-open | Myynti → Asiakkaat | nav | yes | PASS | PASS | PASS | PASS | 2309 | 11 | [png](all/sheet-myynti-customers-open.png) |
-| myynti | myynti-customer-open | Asiakkaat → Asiakas | nav | yes | PASS | PASS | PASS | PASS | 1999 | 11 | [png](all/sheet-myynti-customer-open.png) |
-| myynti | myynti-customer-back | Asiakas → Asiakkaat | nav | yes | PASS | PASS | PASS | PASS | 1641 | 14 | [png](all/sheet-myynti-customer-back.png) |
-| myynti | myynti-customers-swipeback | Asiakkaat → Myynti | nav | yes | PASS | PASS | PASS | PASS | 1780 | 32 | [png](all/sheet-myynti-customers-swipeback.png) |
-| myynti | myynti-recurring-open | Myynti → Toistuvat laskut | nav | yes | PASS | PASS | PASS | PASS | 1640 | 17 | [png](all/sheet-myynti-recurring-open.png) |
-| myynti | myynti-recurring-swipeback | Toistuvat laskut → Myynti | nav | yes | PASS | PASS | PASS | PASS | 1536 | 30 | [png](all/sheet-myynti-recurring-swipeback.png) |
-| myynti | myynti-filter-late | Myynti → Laskut (myöhässä) | swap | yes | PASS | PASS | PASS | FAIL | 4107 | 22 | [png](all/sheet-myynti-filter-late.png) |
+| myynti | myynti-customers-open | Myynti → Asiakkaat | nav | yes | PASS | PASS | PASS | PASS | 3015 | 21 | [png](all/sheet-myynti-customers-open.png) |
+| myynti | myynti-customer-open | Asiakkaat → Asiakas | nav | yes | PASS | PASS | PASS | PASS | 2047 | 13 | [png](all/sheet-myynti-customer-open.png) |
+| myynti | myynti-customer-back | Asiakas → Asiakkaat | nav | yes | PASS | PASS | PASS | PASS | 2037 | 13 | [png](all/sheet-myynti-customer-back.png) |
+| myynti | myynti-customers-swipeback | Asiakkaat → Myynti | nav | yes | PASS | PASS | PASS | PASS | 1686 | 36 | [png](all/sheet-myynti-customers-swipeback.png) |
+| myynti | myynti-recurring-open | Myynti → Toistuvat laskut | nav | yes | FAIL | PASS | PASS | PASS | 3180 | 47 | [png](all/sheet-myynti-recurring-open.png) |
+| myynti | myynti-recurring-swipeback | Toistuvat laskut → Myynti | nav | yes | PASS | PASS | PASS | PASS | 1541 | 25 | [png](all/sheet-myynti-recurring-swipeback.png) |
+| myynti | myynti-filter-late | Myynti → Laskut (myöhässä) | swap | yes | FAIL | PASS | FAIL | FAIL | 2568 | 29 | [png](all/sheet-myynti-filter-late.png) |
 | myynti | myynti-invoice-open | Myynti → Lasku | nav | yes | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-myynti-invoice-open.png) |
-| myynti | myynti-invoice-scroll | Lasku → Lasku | scroll | yes | PASS | PASS | n/a | PASS | 1608 | 27 | [png](all/sheet-myynti-invoice-scroll.png) |
-| myynti | myynti-invoice-back | Lasku → Myynti | nav | yes | PASS | PASS | PASS | PASS | 2762 | 17 | [png](all/sheet-myynti-invoice-back.png) |
-| myynti | myynti-new-invoice | Myynti → Uusi lasku | sheet | yes | PASS | PASS | FAIL | FAIL | 3679 | 22 | [png](all/sheet-myynti-new-invoice.png) |
-| myynti | myynti-new-invoice-cancel | Uusi lasku → Myynti | sheet | yes | PASS | PASS | PASS | PASS | 3457 | 9 | [png](all/sheet-myynti-new-invoice-cancel.png) |
-| myynti | myynti-list-scroll | Myynti → Myynti | scroll | yes | PASS | PASS | n/a | PASS | 1435 | 30 | [png](all/sheet-myynti-list-scroll.png) |
-| raportit | raportit-tab | Koti → tab Raportit | nav | yes | PASS | PASS | PASS | FAIL | 3059 | 2 | [png](all/sheet-raportit-tab.png) |
-| raportit | raportit-prev-year | Raportit → Raportit (previous year) | swap | yes | PASS | PASS | PASS | FAIL | 4646 | 0 | [png](all/sheet-raportit-prev-year.png) |
-| raportit | raportit-next-year | Raportit (previous year) → Raportit | swap | yes | PASS | PASS | PASS | PASS | 4018 | 9 | [png](all/sheet-raportit-next-year.png) |
-| raportit | raportit-refresh | Raportit → Raportit | load | yes | n/a | PASS | FAIL | FAIL | 2279 | 75 | [png](all/sheet-raportit-refresh.png) |
-| raportit | raportit-drill-open | Raportit → drill-down | nav | yes | PASS | PASS | FAIL | FAIL | 747 | 0 | [png](all/sheet-raportit-drill-open.png) |
+| myynti | myynti-invoice-scroll | Lasku → Lasku | scroll | yes | PASS | PASS | n/a | PASS | 1444 | 39 | [png](all/sheet-myynti-invoice-scroll.png) |
+| myynti | myynti-invoice-back | Lasku → Myynti | nav | yes | PASS | PASS | PASS | PASS | 2572 | 21 | [png](all/sheet-myynti-invoice-back.png) |
+| myynti | myynti-new-invoice | Myynti → Uusi lasku | sheet | yes | PASS | PASS | PASS | PASS | 3885 | 61 | [png](all/sheet-myynti-new-invoice.png) |
+| myynti | myynti-new-invoice-cancel | Uusi lasku → Myynti | sheet | yes | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-myynti-new-invoice-cancel.png) |
+| myynti | myynti-list-scroll | Myynti → Myynti | scroll | yes | PASS | PASS | n/a | PASS | 1549 | 33 | [png](all/sheet-myynti-list-scroll.png) |
+| raportit | raportit-tab | Koti → tab Raportit | nav | yes | PASS | PASS | PASS | PASS | 4064 | 0 | [png](all/sheet-raportit-tab.png) |
+| raportit | raportit-prev-year | Raportit → Raportit (previous year) | swap | yes | PASS | PASS | PASS | FAIL | 4283 | 0 | [png](all/sheet-raportit-prev-year.png) |
+| raportit | raportit-next-year | Raportit (previous year) → Raportit | swap | yes | PASS | PASS | PASS | PASS | 5136 | 7 | [png](all/sheet-raportit-next-year.png) |
+| raportit | raportit-refresh | Raportit → Raportit | load | yes | n/a | PASS | PASS | PASS | 2846 | 102 | [png](all/sheet-raportit-refresh.png) |
+| raportit | raportit-drill-open | Raportit → drill-down | nav | yes | PASS | PASS | FAIL | PASS | 1476 | 0 | [png](all/sheet-raportit-drill-open.png) |
 | raportit | raportit-drill-swipeback | drill-down → Raportit | nav | yes | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-raportit-drill-swipeback.png) |
-| raportit | raportit-scroll | Raportit → Raportit | scroll | yes | PASS | PASS | n/a | PASS | 1375 | 34 | [png](all/sheet-raportit-scroll.png) |
-| asetukset | asetukset-open | Koti → Asetukset sheet | sheet | yes | PASS | PASS | PASS | PASS | 3597 | 27 | [png](all/sheet-asetukset-open.png) |
-| asetukset | asetukset-seller-open | Asetukset → Laskuttajan tiedot | nav | yes | PASS | PASS | PASS | PASS | 2062 | 12 | [png](all/sheet-asetukset-seller-open.png) |
-| asetukset | asetukset-seller-back | Laskuttajan tiedot → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 1571 | 13 | [png](all/sheet-asetukset-seller-back.png) |
-| asetukset | asetukset-templates-open | Asetukset → Sähköpostimallit | nav | yes | PASS | PASS | FAIL | PASS | 2419 | 8 | [png](all/sheet-asetukset-templates-open.png) |
-| asetukset | asetukset-templates-back | Sähköpostimallit → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 1300 | 15 | [png](all/sheet-asetukset-templates-back.png) |
-| asetukset | asetukset-payments-open | Asetukset → Maksut | nav | yes | PASS | PASS | PASS | PASS | 1990 | 14 | [png](all/sheet-asetukset-payments-open.png) |
-| asetukset | asetukset-payments-back | Maksut → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 1474 | 13 | [png](all/sheet-asetukset-payments-back.png) |
-| asetukset | asetukset-password-open | Asetukset → Vaihda salasana | nav | yes | PASS | PASS | PASS | PASS | 2198 | 15 | [png](all/sheet-asetukset-password-open.png) |
-| asetukset | asetukset-password-back | Vaihda salasana → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 1562 | 29 | [png](all/sheet-asetukset-password-back.png) |
-| asetukset | asetukset-passkeys-open | Asetukset → Pääsyavaimet | nav | yes | PASS | PASS | PASS | PASS | 2125 | 13 | [png](all/sheet-asetukset-passkeys-open.png) |
-| asetukset | asetukset-passkeys-back | Pääsyavaimet → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 3541 | 0 | [png](all/sheet-asetukset-passkeys-back.png) |
-| asetukset | asetukset-devices-open | Asetukset → Laitteet | nav | yes | PASS | PASS | PASS | PASS | 3072 | 13 | [png](all/sheet-asetukset-devices-open.png) |
-| asetukset | asetukset-devices-back | Laitteet → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 1197 | 24 | [png](all/sheet-asetukset-devices-back.png) |
-| asetukset | asetukset-lock-open | Asetukset → Sovelluslukitus | nav | yes | PASS | PASS | PASS | PASS | 2441 | 5 | [png](all/sheet-asetukset-lock-open.png) |
-| asetukset | asetukset-lock-back | Sovelluslukitus → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 1870 | 18 | [png](all/sheet-asetukset-lock-back.png) |
-| asetukset | asetukset-notifications-open | Asetukset → Ilmoitukset | nav | yes | PASS | PASS | PASS | PASS | 4364 | 0 | [png](all/sheet-asetukset-notifications-open.png) |
-| asetukset | asetukset-notifications-back | Ilmoitukset → Asetukset | nav | yes | PASS | PASS | FAIL | PASS | 2808 | 7 | [png](all/sheet-asetukset-notifications-back.png) |
+| raportit | raportit-scroll | Raportit → Raportit | scroll | yes | PASS | PASS | n/a | PASS | 1611 | 37 | [png](all/sheet-raportit-scroll.png) |
+| asetukset | asetukset-open | Koti → Asetukset sheet | sheet | yes | PASS | PASS | PASS | PASS | 4047 | 25 | [png](all/sheet-asetukset-open.png) |
+| asetukset | asetukset-seller-open | Asetukset → Laskuttajan tiedot | nav | yes | PASS | PASS | PASS | PASS | 3284 | 15 | [png](all/sheet-asetukset-seller-open.png) |
+| asetukset | asetukset-seller-back | Laskuttajan tiedot → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 3547 | 21 | [png](all/sheet-asetukset-seller-back.png) |
+| asetukset | asetukset-templates-open | Asetukset → Sähköpostimallit | nav | yes | PASS | PASS | PASS | PASS | 2747 | 19 | [png](all/sheet-asetukset-templates-open.png) |
+| asetukset | asetukset-templates-back | Sähköpostimallit → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 2290 | 21 | [png](all/sheet-asetukset-templates-back.png) |
+| asetukset | asetukset-payments-open | Asetukset → Maksut | nav | yes | PASS | PASS | PASS | PASS | 3038 | 20 | [png](all/sheet-asetukset-payments-open.png) |
+| asetukset | asetukset-payments-back | Maksut → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 2233 | 11 | [png](all/sheet-asetukset-payments-back.png) |
+| asetukset | asetukset-password-open | Asetukset → Vaihda salasana | nav | yes | PASS | PASS | PASS | PASS | 3472 | 10 | [png](all/sheet-asetukset-password-open.png) |
+| asetukset | asetukset-password-back | Vaihda salasana → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 2223 | 15 | [png](all/sheet-asetukset-password-back.png) |
+| asetukset | asetukset-passkeys-open | Asetukset → Pääsyavaimet | nav | yes | PASS | PASS | FAIL | PASS | 3954 | 17 | [png](all/sheet-asetukset-passkeys-open.png) |
+| asetukset | asetukset-passkeys-back | Pääsyavaimet → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 1806 | 13 | [png](all/sheet-asetukset-passkeys-back.png) |
+| asetukset | asetukset-devices-open | Asetukset → Laitteet | nav | yes | PASS | PASS | PASS | PASS | 3401 | 17 | [png](all/sheet-asetukset-devices-open.png) |
+| asetukset | asetukset-devices-back | Laitteet → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 1857 | 16 | [png](all/sheet-asetukset-devices-back.png) |
+| asetukset | asetukset-lock-open | Asetukset → Sovelluslukitus | nav | yes | PASS | PASS | PASS | PASS | 3286 | 14 | [png](all/sheet-asetukset-lock-open.png) |
+| asetukset | asetukset-lock-back | Sovelluslukitus → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 1844 | 15 | [png](all/sheet-asetukset-lock-back.png) |
+| asetukset | asetukset-notifications-open | Asetukset → Ilmoitukset | nav | yes | PASS | PASS | PASS | PASS | 3183 | 25 | [png](all/sheet-asetukset-notifications-open.png) |
+| asetukset | asetukset-notifications-back | Ilmoitukset → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 1581 | 17 | [png](all/sheet-asetukset-notifications-back.png) |
 | asetukset | asetukset-privacy-open | Asetukset → Tietosuoja | nav | yes | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-asetukset-privacy-open.png) |
-| asetukset | asetukset-privacy-back | Tietosuoja → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 3154 | 0 | [png](all/sheet-asetukset-privacy-back.png) |
+| asetukset | asetukset-privacy-back | Tietosuoja → Asetukset | nav | yes | PASS | PASS | PASS | PASS | 2227 | 6 | [png](all/sheet-asetukset-privacy-back.png) |
 | asetukset | asetukset-close | Asetukset sheet → Koti | sheet | NO | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-asetukset-close.png) |
-| chat | chat-open | Koti → Avustaja | sheet | yes | PASS | PASS | PASS | PASS | 3416 | 31 | [png](all/sheet-chat-open.png) |
-| chat | chat-focus | Avustaja → Avustaja (keyboard) | swap | yes | PASS | PASS | PASS | PASS | 2648 | 18 | [png](all/sheet-chat-focus.png) |
-| chat | chat-send | Avustaja → Avustaja (answer) | load | yes | n/a | PASS | FAIL | PASS | 4375 | 0 | [png](all/sheet-chat-send.png) |
-| chat | chat-close | Avustaja → Koti | sheet | yes | PASS | PASS | PASS | PASS | 3791 | 133 | [png](all/sheet-chat-close.png) |
-| lasku | lasku-new | Myynti → Uusi lasku | sheet | yes | PASS | PASS | PASS | PASS | 3394 | 40 | [png](all/sheet-lasku-new.png) |
+| chat | chat-open | Koti → Avustaja | sheet | yes | PASS | PASS | PASS | PASS | 4247 | 53 | [png](all/sheet-chat-open.png) |
+| chat | chat-focus | Avustaja → Avustaja (keyboard) | swap | yes | PASS | PASS | PASS | PASS | 3731 | 23 | [png](all/sheet-chat-focus.png) |
+| chat | chat-send | Avustaja → Avustaja (answer) | load | yes | n/a | PASS | FAIL | PASS | 4469 | 0 | [png](all/sheet-chat-send.png) |
+| chat | chat-close | Avustaja → Koti | sheet | yes | PASS | PASS | PASS | PASS | 3636 | 137 | [png](all/sheet-chat-close.png) |
+| lasku | lasku-new | Myynti → Uusi lasku | sheet | yes | PASS | PASS | PASS | PASS | 4144 | 36 | [png](all/sheet-lasku-new.png) |
 | lasku | lasku-customer-picker | Uusi lasku → asiakasvalinta | nav | yes | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-lasku-customer-picker.png) |
-| lasku | lasku-customer-cancel | asiakasvalinta → Uusi lasku | nav | yes | PASS | PASS | PASS | PASS | 1318 | 0 | [png](all/sheet-lasku-customer-cancel.png) |
-| lasku | lasku-form-scroll | Uusi lasku → Uusi lasku | scroll | yes | PASS | PASS | n/a | PASS | 1902 | 0 | [png](all/sheet-lasku-form-scroll.png) |
+| lasku | lasku-customer-cancel | asiakasvalinta → Uusi lasku | nav | yes | PASS | PASS | PASS | PASS | 2256 | 11 | [png](all/sheet-lasku-customer-cancel.png) |
+| lasku | lasku-form-scroll | Uusi lasku → Uusi lasku | scroll | yes | PASS | PASS | n/a | PASS | 1985 | 41 | [png](all/sheet-lasku-form-scroll.png) |
 | lasku | lasku-cancel | Uusi lasku → Myynti | sheet | NO | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-lasku-cancel.png) |
-| lasku | lasku-open | Myynti → Lasku | nav | yes | PASS | PASS | FAIL | FAIL | 2773 | 0 | [png](all/sheet-lasku-open.png) |
-| lasku | lasku-copy | Lasku → Uusi lasku (copy) | sheet | yes | PASS | PASS | PASS | PASS | 2822 | 2 | [png](all/sheet-lasku-copy.png) |
+| lasku | lasku-open | Myynti → Lasku | nav | yes | PASS | PASS | PASS | FAIL | 4436 | 13 | [png](all/sheet-lasku-open.png) |
+| lasku | lasku-copy | Lasku → Uusi lasku (copy) | sheet | yes | PASS | PASS | PASS | PASS | 2932 | 17 | [png](all/sheet-lasku-copy.png) |
 | lasku | lasku-copy-cancel | Uusi lasku (copy) → Lasku | sheet | NO | PASS | PASS | PASS | PASS | None | None | [png](all/sheet-lasku-copy-cancel.png) |
-| lasku | lasku-back | Lasku → Myynti | nav | yes | PASS | PASS | PASS | PASS | 3733 | 14 | [png](all/sheet-lasku-back.png) |
-| pankki | pankki-kirjanpito-tab | Koti → tab Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 2182 | 8 | [png](all/sheet-pankki-kirjanpito-tab.png) |
-| pankki | pankki-hub-open | Kirjanpito → Pankki | nav | yes | PASS | PASS | PASS | PASS | 3059 | 26 | [png](all/sheet-pankki-hub-open.png) |
-| pankki | pankki-feed-open | Pankki → Pankkitapahtumat | nav | yes | PASS | PASS | PASS | FAIL | 3257 | 1 | [png](all/sheet-pankki-feed-open.png) |
-| pankki | pankki-feed-scroll | Pankkitapahtumat → Pankkitapahtumat | scroll | yes | PASS | PASS | n/a | PASS | 1915 | 52 | [png](all/sheet-pankki-feed-scroll.png) |
-| pankki | pankki-feed-more | Pankkitapahtumat → Pankkitapahtumat (more) | load | yes | n/a | PASS | PASS | PASS | None | None | [png](all/sheet-pankki-feed-more.png) |
-| pankki | pankki-feed-back | Pankkitapahtumat → Pankki | nav | yes | PASS | PASS | PASS | PASS | 1737 | 31 | [png](all/sheet-pankki-feed-back.png) |
-| pankki | pankki-accounts-open | Pankki → Pankkiyhteys ja tilit | nav | yes | PASS | PASS | PASS | PASS | 2458 | 15 | [png](all/sheet-pankki-accounts-open.png) |
-| pankki | pankki-accounts-back | Pankkiyhteys ja tilit → Pankki | nav | yes | PASS | PASS | PASS | PASS | 2118 | 13 | [png](all/sheet-pankki-accounts-back.png) |
-| pankki | pankki-hub-back | Pankki → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1575 | 20 | [png](all/sheet-pankki-hub-back.png) |
-| pankki | kirjanpito-email-open | Kirjanpito → Sähköposti | nav | yes | PASS | PASS | PASS | PASS | 2147 | 17 | [png](all/sheet-kirjanpito-email-open.png) |
-| pankki | kirjanpito-email-back | Sähköposti → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1658 | 20 | [png](all/sheet-kirjanpito-email-back.png) |
-| pankki | kirjanpito-purchases-open | Kirjanpito → Ostolaskut | nav | yes | PASS | PASS | FAIL | FAIL | 2378 | 8 | [png](all/sheet-kirjanpito-purchases-open.png) |
-| pankki | kirjanpito-purchases-back | Ostolaskut → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1717 | 21 | [png](all/sheet-kirjanpito-purchases-back.png) |
-| pankki | kirjanpito-match-open | Kirjanpito → Kohdista ostolaskujen maksut | nav | yes | PASS | PASS | PASS | PASS | 2304 | 21 | [png](all/sheet-kirjanpito-match-open.png) |
-| pankki | kirjanpito-match-back | Kohdista ostolaskujen maksut → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1700 | 23 | [png](all/sheet-kirjanpito-match-back.png) |
-| pankki | kirjanpito-periods-open | Kirjanpito → Kuukauden sulku | nav | yes | PASS | PASS | PASS | FAIL | 3168 | 61 | [png](all/sheet-kirjanpito-periods-open.png) |
-| pankki | kirjanpito-periods-back | Kuukauden sulku → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1699 | 27 | [png](all/sheet-kirjanpito-periods-back.png) |
-| pankki | kirjanpito-alv-open | Kirjanpito → ALV-ilmoitus | nav | yes | FAIL | PASS | PASS | PASS | 2614 | 25 | [png](all/sheet-kirjanpito-alv-open.png) |
-| pankki | kirjanpito-alv-back | ALV-ilmoitus → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1852 | 33 | [png](all/sheet-kirjanpito-alv-back.png) |
-| pankki | kirjanpito-ledger-open | Kirjanpito → Kirjanpito, Tuloslaskelma | nav | yes | PASS | PASS | PASS | PASS | 2238 | 11 | [png](all/sheet-kirjanpito-ledger-open.png) |
-| pankki | kirjanpito-ledger-back | Kirjanpito, Tuloslaskelma → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1799 | 33 | [png](all/sheet-kirjanpito-ledger-back.png) |
-| offline | offline-tab-myynti | Koti → tab Myynti (offline) | nav | yes | PASS | PASS | PASS | FAIL | 3445 | 39 | [png](all/sheet-offline-tab-myynti.png) |
+| lasku | lasku-back | Lasku → Myynti | nav | yes | PASS | PASS | PASS | PASS | 2716 | 27 | [png](all/sheet-lasku-back.png) |
+| pankki | pankki-kirjanpito-tab | Koti → tab Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 3109 | 5 | [png](all/sheet-pankki-kirjanpito-tab.png) |
+| pankki | pankki-hub-open | Kirjanpito → Pankki | nav | yes | PASS | PASS | PASS | PASS | 3339 | 28 | [png](all/sheet-pankki-hub-open.png) |
+| pankki | pankki-feed-open | Pankki → Pankkitapahtumat | nav | yes | PASS | PASS | PASS | PASS | 4624 | 25 | [png](all/sheet-pankki-feed-open.png) |
+| pankki | pankki-feed-scroll | Pankkitapahtumat → Pankkitapahtumat | scroll | yes | PASS | PASS | n/a | PASS | 1918 | 39 | [png](all/sheet-pankki-feed-scroll.png) |
+| pankki | pankki-feed-more | Pankkitapahtumat → Pankkitapahtumat (more) | load | yes | n/a | PASS | PASS | PASS | 3915 | 0 | [png](all/sheet-pankki-feed-more.png) |
+| pankki | pankki-feed-back | Pankkitapahtumat → Pankki | nav | yes | PASS | PASS | PASS | PASS | 2228 | 27 | [png](all/sheet-pankki-feed-back.png) |
+| pankki | pankki-accounts-open | Pankki → Pankkiyhteys ja tilit | nav | yes | PASS | PASS | PASS | PASS | 2916 | 17 | [png](all/sheet-pankki-accounts-open.png) |
+| pankki | pankki-accounts-back | Pankkiyhteys ja tilit → Pankki | nav | yes | PASS | PASS | PASS | PASS | 2439 | 15 | [png](all/sheet-pankki-accounts-back.png) |
+| pankki | pankki-hub-back | Pankki → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 2081 | 6 | [png](all/sheet-pankki-hub-back.png) |
+| pankki | kirjanpito-email-open | Kirjanpito → Sähköposti | nav | yes | PASS | PASS | PASS | PASS | 3839 | 18 | [png](all/sheet-kirjanpito-email-open.png) |
+| pankki | kirjanpito-email-back | Sähköposti → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1973 | 41 | [png](all/sheet-kirjanpito-email-back.png) |
+| pankki | kirjanpito-purchases-open | Kirjanpito → Ostolaskut | nav | yes | PASS | PASS | FAIL | FAIL | 2763 | 10 | [png](all/sheet-kirjanpito-purchases-open.png) |
+| pankki | kirjanpito-purchases-back | Ostolaskut → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1985 | 32 | [png](all/sheet-kirjanpito-purchases-back.png) |
+| pankki | kirjanpito-match-open | Kirjanpito → Kohdista ostolaskujen maksut | nav | yes | PASS | PASS | PASS | PASS | 4357 | 1 | [png](all/sheet-kirjanpito-match-open.png) |
+| pankki | kirjanpito-match-back | Kohdista ostolaskujen maksut → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1894 | 35 | [png](all/sheet-kirjanpito-match-back.png) |
+| pankki | kirjanpito-periods-open | Kirjanpito → Kuukauden sulku | nav | yes | PASS | PASS | PASS | PASS | 3005 | 31 | [png](all/sheet-kirjanpito-periods-open.png) |
+| pankki | kirjanpito-periods-back | Kuukauden sulku → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1677 | 13 | [png](all/sheet-kirjanpito-periods-back.png) |
+| pankki | kirjanpito-alv-open | Kirjanpito → ALV-ilmoitus | nav | yes | PASS | PASS | PASS | PASS | 2611 | 19 | [png](all/sheet-kirjanpito-alv-open.png) |
+| pankki | kirjanpito-alv-back | ALV-ilmoitus → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 2124 | 50 | [png](all/sheet-kirjanpito-alv-back.png) |
+| pankki | kirjanpito-ledger-open | Kirjanpito → Kirjanpito, Tuloslaskelma | nav | yes | PASS | PASS | PASS | PASS | 3565 | 0 | [png](all/sheet-kirjanpito-ledger-open.png) |
+| pankki | kirjanpito-ledger-back | Kirjanpito, Tuloslaskelma → Kirjanpito | nav | yes | PASS | PASS | PASS | PASS | 1862 | 37 | [png](all/sheet-kirjanpito-ledger-back.png) |
+| offline | offline-tab-myynti | Koti → tab Myynti (offline) | nav | yes | PASS | PASS | PASS | FAIL | 3747 | 33 | [png](all/sheet-offline-tab-myynti.png) |
 | offline | offline-refresh | Myynti → Myynti (offline error) | load | yes | n/a | PASS | PASS | PASS | None | None | [png](all/sheet-offline-refresh.png) |
-| offline | online-again | Myynti (offline) → Myynti | load | yes | n/a | PASS | PASS | PASS | 4107 | 20 | [png](all/sheet-online-again.png) |
+| offline | online-again | Myynti (offline) → Myynti | load | yes | n/a | PASS | PASS | PASS | 1170 | 0 | [png](all/sheet-online-again.png) |
 
 ## Details of FAIL rows
 
-- **koti/koti-refresh** (Koti → Koti): intermediate screens [{'frame': 76, 't': 2.45, 'held_s': 1.01, 'd_start': 11.4, 'd_end': 11.4}]; late change [{'t': 3.46, 'area': 0.034, 'dy_pt': -1, 'what': 'pop'}, {'t': 3.48, 'area': 0.043, 'dy_pt': -2, 'what': 'pop'}, {'t': 3.5, 'area': 0.05, 'dy_pt': -2, 'what': 'pop'}, {'t': 3.73, 'area': 0.05, 'dy_pt': -2, 'what': 'pop'}, {'t': 3.76, 'area': 0.046, 'dy_pt': -1, 'what': 'pop'}]; probe ['MOVE 1792060459.875 tab.koti n=1 max=60 NavigationBarLargeTitleView@0,116,402x52:0,-60', 'SCROLLJUMP 1792060459.974 tab.koti dy=20', 'MOVE 1792060459.976 tab.koti n=11 max=20 _UITouchPassthroughView@0,-206,402x874:0,20 BackdropView@0,-206,402x170:0,20 _UITouchPassthroughView@0,-206,402x874:0,20']
-- **koti/koti-prev-month** (Koti → Koti (previous month)): late change [{'t': 3.52, 'area': 0.019, 'dy_pt': 0, 'what': 'pop'}, {'t': 3.53, 'area': 0.036, 'dy_pt': 0, 'what': 'pop'}, {'t': 3.54, 'area': 0.044, 'dy_pt': 0, 'what': 'pop'}, {'t': 3.58, 'area': 0.02, 'dy_pt': 0, 'what': 'pop'}, {'t': 3.67, 'area': 0.039, 'dy_pt': 0, 'what': 'pop'}, {'t': 3.7, 'area': 0.041, 'dy_pt': 0, 'what': 'pop'}]; probe ['MOVE 1792060470.669 tab.koti n=27 max=218 _SwiftUILayerDelegate@20,668,93x15:0,-218 _SwiftUILayerDelegate@16,817,370x204:0,-218 _SwiftUILayerDelegate@30,831,140x18:0,-218', 'MOVE 1792060470.781 tab.koti n=33 max=148 _SwiftUILayerDelegate@-120,520,36x36:-148,0 _SwiftUILayerDelegate@-111,530,18x14:-148,0 _SwiftUILayerDelegate@-72,519,52x20:-148,0', 'MOVE 1792060470.880 tab.koti n=33 max=144 _SwiftUILayerDelegate@-265,520,36x36:-144,0 _SwiftUILayerDelegate@-256,530,18x14:-144,0 _SwiftUILayerDelegate@-217,519,52x20:-144,0']
-- **koti/koti-add-sheet** (Koti → Lisää sheet): late change [{'t': 1.65, 'area': 0.032, 'dy_pt': 0, 'what': 'pop'}, {'t': 1.73, 'area': 0.03, 'dy_pt': 0, 'what': 'pop'}, {'t': 1.79, 'area': 0.099, 'dy_pt': 0, 'what': 'pop'}, {'t': 1.83, 'area': 0.1, 'dy_pt': 0, 'what': 'pop'}, {'t': 1.88, 'area': 0.038, 'dy_pt': -14, 'what': 'move'}, {'t': 1.92, 'area': 0.031, 'dy_pt': -8, 'what': 'move'}, {'t': 1.95, 'area': 0.018, 'dy_pt': -3, 'what': 'move'}, {'t': 2.09, 'area': 0.035, 'dy_pt': 0, 'what': 'pop'}]
-- **myynti/myynti-tab** (Koti → tab Myynti): late change [{'t': 3.65, 'area': 0.052, 'dy_pt': 0, 'what': 'pop'}]
-- **myynti/myynti-filter-late** (Myynti → Laskut (myöhässä)): probe ['MOVE 1792060749.204 invoice("1f11ca31-8166-47dc-9c47-94f35c5b4251") n=5 max=7 HostedViewWrapper@170,73,62x20:-7,0 _UINavigationBarTitleControl@170,73,62x20:-7,0 _UIIntrinsicContentSizeInvalidationForwardingWrapperView@170,73,62x20:-7,0']
-- **myynti/myynti-new-invoice** (Myynti → Uusi lasku): late change [{'t': 4.34, 'area': 0.053, 'dy_pt': 0, 'what': 'pop'}]; probe ['MOVE 1792060805.899 tab.myynti n=12 max=236 ListCollectionViewCell@16,647,370x62:0,236 _UISystemBackgroundView@16,647,370x62:0,236 UIView@16,647,370x62:0,236']
-- **raportit/raportit-tab** (Koti → tab Raportit): probe ['MOVE 1792060901.515 tab.raportit n=6 max=448 _UICollectionViewListLayoutSectionBackgroundColorDecorationView@-16,80,434x202:0,-448 ListCollectionViewHeaderFooter@16,80,370x40:0,-448 _UISystemBackgroundView@16,80,370x40:0,-448']
-- **raportit/raportit-prev-year** (Raportit → Raportit (previous year)): probe ['MOVE 1792060913.619 tab.raportit n=19 max=319 ListCollectionViewCell@16,681,370x52:0,319 _UISystemBackgroundView@16,681,370x52:0,319 UIView@16,681,370x52:0,319']
-- **raportit/raportit-refresh** (Raportit → Raportit): late change [{'t': 3.1, 'area': 0.028, 'dy_pt': -2, 'what': 'pop'}]; probe ['SCROLLJUMP 1792060928.123 tab.raportit dy=8', 'MOVE 1792060928.123 tab.raportit n=12 max=60 NavigationBarLargeTitleView@0,115,402x52:0,-60 _UITouchPassthroughView@0,-220,402x874:0,8 BackdropView@0,-220,402x170:0,8', 'SCROLLJUMP 1792060928.223 tab.raportit dy=28']
-- **raportit/raportit-drill-open** (Raportit → drill-down): late change [{'t': 1.82, 'area': 0.048, 'dy_pt': 0, 'what': 'pop'}, {'t': 2.35, 'area': 0.053, 'dy_pt': 0, 'what': 'pop'}]; probe ['MOVE 1792060945.808 tab.myynti n=12 max=53 _SwiftUILayerDelegate@502,4,105x34:53,0 _SwiftUILayerDelegate@516,12,63x18:53,0 _SwiftUILayerDelegate@501,3,106x35:53,0']
-- **asetukset/asetukset-templates-open** (Asetukset → Sähköpostimallit): late change [{'t': 3.11, 'area': 0.023, 'dy_pt': 0, 'what': 'pop'}]
-- **asetukset/asetukset-notifications-back** (Ilmoitukset → Asetukset): late change [{'t': 3.85, 'area': 0.085, 'dy_pt': 0, 'what': 'pop'}]
-- **chat/chat-send** (Avustaja → Avustaja (answer)): late change [{'t': 6.42, 'area': 0.082, 'dy_pt': 0, 'what': 'pop'}]
-- **lasku/lasku-open** (Myynti → Lasku): late change [{'t': 3.61, 'area': 0.066, 'dy_pt': 0, 'what': 'pop'}]; probe ['MOVE 1792061511.837 invoice("b40dd4a1-a17e-4d5a-bbe7-e2f4b9b9b5d8") n=5 max=7 HostedViewWrapper@169,73,62x20:-7,0 _UINavigationBarTitleControl@169,73,62x20:-7,0 _UIIntrinsicContentSizeInvalidationForwardingWrapperView@169,73,62x20:-7,0']
-- **pankki/pankki-feed-open** (Pankki → Pankkitapahtumat): probe ['MOVE 1792061655.394 bankFeed n=8 max=84 AnimationView@135,59,262x48:-84,0 PlatterView@146,62,239x44:-80,0 AnimationView@146,62,239x44:-80,0']
-- **pankki/kirjanpito-purchases-open** (Kirjanpito → Ostolaskut): late change [{'t': 3.29, 'area': 0.044, 'dy_pt': 0, 'what': 'pop'}, {'t': 3.49, 'area': 0.085, 'dy_pt': 0, 'what': 'pop'}]; probe ['MOVE 1792061738.847 purchaseInvoices n=13 max=85 HostedViewWrapper@72,73,86x20:-85,0 _UINavigationBarTitleControl@72,73,86x20:-85,0 _UIIntrinsicContentSizeInvalidationForwardingWrapperView@72,73,86x20:-85,0', 'MOVE 1792061739.091 purchaseInvoices n=62 max=1841 _UICollectionViewListLayoutSectionBackgroundColorDecorationView@-16,93,434x136:0,1841 _SwiftUILayerDelegate@283,304,69x18:190,291 _SwiftUILayerDelegate@72,303,135x20:-126,290']
-- **pankki/kirjanpito-periods-open** (Kirjanpito → Kuukauden sulku): probe ['MOVE 1792061785.440 periods n=4 max=182 ListCollectionViewHeaderFooter@16,735,370x45:0,182 _UISystemBackgroundView@16,735,370x45:0,182 _UICollectionViewListCellContentView@16,735,370x45:0,182']
-- **pankki/kirjanpito-alv-open** (Kirjanpito → ALV-ilmoitus): intermediate screens [{'frame': 7, 't': 2.36, 'held_s': 0.26, 'd_start': 9.3, 'd_end': 12.8}]
-- **offline/offline-tab-myynti** (Koti → tab Myynti (offline)): probe ['MOVE 1792061883.400 tab.myynti n=98 max=1832 _UICollectionViewListLayoutSectionBackgroundColorDecorationView@-16,84,434x154:0,1832 _UICollectionViewListLayoutSectionBackgroundColorDecorationView@-16,374,434x351:0,90 _SwiftUILayerDelegate@32,608,161x14:0,90', 'MOVE 1792061883.723 tab.myynti n=3 max=8 _SwiftUILayerDelegate@94,75,18x14:0,8 _SwiftUILayerDelegate@120,74,187x15:0,8 _SwiftUILayerDelegate@80,66,242x32:0,8']
+- **koti/koti-prev-month** (Koti → Koti (previous month)): late change [{'t': 3.84, 'area': 0.019, 'dy_pt': 0, 'what': 'pop'}, {'t': 3.94, 'area': 0.038, 'dy_pt': 0, 'what': 'pop'}, {'t': 4.07, 'area': 0.046, 'dy_pt': 0, 'what': 'pop'}, {'t': 4.17, 'area': 0.029, 'dy_pt': 0, 'what': 'pop'}]
+- **koti/koti-add-sheet** (Koti → Lisää sheet): late change [{'t': 1.81, 'area': 0.021, 'dy_pt': 0, 'what': 'pop'}, {'t': 1.9, 'area': 0.679, 'dy_pt': 0, 'what': 'pop'}, {'t': 2.02, 'area': 0.081, 'dy_pt': 0, 'what': 'pop'}, {'t': 2.03, 'area': 0.084, 'dy_pt': -31, 'what': 'move'}, {'t': 2.09, 'area': 0.033, 'dy_pt': -9, 'what': 'move'}, {'t': 2.14, 'area': 0.021, 'dy_pt': -4, 'what': 'move'}, {'t': 2.28, 'area': 0.032, 'dy_pt': 0, 'what': 'pop'}]
+- **myynti/myynti-tab-revisit-koti** (Myynti → tab Koti): late change [{'t': 1.86, 'area': 0.137, 'dy_pt': 0, 'what': 'pop'}, {'t': 2.03, 'area': 0.019, 'dy_pt': 0, 'what': 'pop'}]
+- **myynti/myynti-recurring-open** (Myynti → Toistuvat laskut): intermediate screens [{'frame': 4, 't': 2.66, 'held_s': 0.52, 'd_start': 11.0, 'd_end': 11.4}]
+- **myynti/myynti-filter-late** (Myynti → Laskut (myöhässä)): intermediate screens [{'frame': 4, 't': 2.32, 'held_s': 0.25, 'd_start': 9.5, 'd_end': 18.0}]; late change [{'t': 3.45, 'area': 0.023, 'dy_pt': 0, 'what': 'pop'}]; probe ['MOVE 1792065071.638 invoice("3f83cd83-3cb6-4dc7-8fb1-4c8f4a6067ef") n=5 max=7 HostedViewWrapper@170,73,62x20:-7,0 _UINavigationBarTitleControl@170,73,62x20:-7,0 _UIIntrinsicContentSizeInvalidationForwardingWrapperView@170,73,62x20:-7,0', 'MOVE 1792065072.351 invoice("3f83cd83-3cb6-4dc7-8fb1-4c8f4a6067ef") n=9 max=47 _SwiftUILayerDelegate@134,344,38x14:-47,0 _SwiftUILayerDelegate@144,321,18x18:-47,0 _SwiftUILayerDelegate@130,271,180x20:-42,0']
+- **raportit/raportit-prev-year** (Raportit → Raportit (previous year)): probe ['MOVE 1792065244.265 tab.raportit n=19 max=319 ListCollectionViewCell@16,681,370x52:0,319 _UISystemBackgroundView@16,681,370x52:0,319 UIView@16,681,370x52:0,319']
+- **raportit/raportit-drill-open** (Raportit → drill-down): late change [{'t': 2.91, 'area': 0.046, 'dy_pt': 0, 'what': 'pop'}, {'t': 3.11, 'area': 0.037, 'dy_pt': 0, 'what': 'pop'}, {'t': 3.28, 'area': 0.052, 'dy_pt': 0, 'what': 'pop'}]
+- **asetukset/asetukset-passkeys-open** (Asetukset → Pääsyavaimet): late change [{'t': 5.24, 'area': 0.017, 'dy_pt': 0, 'what': 'pop'}]
+- **chat/chat-send** (Avustaja → Avustaja (answer)): intermediate screens [{'frame': 111, 't': 4.47, 'held_s': 2.45, 'd_start': 9.3, 'd_end': 12.0}]; late change [{'t': 6.99, 'area': 0.083, 'dy_pt': 0, 'what': 'pop'}]
+- **lasku/lasku-open** (Myynti → Lasku): probe ['MOVE 1792065889.737 invoice("5814959c-24ae-41d6-a9c6-af8df58e35c4") n=5 max=7 HostedViewWrapper@169,73,62x20:-7,0 _UINavigationBarTitleControl@169,73,62x20:-7,0 _UIIntrinsicContentSizeInvalidationForwardingWrapperView@169,73,62x20:-7,0']
+- **pankki/kirjanpito-purchases-open** (Kirjanpito → Ostolaskut): late change [{'t': 4.01, 'area': 0.052, 'dy_pt': 0, 'what': 'pop'}]; probe ['MOVE 1792066126.074 purchaseInvoices n=13 max=85 HostedViewWrapper@72,73,86x20:-85,0 _UINavigationBarTitleControl@72,73,86x20:-85,0 _UIIntrinsicContentSizeInvalidationForwardingWrapperView@72,73,86x20:-85,0']
+- **offline/offline-tab-myynti** (Koti → tab Myynti (offline)): probe ['MOVE 1792066274.253 tab.myynti n=3 max=7 _SwiftUILayerDelegate@94,73,18x14:0,7 _SwiftUILayerDelegate@120,72,187x15:0,7 _SwiftUILayerDelegate@80,64,242x32:0,7']
