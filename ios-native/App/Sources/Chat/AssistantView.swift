@@ -94,13 +94,20 @@ struct AssistantView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
-                    } else if model.aiAvailable == false, !model.streaming, model.messages.last?.role == "assistant" {
-                        // Limited mode: the shortcuts that still work stay at hand after each reply.
-                        shortcuts(model)
                     }
                     ForEach(model.messages) { message in
                         MessageRow(message: message, streaming: model.streaming && message.id == model.messages.last?.id, model: model)
                             .id(message.id)
+                    }
+                    // Limited mode: the shortcuts that still work stay at hand after each reply.
+                    let row = AssistantCooldown.shortcutRow(available: model.aiAvailable, messageCount: model.messages.count,
+                                                            replying: model.streaming, lastRole: model.messages.last?.role)
+                    if row != .none {
+                        shortcuts(model)
+                            .opacity(row == .shown ? 1 : 0)
+                            .allowsHitTesting(row == .shown)
+                            .accessibilityHidden(row != .shown)
+                            .motion(.easeOut(duration: 0.25), value: row)
                     }
                     if let failure = model.failure {
                         VStack(alignment: .leading, spacing: 8) {
@@ -331,6 +338,8 @@ private struct Bubble: View, Equatable {
                     }
                 }
             }
+            // The first words fade in where the typing indicator was (motion audit chat-send).
+            .motion(.easeOut(duration: 0.25), value: message.content.isEmpty)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(mine ? Theme.ink : Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))

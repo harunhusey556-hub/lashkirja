@@ -25,6 +25,20 @@ public enum ReportDrill: Hashable, Sendable {
         }
     }
 
+    /// The Kuitit list a receipts drill opens on (the app's `ReceiptsView`, drilled); nil for the
+    /// other lists. Raportit fills the cache with it, so the pushed list paints its rows with the
+    /// push instead of grey rows the answer then replaces (motion audit raportit-drill-open).
+    public var receiptQuery: ReceiptListQuery? {
+        switch self {
+        case .receipts(let period, let tab, let category):
+            .drilled(month: period, tab: ReceiptTab(rawValue: tab) ?? .all, category: category)
+        case .receiptsMissingVat(let period):
+            .drilled(month: period, missingVat: true)
+        case .invoices, .bankFeed, .purchaseInvoices:
+            nil
+        }
+    }
+
     /// The category rows the profit and loss puts sales invoices and credit notes in.
     static let invoiceCategories: Set<String> = ["Myyntilaskut", "Hyvityslaskut"]
 
