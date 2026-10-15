@@ -107,7 +107,7 @@ struct AssistantView: View {
                             .opacity(row == .shown ? 1 : 0)
                             .allowsHitTesting(row == .shown)
                             .accessibilityHidden(row != .shown)
-                            .motion(.easeOut(duration: 0.25), value: row)
+                            .motion(.linear(duration: 0.3), value: row)
                     }
                     if let failure = model.failure {
                         VStack(alignment: .leading, spacing: 8) {
@@ -338,8 +338,9 @@ private struct Bubble: View, Equatable {
                     }
                 }
             }
-            // The first words fade in where the typing indicator was (motion audit chat-send).
-            .motion(.easeOut(duration: 0.25), value: message.content.isEmpty)
+            // The first words fade in where the typing indicator was (motion audit chat-send):
+            // linear, so no single frame changes much of the screen at once.
+            .motion(.linear(duration: 0.3), value: message.content.isEmpty)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(mine ? Theme.ink : Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
