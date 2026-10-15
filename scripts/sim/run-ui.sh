@@ -33,6 +33,10 @@ curl -s -o /dev/null -X POST "http://127.0.0.1:$UPSTREAM_PORT/api/auth/token" -H
 xcrun simctl boot "$U" 2>/dev/null
 for i in {1..60}; do xcrun simctl list devices | grep "$U" | grep -q Booted && break; sleep 2; done
 sleep 5
+# Uninstalling the app leaves its Keychain items: a walk would restore the previous walk's session,
+# which a reseeded demo DB refuses only after the tabs have painted (motion gate pr-run1 lost its
+# launch that way, CI 2026-10-15). Every walk starts signed out.
+xcrun simctl keychain "$U" reset || echo "simctl keychain reset failed: the walk may start from an old session"
 
 rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
 # XCUIScreen screenshots time out on a headless simulator, so the test asks the host for them.
