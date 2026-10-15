@@ -68,12 +68,20 @@ struct KirjanpitoView: View {
     }
 
     /// The three hub figures load side by side; the pending figure is a count query, not the receipt list.
+    /// Through the app's cache, which the launch prefetch filled: the last figures at once, the
+    /// server's in place when they are stale.
     private func load() async {
         let api = app.api
         // Kuitit only: a bill filed as an ostolasku is counted under Ostolaskut.
-        async let all: ReceiptCounts? = try? api.get("/api/receipts/counts", query: ReceiptListQuery().countsQuery())
-        async let waiting: ReceiptCounts? = try? api.get("/api/receipts/counts", query: ReceiptListQuery.pendingCountQuery)
-        async let open: StatementOpenCount? = try? api.get("/api/statements/counts")
+        let allQuery = ReceiptListQuery().countsQuery()
+        if counts == nil {
+            if let c: ReceiptCounts = await app.cachedValue("/api/receipts/counts", query: allQuery) { counts = c.counts }
+            if let p: ReceiptCounts = await app.cachedValue("/api/receipts/counts", query: ReceiptListQuery.pendingCountQuery) { pending = p.counts.all }
+            if let o: StatementOpenCount = await app.cachedValue("/api/statements/counts") { openRows = o.open }
+        }
+        async let all: ReceiptCounts? = try? app.cachedGet("/api/receipts/counts", query: allQuery)
+        async let waiting: ReceiptCounts? = try? app.cachedGet("/api/receipts/counts", query: ReceiptListQuery.pendingCountQuery)
+        async let open: StatementOpenCount? = try? app.cachedGet("/api/statements/counts")
         if let c = await all { counts = c.counts }
         if let p = await waiting { pending = p.counts.all }
         if let o = await open {

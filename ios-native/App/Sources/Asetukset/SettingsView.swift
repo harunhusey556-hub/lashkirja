@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var app
     @State private var profile: Profile?
     @State private var profileFailure: String?
+    @State private var profileAsked = false
     @State private var lockEnabled = AppLock.shared.isEnabled
     @State private var confirmLogout = false
     @State private var savingAutoLink = false
@@ -12,7 +13,8 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-            if let profile {
+            // The profile AppModel already holds (the launch prefetch read it) shows at once.
+            if let profile = profile ?? app.profile {
                 Section {
                     NavigationLink { ProfileForm(original: profile, section: .person) { saved($0) } } label: {
                         SettingRow(title: [profile.firstName, profile.lastName].compactMap { $0 }.joined(separator: " "), subtitle: profile.email, symbol: "person.crop.circle")
@@ -51,7 +53,7 @@ struct SettingsView: View {
                     Button("Yritä uudelleen") { Task { await loadProfile() } }
                 }
             } else {
-                ProgressView().task { await loadProfile() }
+                ProgressView()
             }
             Section("Tili ja turvallisuus") {
                 NavigationLink { PasswordView() } label: { SettingRow(title: "Vaihda salasana", subtitle: nil, symbol: "key") }
@@ -81,7 +83,14 @@ struct SettingsView: View {
         .navigationTitle("Asetukset")
         // The lock lives outside SwiftUI state; read it again when coming back from its screen.
         .onAppear { lockEnabled = AppLock.shared.isEnabled }
-        .perfReady("asetukset", profile != nil)
+        .perfReady("asetukset", profile ?? app.profile != nil)
+        .task {
+            // Once per opening: the server's profile replaces the one shown, in place.
+            guard !profileAsked else { return }
+            profileAsked = true
+            if profile == nil { profile = app.profile }
+            await loadProfile()
+        }
         .confirmSheet(isPresented: $confirmLogout, title: "Kirjaudutaanko ulos?", confirmTitle: "Kirjaudu ulos") {
             Task { await app.logout() }
         }

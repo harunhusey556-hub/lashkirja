@@ -290,17 +290,20 @@ struct BankFeedView: View {
         .refreshable {
             // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
             gate.mark(key: month ?? "", version: app.refreshEverything())
+            async let links: Void = loadBankLinks()
             await load()
-            await loadBankLinks()
+            await links
         }
         .perfReady("pankkiFeed", state.value != nil)
         .task(id: loadKey) {
-            restore()
+            await restore()
             guard state.value == nil || gate.isDue(key: month ?? "", version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion
+            // The bank links only fill the menu: they load beside the rows, not after them.
+            async let links: Void = loadBankLinks()
             await load()
-            await loadBankLinks()
+            await links
             if !Task.isCancelled { gate.mark(key: month ?? "", version: version) }
         }
         .motion(.snappy, value: onlyOpen)
@@ -329,7 +332,11 @@ struct BankFeedView: View {
         let loadedRows = statements.reduce(0) { $0 + $1.transactions.count }
         let query = CursorPaging.firstQuery(BankFeed.query(month: requested), loadedRows: loadedRows)
         do {
-            let list: StatementList = try await app.api.get("/api/statements", query: query)
+            // The first page goes through the app's cache (Kirjanpito warms it); a reload of more
+            // rows than one page asks the server.
+            let list: StatementList = loadedRows <= CursorPaging.pageSize
+                ? try await app.cachedGet("/api/statements", query: query)
+                : try await app.api.get("/api/statements", query: query)
             guard requested == month else { return }
             statements = list.statements
             paging.firstPage(next: list.nextCursor)
@@ -366,11 +373,21 @@ struct BankFeedView: View {
     }
 
     /// The previous visit's rows for this month filter, shown at once; the load refreshes them behind.
-    private func restore() {
-        guard state.value == nil, let memory = app.bankFeedMemory[month ?? ""] else { return }
-        statements = memory.statements
-        paging = memory.paging
-        state.succeed(BankFeed.months(memory.statements))
+    /// No visit yet: the cached first page (Kirjanpito warms it), so the screen opens with rows.
+    private func restore() async {
+        guard state.value == nil else { return }
+        if let memory = app.bankFeedMemory[month ?? ""] {
+            statements = memory.statements
+            paging = memory.paging
+            state.succeed(BankFeed.months(memory.statements))
+            return
+        }
+        let requested = month
+        guard let list: StatementList = await app.cachedValue("/api/statements", query: CursorPaging.firstQuery(BankFeed.query(month: requested))),
+              requested == month, state.value == nil else { return }
+        statements = list.statements
+        paging.firstPage(next: list.nextCursor)
+        state.succeed(BankFeed.months(list.statements))
     }
 
     private func remember() {
@@ -513,7 +530,7 @@ struct BankFeedView: View {
 
     /// Best effort: without the connections the menu simply has no "Päivitä".
     private func loadBankLinks() async {
-        guard let list: BankConnections = try? await app.api.get("/api/bank/connections") else { return }
+        guard let list: BankConnections = try? await app.cachedGet("/api/bank/connections") else { return }
         bankLinks = list.connections
     }
 

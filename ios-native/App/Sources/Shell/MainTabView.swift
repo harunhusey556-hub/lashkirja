@@ -128,6 +128,7 @@ struct MainTabView: View {
         if next != tab {
             Haptics.selection()
             Perf.beginTab(next.perfRow)
+            app.warmNext(from: next)
         }
         EventLog.shared.log(.screen("tab.\(next)"))
         tab = next

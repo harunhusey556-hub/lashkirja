@@ -71,6 +71,8 @@ final class AppModel {
     private var eventFlushLoop: Task<Void, Never>?
     private var versionPoll: Task<Void, Never>?
     private var prefetchTask: Task<Void, Never>?
+    private var nextPrefetchTask: Task<Void, Never>?
+    @ObservationIgnored private var profileLoad: Task<Profile?, Never>?
     /// A server without `/api/bootstrap` (404) is not asked again this session.
     private var bootstrapMissing = false
     private var versionSettle: Task<Void, Never>?
@@ -267,13 +269,42 @@ final class AppModel {
         prefetchTask = Task { [weak self] in
             guard let self else { return }
             // Side by side: the bootstrap's counts stand in for the counts request if it is first.
+            // The profile too: Koti's ALV row and the ALV screen wait on it.
             async let booted: Void = self.bootstrap(kuititFilter: filter)
-            await withTaskGroup(of: Void.self) { group in
-                for request in requests {
-                    group.addTask { await self.warm(request) }
-                }
-            }
+            async let profile = self.cachedProfile()
+            await self.warmAll(requests)
             await booted
+            _ = await profile
+            // Koti is painted: the other tabs' first screens next, before the owner taps them.
+            guard !Task.isCancelled else { return }
+            await self.warmAll(NextPrefetch.afterKoti(month: MonthKey.current()))
+        }
+    }
+
+    /// A tab was chosen: the screens one tap away from it start loading now. Fills the cache only.
+    func warmNext(from tab: AppTab) {
+        guard case .signedIn = phase else { return }
+        nextPrefetchTask?.cancel()
+        nextPrefetchTask = Task { [weak self] in
+            guard let self else { return }
+            switch tab {
+            case .kirjanpito:
+                let kind = VatKind(profile: await self.cachedProfile()?.vatPeriod)
+                let alv = VatDue.nextDueKey(today: APIDate.dayString(Date()), kind: kind)
+                await self.warmAll(NextPrefetch.kirjanpito(month: MonthKey.current(), alvPeriod: alv))
+            case .myynti:
+                await self.warmAll(NextPrefetch.myynti())
+            default:
+                break
+            }
+        }
+    }
+
+    private func warmAll(_ requests: [PrefetchRequest]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for request in requests {
+                group.addTask { await self.warm(request) }
+            }
         }
     }
 
@@ -407,11 +438,25 @@ final class AppModel {
         profileChanged(nil)
     }
 
+    /// Asked once however many screens want it at the same time (the launch prefetch, Koti, ALV).
     func cachedProfile() async -> Profile? {
         if let profile { return profile }
         let started = session.current
-        guard let response: ProfileResponse = try? await api.get("/api/profile"), session.isCurrent(started) else { return profile }
-        profile = response.profile
+        let task: Task<Profile?, Never>
+        if let running = profileLoad {
+            task = running
+        } else {
+            let api = self.api
+            task = Task {
+                let response: ProfileResponse? = try? await api.get("/api/profile")
+                return response?.profile
+            }
+            profileLoad = task
+        }
+        let loaded = await task.value
+        if profileLoad == task { profileLoad = nil }
+        guard let loaded, session.isCurrent(started) else { return profile }
+        profile = loaded
         return profile
     }
 
@@ -451,6 +496,9 @@ final class AppModel {
         versionRouteMissing = false
         prefetchTask?.cancel()
         prefetchTask = nil
+        nextPrefetchTask?.cancel()
+        nextPrefetchTask = nil
+        profileLoad = nil
         bootstrapMissing = false
         // This owner's cached answers, in memory and on disk, go with them.
         let resources = self.resources

@@ -290,12 +290,17 @@ struct BankAccountsView: View {
 
     private func load() async {
         var problem: String?
-        // Accounts and connections load side by side.
-        let api = app.api
+        let app = self.app
         let startedAt = Date()
         let query = showArchived ? ["includeArchived": "1"] : [String: String]()
-        async let accountsResult = Result<BankAccountsOverview, Error>(asyncCatching: { try await api.get("/api/bank-accounts", query: query) })
-        async let connectionsResult = Result<BankConnections, Error>(asyncCatching: { try await api.get("/api/bank/connections") })
+        // The cached answers first (the launch prefetch and Kirjanpito warm them), so the screen
+        // opens with its accounts; the server's then replace them in place.
+        if overview == nil, let cached: BankAccountsOverview = await app.cachedValue("/api/bank-accounts", query: query) { overview = cached }
+        if connections == nil, let cached: BankConnections = await app.cachedValue("/api/bank/connections") { connections = cached }
+        // Accounts and connections load side by side. The accounts always from the server: their
+        // balances settle the ones a sync returned, which a cached answer cannot.
+        async let accountsResult = Result<BankAccountsOverview, Error>(asyncCatching: { try await app.cachedGet("/api/bank-accounts", query: query, force: true) })
+        async let connectionsResult = Result<BankConnections, Error>(asyncCatching: { try await app.cachedGet("/api/bank/connections") })
         let (accounts, links) = await (accountsResult, connectionsResult)
         if Task.isCancelled { return }
         switch accounts {

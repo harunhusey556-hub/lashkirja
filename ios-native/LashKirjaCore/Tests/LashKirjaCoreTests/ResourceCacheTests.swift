@@ -180,6 +180,101 @@ private let key = ResourceKey(user: "u1", path: "/api/receipts", query: ["sort":
 
 // MARK: Disk
 
+// MARK: Last good answer (w35: screens paint the cached answer, then refresh it in place)
+
+private struct Figures: Decodable, Equatable { let n: Int }
+private struct Report: Decodable, Equatable { let n: Int; let extra: String? }
+
+@Suite struct LastGoodAnswerTests {
+    @Test func aStaleAnswerIsShownAndTheRefreshReplacesIt() async throws {
+        let clock = Clock()
+        let cache = ResourceCache(now: { clock.now })
+        let _: Box = try await cache.load(key, version: 0) { body(1) }
+        clock.now += 120
+        // The screen opens: the old answer paints at once, marked stale...
+        let shown = try #require(await cache.cached(key, version: 0, as: Box.self))
+        #expect(shown.value == Box(n: 1))
+        #expect(shown.isFresh == false)
+        // ...its load asks the server, and the answer takes the old one's place.
+        let fresh: Box = try await cache.load(key, version: 0) { body(2) }
+        #expect(fresh == Box(n: 2))
+        let after = try #require(await cache.cached(key, version: 0, as: Box.self))
+        #expect(after.value == Box(n: 2))
+        #expect(after.isFresh)
+    }
+
+    @Test func aPullToRefreshReplacesEvenAFreshAnswer() async throws {
+        let cache = ResourceCache()
+        let _: Box = try await cache.load(key, version: 0) { body(1) }
+        let refreshed: Box = try await cache.load(key, version: 0, force: true) { body(2) }
+        #expect(refreshed == Box(n: 2))
+        #expect(await cache.cached(key, version: 0, as: Box.self)?.value == Box(n: 2))
+    }
+
+    @Test func theLastLaunchsAnswerShowsAndAFailedRefreshKeepsIt() async throws {
+        let store = tempStore()
+        defer { store.removeAll() }
+        let first = ResourceCache(store: store)
+        let _: Box = try await first.load(key, version: 0, persist: true) { body(5) }
+        await first.flushWrites()
+        // Next launch, offline: the figures of last time are on screen, and stay there.
+        let next = ResourceCache(store: store)
+        #expect(await next.cached(key, version: 0, as: Box.self)?.value == Box(n: 5))
+        await #expect(throws: LKError.self) {
+            let _: Box = try await next.load(key, version: 0) { throw LKError.offline() }
+        }
+        #expect(await next.cached(key, version: 0, as: Box.self)?.value == Box(n: 5))
+        let back: Box = try await next.load(key, version: 0) { body(6) }
+        #expect(back == Box(n: 6))
+    }
+
+    @Test func twoScreensReadOneAnswerAsTheirOwnTypes() async throws {
+        // Koti reads /api/alv as its row's figures, the ALV screen as the whole report: one request.
+        let cache = ResourceCache()
+        let calls = Calls()
+        let alv = ResourceKey(user: "u1", path: "/api/alv", query: ["period": "2026-Q3"])
+        let _: Figures = try await cache.load(alv, version: 0) {
+            await calls.hit()
+            return Data(#"{"n":4,"extra":"x"}"#.utf8)
+        }
+        let report = try #require(await cache.cached(alv, version: 0, as: Report.self))
+        #expect(report.value == Report(n: 4, extra: "x"))
+        #expect(report.isFresh)
+        let again: Figures = try await cache.load(alv, version: 0) { await calls.hit(); return Data() }
+        #expect(again == Figures(n: 4))
+        #expect(await calls.count == 1)
+    }
+}
+
+@Suite struct NextPrefetchTests {
+    @Test func kotiWarmsTheOtherTabsWithTheirScreensQueries() {
+        let requests = NextPrefetch.afterKoti(month: "2026-10")
+        // Myynti opens on every invoice, no chip, no search.
+        #expect(requests.contains(PrefetchRequest(path: "/api/invoices", query: SalesListQuery.query(scope: InvoiceScope(), filter: .all, search: ""))))
+        #expect(requests.contains(PrefetchRequest(path: "/api/invoices/counts", query: [:], persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/receipts/counts", query: ReceiptListQuery.pendingCountQuery, persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/reports/profit-loss", query: ["from": "2026-01", "to": "2026-12"], persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/ai/chat", persist: false)))
+        // Only the launch lists go to disk; Myynti's list is one of the screen's own persisted keys.
+        #expect(requests.filter(\.persist).map(\.path) == ["/api/invoices"])
+    }
+
+    @Test func kirjanpitoWarmsTheFeedsFirstPageTheCloseMonthAndTheReturnDue() {
+        let requests = NextPrefetch.kirjanpito(month: "2026-10", alvPeriod: "2026-Q3")
+        #expect(requests.contains(PrefetchRequest(path: "/api/statements", query: ["cursor": "", "limit": "50"], persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/bank/connections", persist: false)))
+        // "Kuukauden sulku" opens on last month.
+        #expect(requests.contains(PrefetchRequest(path: "/api/dashboard/month", query: ["month": "2026-09"], persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/period-lock", persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/alv", query: ["period": "2026-Q3"], persist: false)))
+        #expect(NextPrefetch.kirjanpito(month: "2026-10", alvPeriod: nil).allSatisfy { $0.path != "/api/alv" })
+    }
+
+    @Test func myyntiWarmsTheNewInvoiceForm() {
+        #expect(NextPrefetch.myynti().map(\.path) == ["/api/customers", "/api/catalog"])
+    }
+}
+
 @Suite struct ResourceDiskTests {
     @Test func aPersistedListPaintsOnTheNextLaunchButIsNeverFresh() async throws {
         let store = tempStore()
