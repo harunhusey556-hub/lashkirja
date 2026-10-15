@@ -7,7 +7,7 @@ name: iOS perf walk
 on:
   push:
     branches: ["fix/w35-preload-perf"]
-    paths: [".github/workflows/ios-perf-walk.yml", "scripts/sim/perf-medians.py"]
+    paths: [".github/workflows/ios-perf-walk.yml", "scripts/sim/perf-medians.py", "ios-native/App/Tests/LashKirjaUITests/PerfWalkTests.swift"]
   workflow_dispatch:
     inputs:
       base:
