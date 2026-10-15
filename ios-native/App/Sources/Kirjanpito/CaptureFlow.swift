@@ -240,9 +240,18 @@ struct CaptureFlow: View {
             Text("Lisää kuva tai PDF kuitista tai laskusta").font(.headline).multilineTextAlignment(.center)
             pickButtons
             if let importFailure { Text(importFailure).font(.footnote).foregroundStyle(Theme.danger).transition(.opacity) }
+            // Under the buttons, so they never move when it comes or goes.
+            if showsQueued {
+                QueuedReceiptsStatus().padding(.top, 8).transition(.opacity)
+            }
         }
         .motion(.snappy, value: importFailure)
+        .motion(.snappy, value: showsQueued)
     }
+
+    /// The offline queue (Kuitit's card, under this cover) has photos or a stop to show. A bank-row
+    /// match never puts its file there, so it shows only the bulk queue's own rows.
+    private var showsQueued: Bool { !single && QueuedReceiptsStatus.shows }
 
     @ViewBuilder private var pickButtons: some View {
         if Self.cameraAvailable {
@@ -256,7 +265,10 @@ struct CaptureFlow: View {
         Button { showFiles = true } label: { Label("Valitse tiedosto", systemImage: "doc").frame(maxWidth: .infinity, minHeight: 44) }
             .buttonStyle(.bordered)
         // UI tests only (Debug + `-LKUITest`): the simulator has no camera to take a picture with.
-        if UITestHooks.active { fixtureButton }
+        if UITestHooks.active {
+            fixtureButton
+            queueFixtureButton
+        }
     }
 
     private var fixtureButton: some View {
@@ -265,6 +277,17 @@ struct CaptureFlow: View {
         } label: { Label("Testikuitti", systemImage: "testtube.2").frame(maxWidth: .infinity, minHeight: 44) }
             .buttonStyle(.bordered)
             .accessibilityIdentifier("capture-fixture")
+    }
+
+    /// UI tests only: the fixture kept on the phone the way a file read without a connection is
+    /// (`CaptureQueueModel.keepOffline`), since the simulator's network cannot be cut from a test.
+    private var queueFixtureButton: some View {
+        Button {
+            guard let data = ReceiptImageEncoder.jpeg(from: UITestHooks.fixtureReceipt()) else { return }
+            OfflineReceiptQueueModel.shared.enqueue(app: app, data: data, fileName: UITestHooks.fixtureName, mimeType: "image/jpeg")
+        } label: { Label("Testikuitti jonoon", systemImage: "tray.and.arrow.down").frame(maxWidth: .infinity, minHeight: 44) }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("capture-queue-fixture")
     }
 
     /// Nothing is ever inserted above the rows or taken from between them while files finish (owner,
@@ -306,11 +329,17 @@ struct CaptureFlow: View {
                 // UI tests only (Debug + `-LKUITest`): the simulator has no camera to take a picture with.
                 if UITestHooks.active {
                     fixtureButton.listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    queueFixtureButton.listRowBackground(Color.clear).listRowSeparator(.hidden)
                 }
                 if let importFailure {
                     Text(importFailure).font(.footnote).foregroundStyle(Theme.danger).listRowSeparator(.hidden)
                         .transition(.opacity)
                 }
+            }
+            // Last, under the actions: nothing above it moves when it comes or goes. A row kept for
+            // later says "Odottaa yhteyttä" above for good; this says when it is sent or refused.
+            if showsQueued {
+                Section { QueuedReceiptsStatus() }.transition(.opacity)
             }
         }
         .scrollContentBackground(.hidden)
@@ -319,6 +348,7 @@ struct CaptureFlow: View {
         .motion(.snappy, value: queue.isFinished)
         .motion(.snappy, value: queue.holdsWork)
         .motion(.snappy, value: importFailure)
+        .motion(.snappy, value: showsQueued)
     }
 
     private var primaryTitle: String { queue.reviewButtonTitle ?? "Valmis" }
