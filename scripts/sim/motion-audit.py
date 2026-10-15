@@ -11,8 +11,9 @@ Per step (docs/quality/SIMULATOR.md §4):
   shift-video   after the step's motion went quiet (QUIET_S without a new frame), the screen
                 changes again over more than SHIFT_AREA of its area: content popping in late, a
                 list jumping, a scroll position reset.
-  shift-probe   the app's own MotionProbe (MOVE/SCROLLJUMP lines) saw layers move more than 2 pt
-                after the step's layout had been quiet for PROBE_QUIET_S. Catches what 4 fps misses.
+  shift-probe   the app's own MotionProbe saw layers move more than PROBE_MIN_PT after the step's
+                layout settled (its QUIET line: 0.4 s of ticks with nothing moving). Moves made only
+                of system chrome (CHROME) are transition machinery, not a shift. Catches what 4 fps misses.
   jank          frames missing against 60 fps while the screen moved. The Haswell simulator emits
                 ~4 fps, so this is reported, never judged (in-app signposts are the jank tool).
   settle_ms     from the tap to the last frame that moved.
@@ -32,7 +33,6 @@ BLANK_STD = 2.0         # a frame this uniform is blank
 HOLD_S = 0.25           # an intermediate screen stands at least this long
 QUIET_S = 0.6           # no new frame for this long: the step's motion is over
 SHIFT_AREA = 0.015      # share of the screen that must change after settling to call it a shift
-PROBE_QUIET_S = 0.5
 PROBE_MIN_PT = 3        # probe moves smaller than this are rounding
 CALIBRATION = """Thresholds were set on test00_Calibration: good = tab switch to Kirjanpito, push to
 Kuukauden sulku and its swipe-back; bad = the w32 brief's item 7 (capture upload, the screen moves
@@ -184,7 +184,7 @@ def probe_events(path):
         return out
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()
-        if len(parts) < 3 or parts[0] not in ("MOVE", "SCROLLJUMP", "SCREEN", "ROOT"):
+        if len(parts) < 3 or parts[0] not in ("MOVE", "SCROLLJUMP", "SCREEN", "ROOT", "QUIET"):
             continue
         try:
             t = float(parts[1])
@@ -194,25 +194,41 @@ def probe_events(path):
         m = re.search(r"max=(\d+)", line)
         ev["max"] = int(m.group(1)) if m else (abs(int(re.search(r"dy=(-?\d+)", line).group(1))) if "dy=" in line else 0)
         out.append(ev)
+    # A log from a probe without QUIET lines: a 0.5 s gap between moves stands for one.
+    if out and not any(e["kind"] == "QUIET" for e in out):
+        moves = [e for e in out if e["kind"] in ("MOVE", "SCROLLJUMP")]
+        for a, b in zip(moves, moves[1:] + [None]):
+            if b is None or b["t"] - a["t"] > 0.5:
+                out.append({"kind": "QUIET", "t": a["t"] + 0.5, "screen": a["screen"], "raw": "", "max": 0})
+        out.sort(key=lambda e: e["t"])
     return out
 
 
+# System chrome that moves by design during a transition (sheet shadow, bars, large title,
+# recycled list decorations): a MOVE made only of these is not a layout shift.
+CHROME = re.compile(r"^(UIDropShadowView|UITransitionView|_UIBarBackground|UIVisualEffectView|_UIVisualEffect\w*|"
+                    r"_UINavigationBar\w*|_UIButtonBarStackView|_UICollectionViewListLayoutSectionBackgroundColorDecorationView|"
+                    r"UIRefreshControl|_UIRefreshControl\w*|UIActivityIndicatorView|_UISystemBackgroundView|UIView)@")
+
+
+def chrome_only(raw):
+    parts = raw.split()[5:]
+    return bool(parts) and all(CHROME.match(p) for p in parts)
+
+
 def probe_shift(events, start, end):
-    """MOVE/SCROLLJUMP after the step's layout went quiet, within [start, end]."""
-    moves = [e for e in events if e["kind"] in ("MOVE", "SCROLLJUMP") and start <= e["t"] <= end]
-    if not moves:
+    """MOVE/SCROLLJUMP after the step's layout settled (the probe's own QUIET line, written only
+    after ticks that ran), within [start, end]."""
+    window = [e for e in events if start <= e["t"] <= end and e["kind"] in ("MOVE", "SCROLLJUMP", "QUIET")]
+    first_move = next((i for i, e in enumerate(window) if e["kind"] != "QUIET"), None)
+    if first_move is None:
         return [], None
-    last = moves[0]["t"]
-    settled_at = None
-    late = []
-    for e in moves[1:]:
-        if settled_at is None and e["t"] - last > PROBE_QUIET_S:
-            settled_at = last
-        if settled_at is not None and e["max"] >= PROBE_MIN_PT:
-            late.append(e)
-        if settled_at is None:
-            last = e["t"]
-    return late, int(((settled_at or last) - start) * 1000)
+    settled = next((e["t"] for e in window[first_move:] if e["kind"] == "QUIET"), None)
+    if settled is None:
+        return [], None
+    late = [e for e in window if e["kind"] != "QUIET" and e["t"] > settled and e["max"] >= PROBE_MIN_PT
+            and not (e["kind"] == "MOVE" and chrome_only(e["raw"]))]
+    return late, int((settled - start) * 1000)
 
 
 def main():
@@ -260,7 +276,7 @@ def main():
              f"shift (video) {count('shift_video')}, shift (probe) {count('shift_probe')}.", "",
              "## Calibration", "", CALIBRATION, "",
              f"Thresholds: STATIC_DIFF={STATIC_DIFF}, DISTINCT={DISTINCT}, FLASH_LUMA={FLASH_LUMA}, QUIET_S={QUIET_S}, "
-             f"SHIFT_AREA={SHIFT_AREA}, PROBE_QUIET_S={PROBE_QUIET_S}, PROBE_MIN_PT={PROBE_MIN_PT}.", "",
+             f"SHIFT_AREA={SHIFT_AREA}, PROBE_MIN_PT={PROBE_MIN_PT}.", "",
              "Jank is not judged: the simulator writes ~4 frames a second, so 'dropped' counts every animation.", "",
              "## Steps", "",
              "| suite | step | from → to | kind | reached | intermediate | flash | shift video | shift probe | settle ms | dropped@60 | sheet |",

@@ -14,6 +14,7 @@ import os
 ///   ROOT <t> <name> <w>x<h>                    the screen's root changed size (GeometryReader)
 ///   MOVE <t> <screen> n=<count> max=<pt> ...   layers moved more than 2 pt since the last tick
 ///   SCROLLJUMP <t> <screen> dy=<pt>            a scroll offset changed with no finger on it
+///   QUIET <t> <screen>                         nothing moved for 0.4 s of ticks: the layout settled
 /// scripts/sim/motion-audit.py calls a MOVE after the step's motion went quiet a late layout shift.
 /// Signposts (category `Motion`) mark each screen and how long it took to stop moving.
 @MainActor
@@ -83,6 +84,9 @@ final class MotionProbe: NSObject {
             if let state = moving, t - lastMove > Self.quiet {
                 Self.signposter.endInterval("settle", state)
                 moving = nil
+                // Written only after ticks that really ran: a main thread that stalls mid-animation
+                // on a loaded Mac is not "quiet".
+                write("QUIET \(Self.now) \(screen)")
             }
             return
         }
@@ -128,7 +132,11 @@ final class MotionProbe: NSObject {
 
 private struct MotionRootSize: PreferenceKey {
     static let defaultValue = CGSize.zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
+    // The screen's own subtree reports zero; the GeometryReader's size must win whatever the order.
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        value = CGSize(width: max(value.width, next.width), height: max(value.height, next.height))
+    }
 }
 
 extension View {

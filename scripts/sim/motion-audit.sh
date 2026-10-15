@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Simulator motion audit in one command, from the Windows PC (docs/quality/SIMULATOR.md §4):
-#   scripts/sim/motion-audit.sh [--no-sync | --sync-only | --collect] [suite ...]
+#   scripts/sim/motion-audit.sh [--head] [--no-sync | --sync-only | --collect] [suite ...]
 #   e.g. test00_Calibration test01_Koti (default: the whole class as one run, "all"). --collect only waits for and copies
 #   back runs already started (when the caller's shell gave up waiting), then analyzes.
 # 1. Snapshots this worktree (uncommitted changes too, never .mono) and sends it to the iMac as a
@@ -14,8 +14,8 @@ UDID=${LK_SIM_UDID:-9D2F3A52-4B81-4EB3-B6FF-0C457695BB90}
 REMOTE=${LK_REMOTE_DIR:-LashKirja/motion-sim}
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 OUT=${LK_MOTION_OUT:-sim-shots/motion}  # relative to the repo: Windows Python cannot read /c/... paths
-SYNC=1; RUN=1; SYNC_ONLY=0
-while [ $# -gt 0 ]; do case $1 in --no-sync) SYNC=0; shift;; --collect) SYNC=0; RUN=0; shift;; --sync-only) SYNC_ONLY=1; shift;; *) break;; esac; done
+SYNC=1; RUN=1; SYNC_ONLY=0; HEAD_ONLY=0
+while [ $# -gt 0 ]; do case $1 in --no-sync) SYNC=0; shift;; --collect) SYNC=0; RUN=0; shift;; --sync-only) SYNC_ONLY=1; shift;; --head) HEAD_ONLY=1; shift;; *) break;; esac; done
 SUITES=("$@")
 # No suite named: the whole class in one run (one build check, one sign-in), as "all".
 [ ${#SUITES[@]} -gt 0 ] || SUITES=(all)
@@ -27,6 +27,8 @@ idx=$(mktemp)
 GIT_INDEX_FILE=$idx git read-tree HEAD
 GIT_INDEX_FILE=$idx git add -A  # .mono is ignored
 snap=$(git commit-tree "$(GIT_INDEX_FILE=$idx git write-tree)" -p HEAD -m "motion-audit snapshot")
+# --head: the last commit only (a "before" run while fixes wait uncommitted).
+[ $HEAD_ONLY = 1 ] && snap=$(git rev-parse HEAD)
 rm -f "$idx"
 git update-ref refs/motion-audit/snapshot "$snap"
 mkdir -p build-sim; bundle=build-sim/motion-audit.bundle  # relative: git and scp read /tmp differently on Windows

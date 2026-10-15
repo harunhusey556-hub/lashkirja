@@ -113,9 +113,10 @@ final class MotionAuditTests: WalkTestCase {
     func find(_ pred: String, _ arg: String, scrolls: Int = 6) -> XCUIElement? {
         let e = element(pred, arg)
         _ = e.waitForExistence(timeout: 10)
-        for _ in 0...scrolls {
-            if e.exists && e.isHittable && e.frame.minY > 90 && e.frame.maxY < app.windows.firstMatch.frame.maxY - 90 { return e }
-            guard e.exists || scrolls > 0 else { break }
+        for attempt in 0...scrolls {
+            // Without scrolling (toolbar buttons, sheets) any hittable match will do.
+            if e.exists && e.isHittable && (scrolls == 0 || (e.frame.minY > 90 && e.frame.maxY < app.windows.firstMatch.frame.maxY - 90)) { return e }
+            if attempt == scrolls { break }
             app.windows.firstMatch.swipeUp(velocity: .slow); sleep(1)
         }
         return e.exists && e.isHittable ? e : nil
