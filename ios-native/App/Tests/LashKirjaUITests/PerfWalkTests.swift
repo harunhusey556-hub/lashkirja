@@ -30,12 +30,12 @@ final class PerfWalkTests: WalkTestCase {
         }
         tab("Kirjanpito")
         for label in ["Kuitit", "Kohdista kuitit", "Kuukauden sulku", "ALV-ilmoitus"] {
-            if open(label) { sleep(3); back() }
+            if openRow(label) { sleep(3); back() }
         }
-        if open("Pankki") {
+        if openRow("Pankki") {
             sleep(2)
             // Without a bank connection the hub offers "Yhdistä pankki" instead of its links.
-            if press("Yhdistä pankki") || open("Pankkiyhteys ja tilit") { sleep(3); back() }
+            if press("Yhdistä pankki") || openRow("Pankkiyhteys ja tilit") { sleep(3); back() }
             back()
         }
         // The sheets open from a tab's root, where the toolbar is.
@@ -62,7 +62,7 @@ final class PerfWalkTests: WalkTestCase {
     }
 
     /// Taps the on-screen row whose label starts with `prefix`, scrolling down for it.
-    private func open(_ prefix: String) -> Bool {
+    private func openRow(_ prefix: String) -> Bool {
         let rows = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", prefix))
         _ = rows.firstMatch.waitForExistence(timeout: 8)
         for _ in 0...6 {
