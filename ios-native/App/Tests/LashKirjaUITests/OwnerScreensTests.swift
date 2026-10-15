@@ -103,10 +103,8 @@ final class OwnerScreensTests: WalkTestCase {
         guard tapLabel("label CONTAINS %@", "ABC Prisma Kotka") else {
             capture("a0-no-row"); XCTFail("seed receipt ABC Prisma Kotka is not listed"); return
         }
-        // The menu is in the bar from the first frame and turns enabled once the receipt is loaded.
         let actions = app.buttons["Toiminnot"].firstMatch
-        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND isEnabled == true"), object: actions)
-        guard XCTWaiter().wait(for: [loaded], timeout: 20) == .completed else { capture("a0-no-detail"); XCTFail("the receipt did not load"); return }
+        guard actions.waitForExistence(timeout: 20) else { capture("a0-no-detail"); XCTFail("the receipt did not load"); return }
         capture("a1-receipt-detail")
         actions.tap()
         let delete = app.buttons["Poista kuitti"].firstMatch

@@ -131,15 +131,14 @@ struct ReceiptDetailView: View {
         .refreshable { await load(force: true) }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // Always there, only disabled until the receipt is loaded: the bar does not change
-            // while the list row's preview turns into the receipt.
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
-                    Button(role: .destructive) { confirmDelete = true } label: { Label("Poista kuitti", systemImage: "trash") }
-                } label: { Image(systemName: "ellipsis.circle") }
-                .accessibilityLabel("Toiminnot")
-                .disabled(state.value == nil)
+            if state.value != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
+                        Button(role: .destructive) { confirmDelete = true } label: { Label("Poista kuitti", systemImage: "trash") }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Toiminnot")
+                }
             }
         }
         .motion(.snappy, value: failure)
