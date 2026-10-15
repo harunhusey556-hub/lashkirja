@@ -32,7 +32,11 @@ final class PerfWalkTests: WalkTestCase {
         for label in ["Kuitit", "Kohdista kuitit", "Kuukauden sulku", "ALV-ilmoitus"] {
             if openRow(label) { sleep(3); back() }
         }
-        if openRow("Pankki") {
+        // The rows above were found by scrolling down: back to the top, where the Pankki row is.
+        // Its title exactly: "Pankki" as a prefix also matched the subtitles further down
+        // ("Pankkitapahtumat, joille puuttuu kuitti"), which open Kohdista kuitit instead.
+        app.windows.firstMatch.swipeDown(velocity: .fast)
+        if openRow("Pankki", exact: true) {
             sleep(2)
             // Without a bank connection the hub offers "Yhdistä pankki" instead of its links.
             if press("Yhdistä pankki") || openRow("Pankkiyhteys ja tilit") { sleep(3); back() }
@@ -61,9 +65,9 @@ final class PerfWalkTests: WalkTestCase {
         return true
     }
 
-    /// Taps the on-screen row whose label starts with `prefix`, scrolling down for it.
-    private func openRow(_ prefix: String) -> Bool {
-        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", prefix))
+    /// Taps the on-screen row whose label starts with `prefix` (is `prefix`, when `exact`), scrolling down for it.
+    private func openRow(_ prefix: String, exact: Bool = false) -> Bool {
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: exact ? "label == %@" : "label BEGINSWITH %@", prefix))
         _ = rows.firstMatch.waitForExistence(timeout: 8)
         for _ in 0...6 {
             if let row = rows.allElementsBoundByIndex.first(where: { $0.isHittable && $0.frame.minY > 30 }) {
@@ -77,9 +81,12 @@ final class PerfWalkTests: WalkTestCase {
         return false
     }
 
+    /// The pushed screen's back button. Not the bar's first button: at a tab's root that is the
+    /// Avustaja toolbar button, which opened the assistant over the rest of the walk (PR #16's
+    /// MISS Asetukset / Pankkiyhteys ja tilit, and its "open chat" figures came from there).
     private func back() {
-        let button = app.navigationBars.firstMatch.buttons.element(boundBy: 0)
-        if button.exists { button.tap() } else { edgeSwipeBack() }
+        let buttons = app.navigationBars.buttons.matching(identifier: "BackButton").allElementsBoundByIndex
+        if let button = buttons.first(where: { $0.isHittable }) { button.tap() } else { edgeSwipeBack() }
         sleep(1)
     }
 }
