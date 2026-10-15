@@ -18,8 +18,10 @@ import { ELIGIBLE_MIN, gatePair, RELATED_MAX, type GateCandidate, type GateRow }
 import { FEE_TOLERANCE_CENTS, FEE_TOLERANCE_RATIO } from "./fee-tolerance";
 
 export { FEE_TOLERANCE_CENTS, FEE_TOLERANCE_RATIO, linkAmountGapCents } from "./fee-tolerance";
-/** The most rows or invoices one list returns. */
+/** The most rows or invoices one page returns; the next page is asked for with `offset`. */
 export const PURCHASE_CANDIDATE_LIMIT = 30;
+/** The largest page a client may ask for. */
+export const PURCHASE_CANDIDATE_MAX_LIMIT = 100;
 /** Without a search, rows this far around the invoice are listed even with no signal. */
 const WINDOW_BEFORE_ISSUE_DAYS = 30;
 const WINDOW_AFTER_DUE_DAYS = 90;
@@ -188,10 +190,27 @@ export interface PurchaseBankCandidate {
   reasons: string[];
 }
 
+/** Which slice of a ranked list one answer carries. */
+export interface CandidatePage {
+  offset?: number | null;
+  limit?: number | null;
+}
+
+/** The page of `ranked` asked for, and whether rows follow it. */
+export function pageOf<T>(ranked: T[], page: CandidatePage): { items: T[]; offset: number; hasMore: boolean } {
+  const offset = Math.max(0, Math.floor(page.offset ?? 0));
+  const limit = Math.min(PURCHASE_CANDIDATE_MAX_LIMIT, Math.max(1, Math.floor(page.limit ?? PURCHASE_CANDIDATE_LIMIT)));
+  return { items: ranked.slice(offset, offset + limit), offset, hasMore: offset + limit < ranked.length };
+}
+
 export interface PurchaseBankCandidateList {
   candidates: PurchaseBankCandidate[];
-  /** Matching rows before the cap. */
+  /** Every matching row, across all pages. */
   total: number;
+  /** Where this page starts in the ranked list. */
+  offset: number;
+  /** More rows follow: ask again with `offset + candidates.length`. */
+  hasMore: boolean;
   /** Months that have offerable rows (for the month chips), newest first. */
   months: Array<{ month: string; count: number }>;
 }
@@ -200,12 +219,13 @@ export interface PurchaseBankCandidateList {
  * Outgoing bank rows that may have paid this purchase invoice: the owner's own,
  * not yet a purchase or sales payment, and not documented by another receipt
  * (a row confirmed to this invoice's own receipt is the same purchase and is
- * offered). Best first, at most PURCHASE_CANDIDATE_LIMIT.
+ * offered). Best first, a page at a time: the ranking runs over every row, so a
+ * later page and a search both reach all of them (599 rows used to stop at 30).
  */
 export async function listBankRowsForPurchase(
   userId: string,
   invoiceId: string,
-  options: { q?: string | null; month?: string | null } = {}
+  options: { q?: string | null; month?: string | null } & CandidatePage = {}
 ): Promise<PurchaseBankCandidateList> {
   const invoice = await prisma.purchaseInvoice.findFirst({
     where: { id: invoiceId, userId },
@@ -264,8 +284,9 @@ export async function listBankRowsForPurchase(
       (entry.row.date !== null && entry.row.date.getTime() >= windowStart && entry.row.date.getTime() <= windowEnd)
   );
 
+  const page = pageOf(ranked, options);
   return {
-    candidates: ranked.slice(0, PURCHASE_CANDIDATE_LIMIT).map(({ item, score }) => ({
+    candidates: page.items.map(({ item, score }) => ({
       transactionId: item.id,
       statementId: item.statementId,
       date: isoDay(item.date),
@@ -279,6 +300,8 @@ export async function listBankRowsForPurchase(
       reasons: score.reasons,
     })),
     total: ranked.length,
+    offset: page.offset,
+    hasMore: page.hasMore,
     months: [...months.entries()]
       .sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0))
       .map(([month, count]) => ({ month, count })),
@@ -302,12 +325,12 @@ export interface PurchaseInvoiceCandidate {
   reasons: string[];
 }
 
-/** Open purchase invoices that one outgoing bank row may have paid, best first. */
+/** Open purchase invoices that one outgoing bank row may have paid, best first, a page at a time. */
 export async function listPurchasesForBankRow(
   userId: string,
   transactionId: string,
-  options: { q?: string | null } = {}
-): Promise<{ candidates: PurchaseInvoiceCandidate[]; total: number }> {
+  options: { q?: string | null } & CandidatePage = {}
+): Promise<{ candidates: PurchaseInvoiceCandidate[]; total: number; offset: number; hasMore: boolean }> {
   const row = await prisma.transaction.findFirst({
     where: { id: transactionId, statement: { userId } },
     select: {
@@ -347,8 +370,9 @@ export async function listPurchasesForBankRow(
       .map((invoice) => ({ row, invoice, item: invoice }))
   );
 
+  const page = pageOf(ranked, options);
   return {
-    candidates: ranked.slice(0, PURCHASE_CANDIDATE_LIMIT).map(({ item, score }) => ({
+    candidates: page.items.map(({ item, score }) => ({
       invoice: {
         id: item.id,
         supplierName: item.supplierName,
@@ -365,6 +389,8 @@ export async function listPurchasesForBankRow(
       reasons: score.reasons,
     })),
     total: ranked.length,
+    offset: page.offset,
+    hasMore: page.hasMore,
   };
 }
 
