@@ -47,7 +47,8 @@ struct ReceiptsView: View {
     /// False while a pushed screen or a cover hides Kuitit.
     @State private var onScreen = false
 
-    private var listMotion: Animation? { onScreen ? .snappy : nil }
+    private var visibility: HiddenListMotion { HiddenListMotion(onScreen: onScreen) }
+    private var listMotion: Animation? { visibility.animation(.snappy) }
 
     /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
     /// Also read by the launch prefetch, so it asks for the list this screen opens on.
@@ -166,6 +167,11 @@ struct ReceiptsView: View {
                 skeletonSection
             }
         }
+        // Hidden under a receipt, the queue sections, the sure-matches count and the rows settle
+        // without animation, also when the change was animated elsewhere (the receipt's own
+        // delete): back on Kuitit the list is already as it ends up.
+        .transaction { visibility.settle(&$0) }
+        .environment(\.listMotion, visibility)
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .searchable(text: $searchText, prompt: "Hae kuitteja")
@@ -252,15 +258,15 @@ struct ReceiptsView: View {
             guard query.tab == .unlinked else { sure = nil; return }
             let list: SureMatchList? = try? await app.api.get("/api/matching/sure")
             guard !Task.isCancelled else { return }
-            withMotion(.snappy) { sure = list }
+            withMotion(listMotion) { sure = list }
         }
         .onAppear { onScreen = true }
         .onDisappear {
             onScreen = false
             toastTask?.cancel()
         }
-        .motion(.snappy, value: pending.map(\.id))
-        .motion(.snappy, value: rejected.map(\.id))
+        .motion(listMotion, value: pending.map(\.id))
+        .motion(listMotion, value: rejected.map(\.id))
         // A changed list, a notice, a filter chip or the bulk bar eases in and out: the rows below
         // glide to their new place instead of jumping there. Only while Kuitit is on screen: an
         // answer landing under a pushed receipt just takes its place (animating there kept the
@@ -726,7 +732,7 @@ struct ReceiptsView: View {
             }
             if ids.count > 1 { notice = outcome }
             Haptics.success()
-            withMotion { pending.removeAll { ids.contains($0.id) } }
+            withMotion(visibility.animation(.default)) { pending.removeAll { ids.contains($0.id) } }
             await load()
         } catch {
             failure = error.userMessage
@@ -792,7 +798,7 @@ struct ReceiptsView: View {
             await load()
         } catch is CancellationError {
         } catch {
-            withMotion {
+            withMotion(visibility.animation(.default)) {
                 rejected.insert(row, at: min(index, rejected.count))
                 rejectedTotal += 1
             }
@@ -829,13 +835,13 @@ struct ReceiptsView: View {
             }
         }
         if !deleted.isEmpty {
-            withMotion {
+            withMotion(visibility.animation(.default)) {
                 receipts.update { rows in rows.removeAll { deleted.contains($0.id) } }
                 total = max(0, total - deleted.count)
             }
             app.dataVersion += 1
         }
-        withMotion { app.unhide(refused) }
+        withMotion(visibility.animation(.default)) { app.unhide(refused) }
         selected = Set(refused)
         if selecting && refused.isEmpty { selecting = false }
         if refused.isEmpty {
@@ -893,6 +899,7 @@ struct ReceiptRow: View, Equatable {
 /// The "Näytä enemmän" row of a list the server pages (`PagedShowMore`): reveals ten loaded rows,
 /// and asks for the next page only once every loaded row is on screen. `fetch` returns the new row count.
 struct PagedShowMoreButton: View {
+    @Environment(\.listMotion) private var listMotion
     @Binding var limit: ShowMore
     let loaded: Int
     let total: Int
@@ -934,7 +941,7 @@ struct PagedShowMoreButton: View {
                     .frame(width: 20, height: 20)
                 }
                 .foregroundStyle(Theme.accent)
-                .motion(.snappy, value: loading)
+                .motion(listMotion.animation(.snappy), value: loading)
             }
             .disabled(loading)
         }

@@ -84,7 +84,7 @@ private actor Events { var seen: [Bool] = []; func add(_ reached: Bool) { seen.a
     let t = ScriptedTransport([.success(denied), .success(okBody())])
     let c = APIClient(baseURL: base, transport: t, tokens: Token(value: "old"), sleep: noSleep)
     let handled = Counter()
-    await c.setOnUnauthorized { await handled.bump() }
+    await c.setOnUnauthorized { _ in await handled.bump() }
     await #expect(throws: LKError.self) { let _: Ping = try await c.get("/x") }
     #expect(t.requests.count == 1)
     #expect(await handled.value == 1)
@@ -95,7 +95,7 @@ private actor Events { var seen: [Bool] = []; func add(_ reached: Bool) { seen.a
     let t = ScriptedTransport([.success(denied)])
     let c = APIClient(baseURL: base, transport: t, tokens: Token(value: nil), sleep: noSleep)
     let handled = Counter()
-    await c.setOnUnauthorized { await handled.bump() }
+    await c.setOnUnauthorized { _ in await handled.bump() }
     await #expect(throws: LKError.self) { let _: Ping = try await c.get("/x") }
     #expect(await handled.value == 0)
 }

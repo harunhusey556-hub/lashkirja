@@ -22,7 +22,7 @@ actor SwitchableToken: TokenProvider {
     let t = FakeTransport([HTTPResponse(status: 401, headers: apiHeader, body: Data(#"{"error":"Väärä salasana"}"#.utf8))])
     let c = APIClient(baseURL: base, transport: t, tokens: FixedToken(value: nil), sleep: { _ in })
     let flag = Flag()
-    await c.setOnUnauthorized { await flag.set() }
+    await c.setOnUnauthorized { _ in await flag.set() }
     await #expect(throws: LKError.self) { let _: Thing = try await c.send("POST", "/api/auth/token", body: EmptyBody()) }
     #expect(await flag.value == false)
 }
@@ -40,7 +40,7 @@ final class SwapTransport: HTTPTransport, @unchecked Sendable {
     let token = SwitchableToken("OLD")
     let c = APIClient(baseURL: base, transport: SwapTransport(token), tokens: token, sleep: { _ in })
     let flag = Flag()
-    await c.setOnUnauthorized { await flag.set() }
+    await c.setOnUnauthorized { _ in await flag.set() }
     await #expect(throws: LKError.self) { let _: Thing = try await c.get("/x") }
     #expect(await flag.value == false)
 }

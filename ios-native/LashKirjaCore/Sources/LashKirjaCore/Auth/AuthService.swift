@@ -173,14 +173,18 @@ public actor AuthService: TokenProvider {
         if await store.loadPendingRevoke() == token { await store.savePendingRevoke(nil) }
     }
 
-    /// Called on any 401: drop the session. True when one existed.
-    public func handleUnauthorized() async -> Bool {
+    /// A 401 to a request sent with `sentToken`: drops the session only while that token is still
+    /// the one in use, and says whether it did. The caller's own check is not enough: a sign-in
+    /// can land between it and this call, and its new session must not be the one dropped.
+    public func handleUnauthorized(sentToken: String) async -> Bool {
+        // Loads the Keychain token when none is cached yet; the compare below runs without a
+        // suspension, so no sign-in can slip in between it and the clear.
+        _ = await currentToken()
+        guard cached?.token == sentToken else { return false }
         epoch.next()
-        let had = cached != nil
         cached = nil
-        let stored = await store.load()
         await store.clear()
-        return had || stored != nil
+        return true
     }
 
     /// A new session from a sign-in: one that cannot be saved is reported, not pretended.
