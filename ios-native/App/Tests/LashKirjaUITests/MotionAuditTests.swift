@@ -22,8 +22,8 @@ final class MotionAuditTests: WalkTestCase {
         app = XCUIApplication()
         app.launchArguments += ["-LKUITest", "-LKMotionAudit"]
         app.launchEnvironment["LK_MOTION_LOG"] = "\(shotDir)/probe.log"
-        app.launch()
-        if app.secureTextFields.firstMatch.waitForExistence(timeout: 8) { signIn(app) }
+        // `-LKUITest` carries the launch-phase marker: sign-in waits for the app to settle, not 8 s.
+        launchSignedIn()
         if app.buttons["Ei nyt"].waitForExistence(timeout: 5) { app.buttons["Ei nyt"].tap() }
         _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         sleep(2); dismissSystemPrompts()
