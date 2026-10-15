@@ -187,10 +187,10 @@ final class StabilityTests: WalkTestCase {
         guard let token = call("/api/auth/token", ["email": "demo@lashkirja.fi", "password": "demo123"], nil)?["token"] as? String,
               let sessions = call("/api/auth/sessions", nil, token)?["sessions"] as? [[String: Any]] else { return false }
         // The app signs in as "ios-app"; this token (a plain one) is the current session and stays.
-        let app = sessions.filter { $0["label"] as? String == "iPhone · LashKirja-sovellus" && $0["current"] as? Bool != true }
-        let revoked = app.compactMap { $0["id"] as? String }
+        let appSessions = sessions.filter { $0["label"] as? String == "iPhone · LashKirja-sovellus" && $0["current"] as? Bool != true }
+        let revoked = appSessions.compactMap { $0["id"] as? String }
             .filter { call("/api/auth/sessions", ["id": $0], token)?["ok"] as? Bool == true }
-        return !app.isEmpty && revoked.count == app.count
+        return !appSessions.isEmpty && revoked.count == appSessions.count
     }
 
     /// Opens ALV and then reads nothing for 25 s: the app's own hang watchdog (event log) tells
