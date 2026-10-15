@@ -465,6 +465,11 @@ struct InvoiceDetailView: View {
         if state.value == nil, let cached: InvoiceDetailResponse = await app.cachedValue(path) {
             state.succeed(cached.invoice)
             duplicates = cached.paymentDuplicates ?? []
+            // The reminder tab and its button come with the cached invoice, not a beat later.
+            if cached.invoice.displayStatus == .overdue,
+               let preview: ReminderPreviewResponse = await app.cachedValue("\(path)/reminders") {
+                reminder = preview.reminder
+            }
             timing.painted(fromCache: true)
         }
         state.begin()
@@ -474,13 +479,14 @@ struct InvoiceDetailView: View {
             timing.dataReady()
             duplicates = response.paymentDuplicates ?? []
             prefetchPdf(response.invoice)
-            await loadCardPayments(response.invoice)
+            // The reminder first: it decides the opening tab's content and the main button.
             if response.invoice.displayStatus == .overdue {
                 await loadReminder()
             } else {
                 reminder = nil
                 reminderFailed = false
             }
+            await loadCardPayments(response.invoice)
         } catch is CancellationError {
         } catch {
             state.fail(error)
@@ -627,7 +633,7 @@ struct InvoiceDetailView: View {
 
     private func loadReminder() async {
         do {
-            let response: ReminderPreviewResponse = try await app.api.get("/api/invoices/\(invoiceId)/reminders")
+            let response: ReminderPreviewResponse = try await app.cachedGet("/api/invoices/\(invoiceId)/reminders")
             reminder = response.reminder
             reminderFailed = false
         } catch is CancellationError {
