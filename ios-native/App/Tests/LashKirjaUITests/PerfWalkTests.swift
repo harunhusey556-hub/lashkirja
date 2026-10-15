@@ -4,11 +4,12 @@ import XCTest
 /// The figures are the app's own log lines (`perf <kind> <row> <ms>`, subsystem
 /// `fi.lashkirja.perf`), read on the host with `log show`; this test only drives the screens and
 /// leaves each one open long enough for its data. Not part of CI: it needs the demo server.
+/// Every tap is guarded: a screen missing on one account is a MISS note, not the end of the walk.
 final class PerfWalkTests: WalkTestCase {
     func testPerfWalk() {
         // Round 0 is the warm-up (first launch after install, cold server): not a figure.
         for round in 0...3 {
-            // When the round starts: perf-walk.sh files the app's log lines under it.
+            // When the round starts: perf-medians.py files the app's log lines under it.
             note("ROUND \(round) \(Date().timeIntervalSince1970)")
             app.terminate()
             app.launch()
@@ -22,9 +23,9 @@ final class PerfWalkTests: WalkTestCase {
     private func walk() {
         for name in ["Myynti", "Kirjanpito", "Raportit", "Koti"] { tab(name) }
         tab("Myynti")
-        if tap("Uusi lasku") {
+        if press("Uusi lasku") {
             sleep(3)
-            app.buttons["Peruuta"].firstMatch.tap()
+            press("Peruuta")
             sleep(1)
         }
         tab("Kirjanpito")
@@ -33,20 +34,35 @@ final class PerfWalkTests: WalkTestCase {
         }
         if tapLabel("label BEGINSWITH %@", "Pankki") {
             sleep(2)
-            if tapLabel("label BEGINSWITH %@", "Pankkiyhteys ja tilit") { sleep(3); back() }
+            // Without a bank connection the hub offers "Yhdistä pankki" instead of its links.
+            if press("Yhdistä pankki") || tapLabel("label BEGINSWITH %@", "Pankkiyhteys ja tilit") { sleep(3); back() }
             back()
         }
-        for sheet in ["Asetukset", "Avustaja"] {
-            app.buttons[sheet].firstMatch.tap()
+        // The sheets open from a tab's root, where the toolbar is.
+        tab("Koti")
+        for sheet in ["Asetukset", "Avustaja"] where press(sheet) {
             sleep(3)
-            app.buttons["Valmis"].firstMatch.tap()
+            press("Valmis")
             sleep(1)
         }
-        tab("Koti")
+    }
+
+    /// Taps the button if it shows up within a few seconds; a MISS note otherwise.
+    @discardableResult
+    private func press(_ label: String) -> Bool {
+        let button = app.buttons[label].firstMatch
+        guard button.waitForExistence(timeout: 4), button.isHittable else {
+            note("MISS \(label)")
+            return false
+        }
+        button.tap()
+        taps += 1
+        return true
     }
 
     private func back() {
-        app.navigationBars.firstMatch.buttons.element(boundBy: 0).tap()
+        let button = app.navigationBars.firstMatch.buttons.element(boundBy: 0)
+        if button.exists { button.tap() } else { edgeSwipeBack() }
         sleep(1)
     }
 }
