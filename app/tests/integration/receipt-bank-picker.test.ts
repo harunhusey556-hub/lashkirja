@@ -15,14 +15,12 @@ import { buildRequest, readJson, routeContext, sessionCookie, type JsonValue } f
 let user: TestUser;
 let cookie: string;
 let other: TestUser;
-let otherCookie: string;
 
 beforeEach(async () => {
   await resetDatabase();
   user = await createUser();
   cookie = await sessionCookie(user);
   other = await createUser();
-  otherCookie = await sessionCookie(other);
 });
 
 async function rowsFor(receiptId: string, query = "", auth = cookie) {

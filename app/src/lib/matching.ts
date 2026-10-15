@@ -1046,8 +1046,12 @@ export async function runMatching(userId: string): Promise<RunMatchingResult> {
   const approvedDraftIds = new Set(
     allReceipts.filter((r) => isSourceDraft(r) && r.reviewStatus === "approved").map((r) => r.id)
   );
+  // "Kohdista varmat automaattisesti" (off by default): a certain pick - the viite and the exact
+  // amount agree - posts even when a weaker rival made it "competing"; the gate already chose it.
+  const settings = await prisma.user.findUnique({ where: { id: userId }, select: { autoLinkSureMatches: true } });
+  const linksSure = settings?.autoLinkSureMatches === true;
   const canAutoPost = (a: ScoredPair) =>
-    (shouldAutoConfirm(a.score, a.reasons) && approvedReceiptIds.has(a.receiptId)) ||
+    ((shouldAutoConfirm(a.score, a.reasons) || (linksSure && a.certain === true)) && approvedReceiptIds.has(a.receiptId)) ||
     (approvedDraftIds.has(a.receiptId) && a.reasons.includes(SOURCE_DRAFT_REASONS[0]));
 
   const autoPairs = assignments.filter(canAutoPost);
