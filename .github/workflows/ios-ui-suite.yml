@@ -1,0 +1,257 @@
+name: iOS UI suite
+
+# Every UI test class of the native app, one simulator job per class, each against its own fresh
+# demo API (the setup of ios-native.yml's "iOS build and tests" job, copied). The walks change demo
+# data (copies, customers, problem reports), so no class sees another's leftovers.
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/w36-ui-suite]
+
+permissions:
+  contents: read
+
+jobs:
+  ui:
+    name: ${{ matrix.class }}
+    runs-on: macos-26
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        class: [P0Tests, P1Tests, P2Tests, P3Tests, P4Tests, P5Tests, StabilityTests, OwnerScreensTests, IntegrationTests]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: |
+          brew install xcodegen xcbeautify
+          xcodebuild -version
+      - name: Generate project
+        working-directory: ios-native/App
+        run: xcodegen generate
+      - name: Simulator
+        run: |
+          DEST=$(xcrun simctl list devices available -j | python3 -c 'import sys,json
+          d=json.load(sys.stdin)["devices"]
+          ids=[x["udid"] for k,v in sorted(d.items(), reverse=True) if "iOS" in k for x in v if x["name"].startswith("iPhone")]
+          print(ids[0] if ids else "")')
+          echo "Simulator: $DEST"
+          echo "SIM_UDID=$DEST" >> "$GITHUB_ENV"
+      # A throwaway demo API on this runner's loopback, as docs/quality/SIMULATOR.md does by hand: a
+      # fresh SQLite file, the demo seed, no cloud AI, no mail. Nothing here reaches a real server.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Demo API for the UI tests
+        working-directory: app
+        env:
+          DATABASE_URL: "file:${{ github.workspace }}/app/ui-demo.db"
+          SESSION_SECRET: "ci-only-secret-not-used-anywhere-real-32plus"
+          CLOUD_AI_ENABLED: "false"
+          ENABLEBANKING_ENABLED: "false"
+          MAIL_TRANSPORT: "json"
+        run: |
+          set -euo pipefail
+          npm ci
+          npx prisma generate
+          rm -f ui-demo.db
+          npx prisma migrate deploy
+          npx tsx scripts/demo-seed.ts --ci
+          # The seed's receipts name files that do not exist. Each gets a real picture, stored the way
+          # an upload is (data/uploads/<user>/<uuid>.jpg), so Kuitit has thumbnails to show.
+          DB=ui-demo.db
+          U=$(sqlite3 "$DB" "SELECT id FROM User WHERE email='demo@lashkirja.fi'")
+          mkdir -p "data/uploads/$U" "$RUNNER_TEMP/jpegs"
+          sqlite3 -separator $'\t' "$DB" "SELECT id, vendor, totalAmountCents FROM Receipt WHERE userId='$U'" > "$RUNNER_TEMP/receipts.tsv"
+          cat > "$RUNNER_TEMP/receipt-jpegs.swift" <<'SWIFT'
+          import AppKit
+          // Reads "<id>\t<vendor>\t<cents>" lines; writes <out>/<id>.jpg, a plain receipt picture per row.
+          let out = CommandLine.arguments[1]
+          while let line = readLine() {
+              let field = line.components(separatedBy: "\t")
+              guard field.count == 3 else { continue }
+              guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 600, pixelsHigh: 800, bitsPerSample: 8,
+                                               samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                               bytesPerRow: 0, bitsPerPixel: 0) else { fatalError("no bitmap") }
+              NSGraphicsContext.saveGraphicsState()
+              NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+              NSColor.white.setFill()
+              NSRect(x: 0, y: 0, width: 600, height: 800).fill()
+              let euros = String(format: "%.2f", (Double(field[2]) ?? 0) / 100).replacingOccurrences(of: ".", with: ",")
+              let font = NSFont.monospacedSystemFont(ofSize: 34, weight: .bold)
+              for (index, text) in [field[1].uppercased(), "", "KUITTI", "", "YHTEENSÄ", "\(euros) EUR"].enumerated() {
+                  (text as NSString).draw(at: NSPoint(x: 40, y: 700 - index * 64), withAttributes: [.font: font, .foregroundColor: NSColor.black])
+              }
+              NSGraphicsContext.restoreGraphicsState()
+              guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else { fatalError("no jpeg") }
+              try jpeg.write(to: URL(fileURLWithPath: "\(out)/\(field[0]).jpg"))
+          }
+          SWIFT
+          xcrun swift "$RUNNER_TEMP/receipt-jpegs.swift" "$RUNNER_TEMP/jpegs" < "$RUNNER_TEMP/receipts.tsv"
+          while IFS=$'\t' read -r id vendor cents; do
+            key="$(uuidgen | tr 'A-Z' 'a-z').jpg"
+            install -m 600 "$RUNNER_TEMP/jpegs/$id.jpg" "data/uploads/$U/$key"
+            echo "UPDATE Receipt SET filePath='$key' WHERE id='$id';"
+          done < "$RUNNER_TEMP/receipts.tsv" | sqlite3 "$DB"
+          echo "Receipts with a picture: $(sqlite3 "$DB" "SELECT count(*) FROM Receipt WHERE filePath LIKE '%.jpg'")"
+          npm run build
+          nohup npx next start -H 127.0.0.1 -p 3999 > api-server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null "http://127.0.0.1:3999/login"; then break; fi
+            sleep 1
+          done
+          curl -s -o /dev/null -w "GET /login -> %{http_code}\n" "http://127.0.0.1:3999/login"
+          # A second, browser-like session, so the Laitteet walk has another device to sign out
+          # (scripts/sim/run-ui.sh does the same).
+          curl -s -o /dev/null -w "browser session -> %{http_code}\n" -X POST "http://127.0.0.1:3999/api/auth/token" \
+            -H 'content-type: application/json' -A 'Mozilla/5.0 (Macintosh) Safari' \
+            -d '{"email":"demo@lashkirja.fi","password":"demo123"}'
+      - name: UI tests (${{ matrix.class }}, simulator)
+        working-directory: ios-native/App
+        run: |
+          set -o pipefail
+          SH="$PWD/ui-shots"
+          mkdir -p "$SH"
+          # The host side of the walks, as scripts/sim/run-ui.sh runs it on the Mac: screenshots
+          # (.req), links (.openurl) and text size (.contentsize) through simctl, and the API proxy
+          # on :3998 that the tests take offline with offline.flag.
+          ( shopt -s nullglob
+            while true; do
+              for r in "$SH"/*.req; do xcrun simctl io "$SIM_UDID" screenshot "${r%.req}.png" >/dev/null 2>&1; rm -f "$r"; done
+              # Waited for, as on the Mac: openURL() gives the call up to 10 s before it looks for "Open".
+              for o in "$SH"/*.openurl; do xcrun simctl openurl "$SIM_UDID" "$(cat "$o")" >/dev/null 2>&1; rm -f "$o"; done
+              for c in "$SH"/*.contentsize; do xcrun simctl ui "$SIM_UDID" content_size "$(cat "$c")" >/dev/null 2>&1; rm -f "$c"; done
+              sleep 0.3
+            done ) &
+          W=$!
+          ulimit -n 4096
+          python3 ../../scripts/sim/api-proxy.py 3998 3999 "$SH/offline.flag" > api-proxy.log 2>&1 &
+          P=$!
+          trap 'kill $W $P 2>/dev/null' EXIT
+          # Ad-hoc signed: an unsigned simulator build cannot use the Keychain, so sign-in would fail.
+          TEST_RUNNER_LK_SHOT_DIR="$SH" xcodebuild test -project LashKirja.xcodeproj -scheme LashKirja-UITests \
+            -destination "id=$SIM_UDID" -derivedDataPath build \
+            -only-testing:LashKirjaUITests/${{ matrix.class }} -resultBundlePath UITestResults.xcresult \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
+            API_BASE_URL=http://127.0.0.1:3998 | xcbeautify --renderer github-actions
+      - name: Result
+        if: always()
+        working-directory: ios-native/App
+        run: |
+          mkdir -p result
+          if [ -d UITestResults.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path UITestResults.xcresult --compact > result/summary.json \
+              || echo "::warning::xcresulttool summary failed"
+          fi
+          cp ui-shots/notes.txt result/notes.txt 2>/dev/null || touch result/notes.txt
+          # One line for the suite table: class, passed, failed, skipped, soft-check FAILs (notes.txt).
+          python3 - "${{ matrix.class }}" result <<'PY'
+          import json, os, sys
+          cls, out = sys.argv[1], sys.argv[2]
+          try:
+              s = json.load(open(os.path.join(out, "summary.json")))
+          except Exception:
+              s = {}
+          notes = open(os.path.join(out, "notes.txt"), encoding="utf-8", errors="replace").read().splitlines()
+          soft = [n for n in notes if n.startswith(("FAIL", "MISS"))]
+          row = {"class": cls, "passed": s.get("passedTests", 0), "failed": s.get("failedTests", 0),
+                 "skipped": s.get("skippedTests", 0), "total": s.get("totalTestCount", 0),
+                 "result": s.get("result", "no result bundle"), "soft": soft,
+                 "failures": [{"test": f.get("testName", ""), "text": f.get("failureText", "")} for f in s.get("testFailures", [])]}
+          json.dump(row, open(os.path.join(out, "row.json"), "w"), ensure_ascii=False, indent=1)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as md:
+              md.write(f"### {cls}: {row['passed']} passed, {row['failed']} failed, {row['skipped']} skipped ({row['result']})\n\n")
+              for f in row["failures"]:
+                  md.write(f"- ❌ `{f['test']}`: {f['text'][:400]}\n")
+              for n in soft:
+                  md.write(f"- ⚠️ soft check: {n}\n")
+              md.write("\n<details><summary>notes.txt</summary>\n\n```\n" + "\n".join(notes) + "\n```\n</details>\n")
+          PY
+      - name: Export UI screenshots
+        if: always()
+        working-directory: ios-native/App
+        run: |
+          mkdir -p ui-attachments/named
+          if [ -d UITestResults.xcresult ]; then
+            if xcrun xcresulttool export attachments --path UITestResults.xcresult --output-path ui-attachments; then
+              # manifest.json names each exported file; a copy under its step name is easier to browse.
+              python3 - ui-attachments <<'PY' || echo "::warning::could not name the exported attachments"
+          import json, os, re, shutil, sys
+          root = sys.argv[1]
+          for test in json.load(open(os.path.join(root, "manifest.json"))):
+              for item in test.get("attachments", []):
+                  source = os.path.join(root, item["exportedFileName"])
+                  name = item.get("suggestedHumanReadableName") or item["exportedFileName"]
+                  # XCTest's own recordings and snapshots stay in the .xcresult (ui-xcresult artifact).
+                  if name.startswith(("Screen Recording", "Synthesized Event", "UI Snapshot", "App UI hierarchy", "Debug description")):
+                      continue
+                  if os.path.exists(source):
+                      # upload-artifact refuses " : < > | * ? and newlines (NTFS-safe names).
+                      safe = re.sub(r'[\\/":<>|*?\r\n`]', "_", name)
+                      shutil.copy(source, os.path.join(root, "named", safe))
+          PY
+            else
+              echo "::warning::xcresulttool export attachments failed; the .xcresult bundle is uploaded as is"
+            fi
+          fi
+          cp ../../app/api-server.log . 2>/dev/null || true
+          # The bundle holds thousands of files, some with names upload-artifact refuses: one zip.
+          if [ -d UITestResults.xcresult ]; then ditto -c -k --keepParent UITestResults.xcresult UITestResults.xcresult.zip; fi
+          echo "Attachments: $(ls ui-attachments/named | wc -l | tr -d ' '), host shots: $(ls ui-shots 2>/dev/null | wc -l | tr -d ' ')"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-result-${{ matrix.class }}
+          path: ios-native/App/result
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-screenshots-${{ matrix.class }}
+          path: |
+            ios-native/App/ui-attachments/named
+            ios-native/App/ui-attachments/manifest.json
+            ios-native/App/ui-shots
+            ios-native/App/api-server.log
+            ios-native/App/api-proxy.log
+          retention-days: 14
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-xcresult-${{ matrix.class }}
+          path: ios-native/App/UITestResults.xcresult.zip
+          retention-days: 7
+          if-no-files-found: warn
+
+  summary:
+    name: Suite table
+    runs-on: ubuntu-latest
+    needs: ui
+    if: always()
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ui-result-*
+          path: results
+      - name: Per-class table
+        run: |
+          python3 - results <<'PY'
+          import glob, json, os, sys
+          rows = []
+          for p in sorted(glob.glob(os.path.join(sys.argv[1], "ui-result-*", "row.json"))):
+              rows.append(json.load(open(p, encoding="utf-8")))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as md:
+              md.write("| Class | Result | Passed | Failed | Skipped | Soft-check FAILs |\n|---|---|---:|---:|---:|---:|\n")
+              for r in rows:
+                  mark = "✅" if r["failed"] == 0 and r["total"] > 0 else "❌"
+                  md.write(f"| {r['class']} | {mark} {r['result']} | {r['passed']} | {r['failed']} | {r['skipped']} | {len(r['soft'])} |\n")
+              md.write("\n")
+              for r in rows:
+                  for f in r["failures"]:
+                      md.write(f"- ❌ {r['class']} `{f['test']}`: {f['text'][:300]}\n")
+                  for n in r["soft"]:
+                      md.write(f"- ⚠️ {r['class']}: {n}\n")
+          PY

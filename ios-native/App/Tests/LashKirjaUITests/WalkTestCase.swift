@@ -8,9 +8,15 @@ class WalkTestCase: XCTestCase {
     var app: XCUIApplication!
 
     let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-    /// The system password manager offers to save the demo login; not part of the app.
+    /// The system password manager offers to save the demo login; not part of the app. On iOS 26 its
+    /// "Save Password?" sheet sits in the app's own element tree, not SpringBoard's (CI dump, 2026-10-15).
     func dismissSystemPrompts() {
-        for label in ["Not Now", "Ei nyt"] where springboard.buttons[label].exists { springboard.buttons[label].tap() }
+        for label in ["Not Now", "Ei nyt"] {
+            for root in [springboard, app!] where root.buttons[label].exists { root.buttons[label].tap() }
+        }
+    }
+    var savePasswordPrompt: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label IN %@", ["Not Now", "Ei nyt"])).firstMatch
     }
 
     override func tearDown() { goOnline(); super.tearDown() }
@@ -19,8 +25,12 @@ class WalkTestCase: XCTestCase {
         continueAfterFailure = true
         app = XCUIApplication()
         app.launch()
-        if app.secureTextFields.firstMatch.waitForExistence(timeout: 8) { signIn(app) }
+        let signingIn = app.secureTextFields.firstMatch.waitForExistence(timeout: 8)
+        if signingIn { signIn(app) }
         _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
+        // On a fresh simulator the save offer comes seconds after the tab bar, over the first test's
+        // taps (CI 2026-10-15: P0 A, P1 01, P2 A, Integration A). Only a sign-in brings it.
+        if signingIn { _ = savePasswordPrompt.waitForExistence(timeout: 10) }
         sleep(1); dismissSystemPrompts()
     }
 
