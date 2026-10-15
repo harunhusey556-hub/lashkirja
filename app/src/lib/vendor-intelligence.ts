@@ -81,7 +81,48 @@ export function isAmountWithinRange(amountCents: number, intel: VendorIntelligen
   return amountCents >= minExpected && amountCents <= maxExpected;
 }
 
+/** AutomationEvent kind of a vendor name the owner corrected on a receipt (receipt-update.ts). */
+export const VENDOR_CORRECTION_KIND = "vendor";
+const CORRECTIONS_IN_PROMPT = 8;
+
+/**
+ * The owner's latest vendor corrections as prompt lines: a name read wrong (or not at all)
+ * and what it really is. One correction is enough here - unlike a category, a name the
+ * owner typed is not a guess.
+ */
+async function vendorCorrectionsForAiPrompt(userId: string): Promise<string> {
+  const events = await prisma.automationEvent.findMany({
+    where: { userId, kind: VENDOR_CORRECTION_KIND, resourceType: "receipt" },
+    select: { previousValue: true, newValue: true },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+  const lines = new Map<string, string>();
+  for (const event of events) {
+    const corrected = event.newValue?.trim();
+    if (!corrected) continue;
+    const read = event.previousValue?.trim();
+    const key = `${read?.toLowerCase() ?? ""}→${corrected.toLowerCase()}`;
+    if (lines.has(key)) continue;
+    lines.set(key, read ? `- luettu "${read}" → oikea myyjä ${corrected}` : `- ${corrected}`);
+    if (lines.size >= CORRECTIONS_IN_PROMPT) break;
+  }
+  if (lines.size === 0) return "";
+  return (
+    `Käyttäjän korjaamat myyjät (jos dokumentti on samalta lähettäjältä, käytä korjattua nimeä):\n` +
+    [...lines.values()].join("\n")
+  );
+}
+
 export async function getTopVendorsForAiPrompt(userId: string): Promise<string> {
+  const [categories, corrections] = await Promise.all([
+    vendorCategoriesForAiPrompt(userId),
+    vendorCorrectionsForAiPrompt(userId),
+  ]);
+  return [categories, corrections].filter(Boolean).join("\n\n");
+}
+
+async function vendorCategoriesForAiPrompt(userId: string): Promise<string> {
   const receipts = await prisma.receipt.findMany({
     where: { userId, reviewStatus: "approved" },
     select: { vendor: true, category: true },
