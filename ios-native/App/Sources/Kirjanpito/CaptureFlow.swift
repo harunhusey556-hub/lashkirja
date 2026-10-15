@@ -411,13 +411,15 @@ struct CaptureFlow: View {
                     Text(row.status.label).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
                 }
             }
-            if let progress = row.progress, row.status != .ready {
-                Text(progress).font(.caption).foregroundStyle(Theme.ink2).transition(.opacity)
-            }
-            if let outcome = row.outcomeText {
-                Text(outcome).font(.caption).foregroundStyle(Theme.ink2).transition(.opacity)
-            }
-            if let error = row.error {
+            // One line under the name from the start, its words swapped by a fade: "Jonossa" gaining
+            // "Lähetetään" under it moved every row below, and the buttons under the queue, by a line.
+            let detail = (row.status != .ready ? row.progress : nil) ?? row.outcomeText
+            Text(detail ?? row.error ?? " ")
+                .font(.caption)
+                .foregroundStyle(detail == nil && row.error != nil && row.status == .failed ? Theme.danger : Theme.ink2)
+                .contentTransition(.opacity)
+                .accessibilityHidden(detail == nil && row.error == nil)
+            if detail != nil, let error = row.error {
                 Text(error).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2).transition(.opacity)
             }
             // A save the server refused: the form takes the reading from there (web "Käytä lomakkeessa").

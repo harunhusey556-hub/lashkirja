@@ -201,7 +201,13 @@ struct ReceiptsView: View {
         .confirmSheet(isPresented: $confirmDelete, title: deleteTitle, message: deleteNote, confirmTitle: "Poista") {
             Task { await delete(deleteIds) }
         }
-        .fullScreenCover(isPresented: $capture, onDismiss: { Task { await load() } }) { CaptureFlow(transactionId: nil) }
+        .fullScreenCover(isPresented: $capture, onDismiss: {
+            Task {
+                let version = app.dataVersion
+                await load()
+                if !Task.isCancelled { gate.mark(key: String(describing: query), version: version) }
+            }
+        }) { CaptureFlow(transactionId: nil) }
         .alert("Summarajaus", isPresented: $editingAmount) {
             TextField("Vähintään €", text: $minDraft).moneyInput()
             TextField("Enintään €", text: $maxDraft).moneyInput()
@@ -217,6 +223,10 @@ struct ReceiptsView: View {
         }
         .task(id: ReloadKey(query: query, version: app.dataVersion)) {
             guard receipts.value == nil || gate.isDue(key: String(describing: query), version: app.dataVersion) else { return }
+            // Each save under the capture cover bumps the version: the list stays as it was behind
+            // the cover and is asked once, when the cover has gone (the audit saw 103 layers move
+            // 163 pt back here, and the owner came back to a moved list).
+            guard !capture || receipts.value == nil else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion
             await load()
