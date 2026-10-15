@@ -50,7 +50,9 @@ struct ReceiptDetailView: View {
                             Text(rateLine).font(.caption).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
                         }
                         Text(r.title).font(.headline)
-                        Text(r.isIncome ? "Tulo" : "Meno").font(.caption).foregroundStyle(Theme.ink2)
+                        // A credit note is said in words too, not only by the minus sign.
+                        Text([r.creditNoteLabel, r.isIncome ? "Tulo" : "Meno"].compactMap { $0 }.joined(separator: " · "))
+                            .font(.caption).foregroundStyle(Theme.ink2)
                     }
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)

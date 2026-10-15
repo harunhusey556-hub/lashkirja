@@ -135,7 +135,8 @@ export function unconvertedForeignTotal<
 >(reading: T): T {
   const code = reading.currency?.trim().toUpperCase() ?? "";
   if (!/^[A-Z]{3}$/.test(code) || code === "EUR") return reading;
-  if (reading.totalAmount == null || isUsableRate(reading.fxRate)) return reading;
+  // A credit note's negative figure is left alone: euroConversion prices only a positive total.
+  if (reading.totalAmount == null || reading.totalAmount <= 0 || isUsableRate(reading.fxRate)) return reading;
   const original = reading.originalAmount;
   if (original != null && Math.round(original * 100) !== Math.round(reading.totalAmount * 100)) return reading;
   return { ...reading, originalAmount: reading.totalAmount, totalAmount: null };

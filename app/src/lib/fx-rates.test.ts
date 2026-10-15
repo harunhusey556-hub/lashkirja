@@ -192,6 +192,8 @@ describe("unconvertedForeignTotal", () => {
     expect(unconvertedForeignTotal(euros)).toBe(euros);
     const empty = { currency: "PLN", totalAmount: null, originalAmount: 5707.79 };
     expect(unconvertedForeignTotal(empty)).toBe(empty);
+    const credit = { currency: "USD", totalAmount: -10, originalAmount: -10 };
+    expect(unconvertedForeignTotal(credit)).toBe(credit);
   });
 
   it("then prices it at the ECB rate like any foreign total", async () => {
