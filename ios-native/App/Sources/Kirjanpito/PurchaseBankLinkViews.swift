@@ -87,11 +87,16 @@ struct PurchaseLinkConfirmView: View {
                 }
             }
             if let failure {
-                Section { Text(failure).foregroundStyle(Theme.danger) }
+                Section { Text(failure).foregroundStyle(Theme.danger) }.transition(.opacity)
             }
             Section {
                 Button { Task { await save() } } label: {
-                    if busy { ProgressView() } else { Text("Kohdista") }
+                    // Both laid out, one shown: the button keeps its size while the payment is sent.
+                    ZStack {
+                        Text("Kohdista").opacity(busy ? 0 : 1)
+                        ProgressView().opacity(busy ? 1 : 0).accessibilityHidden(!busy)
+                    }
+                    .motion(.easeOut(duration: 0.15), value: busy)
                 }
                 .buttonStyle(.primary)
                 .disabled(busy)
@@ -99,6 +104,9 @@ struct PurchaseLinkConfirmView: View {
                 .listRowInsets(EdgeInsets())
             }
         }
+        // The failure and the outcome line under the amount come and go without a jump.
+        .motion(.snappy, value: failure)
+        .motion(.snappy, value: (Money.parse(amountText) ?? 0) > 0)
         .formKeyboard()
         .navigationTitle("Vahvista kohdistus")
         .navigationBarTitleDisplayMode(.inline)
@@ -193,6 +201,8 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
     @State private var month: String?
     @State private var limit = ShowMore()
     @State private var loadingMore = false
+    /// The search and month the shown rows answer.
+    @State private var loadedQuery: [String: String]?
 
     var body: some View {
         List {
@@ -209,7 +219,7 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
                 Section { LoadFailureView(failure: failure, retry: load) }
                     .listRowBackground(Color.clear)
             case .loading:
-                ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
+                BankRowSkeleton()
             }
         }
         .scrollContentBackground(.hidden)
@@ -291,11 +301,18 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
     }
 
     private func load() async {
+        let asked = query
         state.begin()
         do {
-            let list: PurchaseBankCandidateList = try await app.api.get(path, query: query)
-            state.succeed(list)
-            limit.reset()
+            let list: PurchaseBankCandidateList = try await app.api.get(path, query: asked)
+            // Coming back from the confirm step asks again for the same rows: the rows opened
+            // with "Näytä enemmän" stay open, so the list neither shrinks nor scrolls.
+            let fresh = asked != loadedQuery
+            loadedQuery = asked
+            withMotion(.snappy) {
+                state.succeed(list)
+                if fresh { limit.reset() }
+            }
         } catch is CancellationError {
         } catch {
             state.fail(error)
@@ -319,6 +336,28 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
         } catch is CancellationError {
         } catch {
             state.fail(error)
+        }
+    }
+}
+
+/// Grey rows where the bank rows or invoices will be, until the first answer: the list then fills
+/// the space it already had instead of growing out of a spinner.
+private struct BankRowSkeleton: View {
+    var body: some View {
+        Section {
+            ForEach(0..<6, id: \.self) { _ in
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Pankkitapahtuman saaja").foregroundStyle(Theme.ink)
+                        Text("12.10.2026 · Viesti").font(.caption).foregroundStyle(Theme.ink2)
+                    }
+                    Spacer()
+                    Text("124,00 €").font(.subheadline.weight(.semibold))
+                }
+                .redacted(reason: .placeholder)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Ladataan")
+            }
         }
     }
 }
@@ -355,6 +394,8 @@ struct PurchaseRowLinkView: View {
     @State private var search = ""
     @State private var limit = ShowMore()
     @State private var loadingMore = false
+    /// The search the shown rows answer.
+    @State private var loadedQuery: [String: String]?
     @State private var target: PurchaseLinkPair?
 
     var body: some View {
@@ -403,7 +444,7 @@ struct PurchaseRowLinkView: View {
                 Section { LoadFailureView(failure: failure, retry: load) }
                     .listRowBackground(Color.clear)
             case .loading:
-                ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
+                BankRowSkeleton()
             }
         }
         .searchable(text: $search, prompt: "Toimittaja, numero tai summa")
@@ -427,11 +468,17 @@ struct PurchaseRowLinkView: View {
     }
 
     private func load() async {
+        let asked = query
         state.begin()
         do {
-            let list: PurchaseInvoiceCandidateList = try await app.api.get("/api/matching/purchase-candidates", query: query)
-            state.succeed(list)
-            limit.reset()
+            let list: PurchaseInvoiceCandidateList = try await app.api.get("/api/matching/purchase-candidates", query: asked)
+            // Back from the confirm step the same search is asked again: the opened rows stay open.
+            let fresh = asked != loadedQuery
+            loadedQuery = asked
+            withMotion(.snappy) {
+                state.succeed(list)
+                if fresh { limit.reset() }
+            }
         } catch is CancellationError {
         } catch {
             state.fail(error)
@@ -499,7 +546,7 @@ struct PurchaseSuggestionsSheet: View {
         NavigationStack {
             List {
                 if let failure {
-                    Section { Text(failure).foregroundStyle(Theme.danger) }
+                    Section { Text(failure).foregroundStyle(Theme.danger) }.transition(.opacity)
                 }
                 Section {
                     ForEach(suggestions) { suggestion in row(suggestion) }
@@ -513,6 +560,7 @@ struct PurchaseSuggestionsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Valmis") { dismiss() } } }
             .motion(.snappy, value: suggestions.map(\.id))
+            .motion(.snappy, value: failure)
         }
         .presentationDetents([.medium, .large])
     }
@@ -533,7 +581,12 @@ struct PurchaseSuggestionsSheet: View {
             }
             HStack(spacing: 12) {
                 Button { Task { await accept(suggestion) } } label: {
-                    if busyId == suggestion.id { ProgressView() } else { Text("Hyväksy") }
+                    // Both laid out, one shown: "Hylkää" beside it does not move while this one works.
+                    ZStack {
+                        Text("Hyväksy").opacity(busyId == suggestion.id ? 0 : 1)
+                        ProgressView().opacity(busyId == suggestion.id ? 1 : 0).accessibilityHidden(busyId != suggestion.id)
+                    }
+                    .motion(.easeOut(duration: 0.15), value: busyId == suggestion.id)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
@@ -607,12 +660,13 @@ struct ReceiptBankPickerSheet: View {
                 LabeledContent(receipt.title) {
                     if let amount = receipt.totalAmount { MoneyText(amount: amount).fontWeight(.semibold) }
                 }
-                if let failure { Text(failure).font(.subheadline).foregroundStyle(Theme.danger) }
+                if let failure { Text(failure).font(.subheadline).foregroundStyle(Theme.danger).transition(.opacity) }
             } footer: {
                 Text("Valitse pankkitapahtuma, jolla tämä kuitti maksettiin. Parhaat osumat ovat ylimpänä.")
             } pick: { candidate in
                 picked = candidate
             }
+            .motion(.snappy, value: failure)
             .navigationTitle("Valitse pankkitapahtuma")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

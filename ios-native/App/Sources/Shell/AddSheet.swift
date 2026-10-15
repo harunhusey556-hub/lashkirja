@@ -35,7 +35,13 @@ struct AddSheet: View {
                         .disabled(busy)
                 } else {
                     Button { Task { await fetchEmail() } } label: {
-                        HStack { Label("Hae sähköpostista", systemImage: "envelope"); if busy { Spacer(); ProgressView() } }
+                        // The spinner is always laid out and only faded, so the row never changes.
+                        HStack {
+                            Label("Hae sähköpostista", systemImage: "envelope")
+                            Spacer()
+                            ProgressView().opacity(busy ? 1 : 0).accessibilityHidden(!busy)
+                        }
+                        .motion(.easeOut(duration: 0.15), value: busy)
                     }
                     .disabled(busy)
                 }
@@ -43,10 +49,16 @@ struct AddSheet: View {
                     Button { openEmailImport() } label: {
                         Text("Sähköpostia ei ole yhdistetty. Yhdistä se tästä ›").font(.footnote).foregroundStyle(Theme.accentDark)
                     }
+                    .transition(.opacity)
                 } else if let notice {
-                    Text(notice).font(.footnote).foregroundStyle(Theme.ink2)
+                    Text(notice).font(.footnote).foregroundStyle(Theme.ink2).transition(.opacity)
                 }
             }
+            // The answer of an import or a mail fetch fades in under the actions; the mailbox
+            // row's words change by a fade once it is known whether a mailbox is connected.
+            .motion(.snappy, value: notice)
+            .motion(.snappy, value: mailboxMissing)
+            .motion(.snappy, value: hasMailbox)
             .navigationTitle("Lisää")
             .navigationBarTitleDisplayMode(.inline)
             // Connecting a mailbox opens here, so Back returns to these actions.
@@ -87,10 +99,12 @@ struct AddSheet: View {
     }
 
     /// As on the web, a new invoice opens once made: the Myynti tab, then the invoice.
+    /// Placed without animation behind this sheet, whose slide down is then the one movement:
+    /// animated, the tab switch and the push ran under the closing sheet as two more.
     private func openCreatedInvoice() {
         if let id = createdInvoiceId {
             createdInvoiceId = nil
-            app.pendingRoute = PendingRoute(tab: .myynti, route: .invoice(id))
+            app.pendingRoute = PendingRoute(tab: .myynti, route: .invoice(id), animated: false)
         }
         dismiss()
     }

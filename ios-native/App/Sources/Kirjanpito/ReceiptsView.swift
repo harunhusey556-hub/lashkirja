@@ -125,12 +125,12 @@ struct ReceiptsView: View {
                     }
                 )
             }
-            if let failure { Text(failure).foregroundStyle(Theme.danger) }
-            if let notice { Text(notice).foregroundStyle(Theme.ink2) }
+            if let failure { Text(failure).foregroundStyle(Theme.danger).transition(.opacity) }
+            if let notice { Text(notice).foregroundStyle(Theme.ink2).transition(.opacity) }
             Section {
                 tabChips
                 if query.isFiltered && (!query.month.isEmpty || !query.category.isEmpty || query.source != .all || query.amountLabel != nil || query.missingVat) {
-                    activeFilters
+                    activeFilters.transition(.opacity)
                 }
             }
             .listRowBackground(Color.clear)
@@ -173,8 +173,10 @@ struct ReceiptsView: View {
             if selecting && !picked.isEmpty {
                 let approvable = ReceiptBulk.approvable(picked)
                 BulkBar(count: picked.count, busy: busy, onCancel: {
-                    selecting = false
-                    selected = []
+                    withMotion(.snappy) {
+                        selecting = false
+                        selected = []
+                    }
                 }) {
                     if !approvable.isEmpty {
                         BulkBarButton(title: ReceiptBulk.approveLabel(ready: approvable.count, notReady: picked.count - approvable.count)) {
@@ -240,6 +242,13 @@ struct ReceiptsView: View {
         .onDisappear { toastTask?.cancel() }
         .motion(.snappy, value: pending.map(\.id))
         .motion(.snappy, value: rejected.map(\.id))
+        // A changed list, a notice, a filter chip or the bulk bar eases in and out: the rows below
+        // glide to their new place instead of jumping there.
+        .motion(.snappy, value: visibleIds)
+        .motion(.snappy, value: failure)
+        .motion(.snappy, value: notice)
+        .motion(.snappy, value: query)
+        .motion(.snappy, value: selected.isEmpty)
         // Photos kept while offline are sent from here too, not only from the capture screen.
         .task { OfflineReceiptQueueModel.shared.start(app: app) }
     }
@@ -268,6 +277,12 @@ struct ReceiptsView: View {
 
     /// The loaded rows minus the ones deleted a moment ago (`app.removedIds`).
     private var shownReceipts: [Receipt] { (receipts.value ?? []).filter { !app.removedIds.contains($0.id) } }
+
+    /// The ids of the rows on screen, in order: a new answer that changes them is animated.
+    private var visibleIds: [String] {
+        let all = shownReceipts
+        return all.prefix(limit.visible(all.count)).map(\.id)
+    }
 
     /// The picked rows that are on screen: a folded list never acts on hidden receipts (web BOOKS-12).
     private var selectedVisible: [Receipt] {
@@ -311,7 +326,12 @@ struct ReceiptsView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text(tab.title)
-                            if let counts { Text("\(tab.count(in: counts))").foregroundStyle(active ? Theme.onInk : Theme.ink2) }
+                            // Laid out before the counts arrive, only faded in: the chips keep their place.
+                            Text(counts.map { "\(tab.count(in: $0))" } ?? "0")
+                                .foregroundStyle(active ? Theme.onInk : Theme.ink2)
+                                .opacity(counts == nil ? 0 : 1)
+                                .contentTransition(.numericText())
+                                .accessibilityHidden(counts == nil)
                         }
                         .font(.subheadline.weight(active ? .semibold : .regular))
                         .foregroundStyle(active ? Theme.onInk : Theme.ink)
@@ -398,10 +418,14 @@ struct ReceiptsView: View {
 
     private func sureBar(_ count: Int) -> some View {
         Button { Task { await linkSure() } } label: {
+            // The spinner is always laid out (and mirrored by a hidden one) and only faded, so the
+            // title stays centred and still when the linking starts.
             HStack(spacing: 8) {
-                if sureBusy { ProgressView().tint(Theme.onInk) }
+                ProgressView().tint(Theme.onInk).opacity(sureBusy ? 1 : 0).accessibilityHidden(!sureBusy)
                 Text(SureMatchText.buttonTitle(count)).font(.headline)
+                ProgressView().hidden().accessibilityHidden(true)
             }
+            .motion(.easeOut(duration: 0.15), value: sureBusy)
             .frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(.primary)
@@ -476,8 +500,10 @@ struct ReceiptsView: View {
                     if allPicked { selected.subtract(onScreen) } else { selected.formUnion(onScreen) }
                 }
                 Button("Valmis") {
-                    selecting = false
-                    selected = []
+                    withMotion(.snappy) {
+                        selecting = false
+                        selected = []
+                    }
                 }
             } else {
                 Menu {
@@ -526,7 +552,7 @@ struct ReceiptsView: View {
                 }
                 .accessibilityLabel(filtered ? "Suodata kuitteja, suodatin käytössä" : "Suodata kuitteja")
                 // Always there, so the toolbar does not rearrange itself when the list arrives.
-                Button { selecting = true } label: { Image(systemName: "checkmark.circle").tapTarget() }
+                Button { withMotion(.snappy) { selecting = true } } label: { Image(systemName: "checkmark.circle").tapTarget() }
                     .accessibilityLabel("Valitse kuitteja")
                     .disabled(receipts.value?.isEmpty ?? true)
                 Button { capture = true } label: { Image(systemName: "camera.circle").tapTarget() }
@@ -560,14 +586,6 @@ struct ReceiptsView: View {
         let list: ReceiptList
         do {
             list = try await app.cachedGet("/api/receipts", query: listQuery, force: force, persist: true)
-            guard asked == query else {
-                if let q = await queue { applyPending(q) }
-                if let r = await rejectedResponse { applyRejected(r) }
-                return
-            }
-            applyList(list, tab: asked.tab)
-            failure = nil
-            timing.dataReady()
         } catch is CancellationError {
             return
         } catch {
@@ -577,13 +595,18 @@ struct ReceiptsView: View {
             if let r = await rejectedResponse { applyRejected(r) }
             return
         }
-        if let c = await countsResponse, asked == query {
-            counts = c.counts
-            // A paging server may leave the count to the counts answer.
-            total = ReceiptListPaging.total(list, tab: asked.tab, counts: c.counts)
-        }
-        if let q = await queue { applyPending(q) }
-        if let r = await rejectedResponse { applyRejected(r) }
+        // The four answers go on screen together: the review queue arriving after the list
+        // was inserted above the rows and pushed every one of them down.
+        let pendingList = await queue
+        let rejectedList = await rejectedResponse
+        let countsList = await countsResponse
+        if let pendingList { applyPending(pendingList) }
+        if let rejectedList { applyRejected(rejectedList) }
+        guard asked == query else { return }
+        if let countsList { counts = countsList.counts }
+        applyList(list, tab: asked.tab)
+        failure = nil
+        timing.dataReady()
     }
 
     private func applyList(_ list: ReceiptList, tab: ReceiptTab) {
@@ -872,16 +895,21 @@ struct PagedShowMoreButton: View {
             } label: {
                 HStack {
                     Text(title).font(.subheadline.weight(.semibold))
+                        .contentTransition(.opacity)
                     Spacer()
-                    if loading {
-                        ProgressView()
-                    } else {
+                    // Both laid out, one shown: the row keeps its size when a page starts or ends loading.
+                    ZStack {
                         Image(systemName: limit.visible(loaded) >= loaded && !serverHasMore ? "chevron.up" : "chevron.down")
                             .font(.caption.weight(.semibold))
+                            .opacity(loading ? 0 : 1)
                             .accessibilityHidden(true)
+                        ProgressView()
+                            .opacity(loading ? 1 : 0)
+                            .accessibilityHidden(!loading)
                     }
                 }
                 .foregroundStyle(Theme.accent)
+                .motion(.snappy, value: loading)
             }
             .disabled(loading)
         }
