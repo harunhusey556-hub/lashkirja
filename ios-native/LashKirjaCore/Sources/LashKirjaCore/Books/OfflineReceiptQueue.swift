@@ -165,6 +165,18 @@ public enum OfflineReceiptRules {
         count == 1 ? "Jonossa 1 kuitti" : "Jonossa \(count) kuittia"
     }
 
+    /// The capture screen's one line for the whole queue, in the order a photo goes through it:
+    /// "1 lähetetään · 2 odottaa yhteyttä · 1 epäonnistui · 3 lähetetty". Nil for an empty queue.
+    public static func glance(_ items: [QueuedReceipt]) -> String? {
+        func count(_ status: QueuedReceipt.Status) -> Int { items.filter { $0.status == status }.count }
+        let parts: [(Int, String)] = [
+            (count(.sending), "lähetetään"), (count(.queued), "odottaa yhteyttä"),
+            (count(.failed), "epäonnistui"), (count(.done), "lähetetty"),
+        ]
+        let shown = parts.filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }
+        return shown.isEmpty ? nil : shown.joined(separator: " · ")
+    }
+
     public static func sentText(_ count: Int) -> String {
         (count == 1 ? "1 kuva lähetetty." : "\(count) kuvaa lähetetty.") + " Kuitit näkyvät tarkistettavissa, kun ne on luettu."
     }

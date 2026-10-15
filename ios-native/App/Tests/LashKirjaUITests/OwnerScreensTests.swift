@@ -50,9 +50,18 @@ final class OwnerScreensTests: WalkTestCase {
     /// The element tree at a failure: what was on screen, not only a picture of it.
     func tree(_ name: String) { keep(name + "-tree", app.debugDescription) }
 
+    /// Asks `exists` itself rather than through an `XCTNSPredicateExpectation`. On a loaded CI host one
+    /// `exists` took 1.6–4.3 s and the predicate waiter spent up to 3.4 s more capturing a debug
+    /// description, so it sampled once in 5 s and gave up on a sheet the recording shows gone 2 s
+    /// after Peruuta (runs 38676562693, 38695044302). As with `waitForExistence`, which answered
+    /// "Toiminnot" after 13.9 s in the same run, the last answer counts: one is taken after the deadline.
     func waitGone(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
-        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
-        return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !element.exists { return true }
+            usleep(250_000)
+        }
+        return !element.exists
     }
 
     /// Kirjanpito → "Kuitit, 28 kuittia" (as StabilityTests.openHubRow).
@@ -259,5 +268,33 @@ final class OwnerScreensTests: WalkTestCase {
             // cloud AI reads the document type; CI never calls it, so this run saved a plain receipt.
             throw XCTSkip("(e) ostolasku toast: the demo API cannot read a bill without cloud AI; (b) and (c) passed, the save closed the screen")
         }
+    }
+
+    // W39 (OPEN-ISSUES 16): a photo kept on the phone to be sent later showed only on Kuitit's card,
+    // under the capture cover. Saved to the queue from inside "Lisää kuitti", it must show there,
+    // whether it is still waiting, being sent, refused or already sent when the test looks.
+    // Last in the class: the photo goes to the demo API's inbox.
+    func testD_QueuedPhotoShowsInsideCapture() {
+        guard openKuitit() else { capture("d0-no-kuitit"); XCTFail("Kuitit did not open"); return }
+        let camera = app.navigationBars["Kuitit"].buttons["Kuvaa kuitti"]
+        (camera.exists ? camera : app.buttons["Kuvaa kuitti"].firstMatch).tap()
+        let fixture = app.buttons["capture-queue-fixture"].firstMatch
+        guard fixture.waitForExistence(timeout: 10) else {
+            capture("d0-no-fixture"); XCTFail("no Testikuitti jonoon button: is the app a Debug build launched with -LKUITest?"); return
+        }
+        if !fixture.isHittable { app.swipeUp(); sleep(1) }
+        fixture.tap()
+
+        let status = app.descendants(matching: .any).matching(identifier: "capture-queued-status").firstMatch
+        let shown = status.waitForExistence(timeout: 10)
+        capture("d1-queued-inside-capture")
+        guard shown else { tree("d1-queued-inside-capture"); XCTFail("the queued photo is not shown inside the capture screen"); return }
+        XCTAssertTrue(app.navigationBars["Uusi kuitti"].exists, "the capture screen is no longer up")
+        let line = status.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ OR label CONTAINS %@", "Jonossa 1 kuitti", "lähetetty")).firstMatch
+        keep("d-status", status.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " | "))
+        XCTAssertTrue(line.exists, "the block inside the capture screen does not name the queued photo")
+        if !app.windows.firstMatch.frame.contains(status.frame) { app.swipeUp(); sleep(1) }
+        XCTAssertTrue(!status.frame.isEmpty && app.windows.firstMatch.frame.contains(status.frame),
+                      "the block is not on screen: \(status.frame)")
     }
 }
