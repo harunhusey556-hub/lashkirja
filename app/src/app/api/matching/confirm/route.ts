@@ -32,8 +32,20 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   try {
     const tx = await prisma.transaction.findFirst({
       where: { id: transactionId, statement: { userId: session.userId! } },
-      select: { suggestedReceiptId: true },
+      select: {
+        suggestedReceiptId: true,
+        invoicePayment: { select: { id: true } },
+        purchasePayment: { select: { purchaseInvoice: { select: { receiptId: true } } } },
+      },
     });
+    // Any row can now be picked by hand ("Valitse muu pankkitapahtuma"), so a row that
+    // already paid a sales invoice or another purchase is refused here, not trusted to the list.
+    if (tx?.invoicePayment) {
+      throw new AppError("Tapahtuma on jo kohdistettu myyntilaskuun.", "TRANSACTION_ALREADY_USED", 409);
+    }
+    if (tx?.purchasePayment && tx.purchasePayment.purchaseInvoice.receiptId !== receiptId) {
+      throw new AppError("Tapahtuma on jo kohdistettu ostolaskuun.", "TRANSACTION_ALREADY_USED", 409);
+    }
     const fromSuggestion = tx?.suggestedReceiptId === receiptId;
     await confirmMatch(
       session.userId!,
