@@ -395,9 +395,14 @@ struct CaptureFlow: View {
             HStack(spacing: 8) {
                 Text(row.name).lineLimitUnlessLarge().truncationMode(.middle)
                 Spacer(minLength: 8)
-                // Always laid out, only faded: the name keeps its width when a file starts or finishes.
-                let working = row.status == .uploading || row.status == .processing || row.status == .saving
-                ProgressView().controlSize(.small).opacity(working ? 1 : 0).accessibilityHidden(!working)
+                // A fixed slot the spinner fades into: the name keeps its width when a file starts or
+                // finishes. Not a hidden spinner: one spinning unseen keeps the app from going idle.
+                ZStack {
+                    if row.status == .uploading || row.status == .processing || row.status == .saving {
+                        ProgressView().controlSize(.small).transition(.opacity)
+                    }
+                }
+                .frame(width: 20, height: 20)
                 // A saved document says what the AI made of it, on the line the status had, so the
                 // row keeps its height; one tap turns it around (`CaptureQueueModel.switchKind`).
                 if row.canSwitchKind, let kind = row.kind {

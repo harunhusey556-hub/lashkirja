@@ -35,11 +35,12 @@ struct AddSheet: View {
                         .disabled(busy)
                 } else {
                     Button { Task { await fetchEmail() } } label: {
-                        // The spinner is always laid out and only faded, so the row never changes.
+                        // The spinner fades into a fixed slot, so the row never changes.
                         HStack {
                             Label("Hae sähköpostista", systemImage: "envelope")
                             Spacer()
-                            ProgressView().opacity(busy ? 1 : 0).accessibilityHidden(!busy)
+                            ZStack { if busy { ProgressView().transition(.opacity) } }
+                                .frame(width: 20, height: 20)
                         }
                         .motion(.easeOut(duration: 0.15), value: busy)
                     }

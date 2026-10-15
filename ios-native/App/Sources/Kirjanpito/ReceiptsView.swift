@@ -418,12 +418,15 @@ struct ReceiptsView: View {
 
     private func sureBar(_ count: Int) -> some View {
         Button { Task { await linkSure() } } label: {
-            // The spinner is always laid out (and mirrored by a hidden one) and only faded, so the
-            // title stays centred and still when the linking starts.
+            // The spinner fades into a fixed slot mirrored on the other side, so the title stays
+            // centred and still when the linking starts.
             HStack(spacing: 8) {
-                ProgressView().tint(Theme.onInk).opacity(sureBusy ? 1 : 0).accessibilityHidden(!sureBusy)
+                ZStack {
+                    if sureBusy { ProgressView().tint(Theme.onInk).transition(.opacity) }
+                }
+                .frame(width: 20, height: 20)
                 Text(SureMatchText.buttonTitle(count)).font(.headline)
-                ProgressView().hidden().accessibilityHidden(true)
+                Color.clear.frame(width: 20, height: 20)
             }
             .motion(.easeOut(duration: 0.15), value: sureBusy)
             .frame(maxWidth: .infinity, minHeight: 44)
@@ -897,16 +900,17 @@ struct PagedShowMoreButton: View {
                     Text(title).font(.subheadline.weight(.semibold))
                         .contentTransition(.opacity)
                     Spacer()
-                    // Both laid out, one shown: the row keeps its size when a page starts or ends loading.
+                    // One fixed slot for the chevron and the spinner: the row keeps its size when a
+                    // page starts or ends loading. The spinner is there only while loading (one
+                    // spinning unseen keeps the app from going idle).
                     ZStack {
                         Image(systemName: limit.visible(loaded) >= loaded && !serverHasMore ? "chevron.up" : "chevron.down")
                             .font(.caption.weight(.semibold))
                             .opacity(loading ? 0 : 1)
                             .accessibilityHidden(true)
-                        ProgressView()
-                            .opacity(loading ? 1 : 0)
-                            .accessibilityHidden(!loading)
+                        if loading { ProgressView().transition(.opacity) }
                     }
+                    .frame(width: 20, height: 20)
                 }
                 .foregroundStyle(Theme.accent)
                 .motion(.snappy, value: loading)

@@ -94,7 +94,7 @@ struct PurchaseLinkConfirmView: View {
                     // Both laid out, one shown: the button keeps its size while the payment is sent.
                     ZStack {
                         Text("Kohdista").opacity(busy ? 0 : 1)
-                        ProgressView().opacity(busy ? 1 : 0).accessibilityHidden(!busy)
+                        if busy { ProgressView().transition(.opacity) }
                     }
                     .motion(.easeOut(duration: 0.15), value: busy)
                 }
@@ -584,7 +584,7 @@ struct PurchaseSuggestionsSheet: View {
                     // Both laid out, one shown: "Hylkää" beside it does not move while this one works.
                     ZStack {
                         Text("Hyväksy").opacity(busyId == suggestion.id ? 0 : 1)
-                        ProgressView().opacity(busyId == suggestion.id ? 1 : 0).accessibilityHidden(busyId != suggestion.id)
+                        if busyId == suggestion.id { ProgressView().transition(.opacity) }
                     }
                     .motion(.easeOut(duration: 0.15), value: busyId == suggestion.id)
                 }

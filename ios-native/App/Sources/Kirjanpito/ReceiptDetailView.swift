@@ -716,7 +716,7 @@ struct ReceiptEditSheet: View {
                     // The button keeps its place and only fades under the spinner while saving.
                     Button("Tallenna") { Task { await save() } }.bold()
                         .opacity(busy ? 0 : 1)
-                        .overlay { ProgressView().opacity(busy ? 1 : 0).accessibilityHidden(!busy) }
+                        .overlay { if busy { ProgressView().transition(.opacity) } }
                         .disabled(busy)
                         .motion(.easeOut(duration: 0.15), value: busy)
                 }
