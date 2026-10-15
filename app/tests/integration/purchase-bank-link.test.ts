@@ -225,15 +225,37 @@ describe("GET /api/purchase-invoices/[id]/payments/candidates", () => {
     expect((await candidatesFor(invoice.id, "?month=2026-13")).status).toBe(400);
   });
 
-  it("caps the list at 30 rows", async () => {
+  it("pages past the first 30 rows until every row is reachable", async () => {
     const invoice = await makePurchase();
     await bankRows(
       user,
-      Array.from({ length: 35 }, (_, index) => ({ amountCents: -(1_00 + index), counterparty: `Kauppa ${index}` }))
+      Array.from({ length: 65 }, (_, index) => ({ amountCents: -(1_00 + index), counterparty: `Kauppa ${index}` }))
     );
-    const { body } = await candidatesFor(invoice.id, "?q=kauppa");
-    expect(body.candidates).toHaveLength(30);
-    expect(body.total).toBe(35);
+    const first = (await candidatesFor(invoice.id, "?q=kauppa")).body;
+    expect(first.candidates).toHaveLength(30);
+    expect(first).toMatchObject({ total: 65, offset: 0, hasMore: true });
+    const second = (await candidatesFor(invoice.id, "?q=kauppa&offset=30")).body;
+    expect(second).toMatchObject({ total: 65, offset: 30, hasMore: true });
+    const last = (await candidatesFor(invoice.id, "?q=kauppa&offset=60")).body;
+    expect(last.candidates).toHaveLength(5);
+    expect(last.hasMore).toBe(false);
+    const seen = new Set([...ids(first), ...ids(second), ...ids(last)]);
+    expect(seen.size).toBe(65);
+    // A bigger page is allowed up to the cap; past it the request is refused.
+    expect((await candidatesFor(invoice.id, "?q=kauppa&limit=100")).body.candidates).toHaveLength(65);
+    expect((await candidatesFor(invoice.id, "?limit=101")).status).toBe(400);
+    expect((await candidatesFor(invoice.id, "?offset=-1")).status).toBe(400);
+  });
+
+  it("finds a row by search however far down the ranking it is", async () => {
+    const invoice = await makePurchase();
+    await bankRows(user, [
+      ...Array.from({ length: 40 }, (_, index) => ({ amountCents: -124_00, counterparty: `Tukku Oy`, message: `M${index}` })),
+      { amountCents: -3_33, counterparty: "Harvinainen Kauppa", date: "2025-06-01" },
+    ]);
+    const { body } = await candidatesFor(invoice.id, "?q=harvinainen");
+    expect(body.candidates.map((c: JsonValue) => c.counterparty)).toEqual(["Harvinainen Kauppa"]);
+    expect(body).toMatchObject({ total: 1, hasMore: false });
   });
 
   it("404s on another owner's invoice", async () => {
@@ -369,6 +391,19 @@ describe("GET /api/matching/purchase-candidates", () => {
     expect((await invoicesFor(row.id, "&q=s%C3%A4hk%C3%B6")).body.candidates.map((c: JsonValue) => c.invoice.id)).toEqual([
       wrongName.id,
     ]);
+  });
+
+  it("pages open purchase invoices past the first 30", async () => {
+    for (let index = 0; index < 33; index += 1) await makePurchase({ supplierName: `Toimittaja ${index}` });
+    const [row] = await bankRows(user, [{ amountCents: -124_00 }]);
+    const first = (await invoicesFor(row.id)).body;
+    expect(first.candidates).toHaveLength(30);
+    expect(first).toMatchObject({ total: 33, offset: 0, hasMore: true });
+    const rest = (await invoicesFor(row.id, "&offset=30")).body;
+    expect(rest.candidates).toHaveLength(3);
+    expect(rest).toMatchObject({ offset: 30, hasMore: false });
+    const all = [...first.candidates, ...rest.candidates].map((c: JsonValue) => c.invoice.id);
+    expect(new Set(all).size).toBe(33);
   });
 
   it("refuses incoming, used and foreign rows", async () => {

@@ -61,13 +61,14 @@ struct MainTabView: View {
             showAssistant = false
             showAdd = false
             showNewInvoice = false
-            // Another tab: switch and push in one step, unanimated, so the closing sheet or cover
-            // reveals the destination itself, not the tab's root and then a push (three screens
-            // where the owner expects one; motion audit bad-link-over-sheet, the w32 "Näytä
-            // tarkistettavat" report). On the same tab the push animates as usual.
-            var transaction = Transaction()
-            transaction.disablesAnimations = pending.tab != tab
-            withTransaction(transaction) {
+            // Behind a cover (the capture's "Näytä tarkistettavat") the push would be a second
+            // movement after the cover's own: the screen is simply there when the cover goes.
+            // Another tab likewise: switch and push in one unanimated step, so a closing sheet
+            // reveals the destination itself, not the tab's root and then a push (motion audit
+            // bad-link-over-sheet). On the same tab an animated route pushes as usual.
+            var placing = Transaction()
+            placing.disablesAnimations = !pending.animated || pending.tab != tab
+            withTransaction(placing) {
                 tab = pending.tab
                 paths[pending.tab] = NavigationStackRule.collapse((paths[pending.tab] ?? []) + [pending.route])
             }

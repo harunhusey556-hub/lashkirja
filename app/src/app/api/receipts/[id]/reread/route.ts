@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { withErrorHandler, AppError } from "@/lib/api-errors";
 import { isStoredUploadKey, resolveUserUploadPath } from "@/lib/storage";
-import { extractReceipt } from "@/lib/ai";
+import { creditSigned, creditSignedVatLines, extractReceipt } from "@/lib/ai";
 import { getTopVendorsForAiPrompt } from "@/lib/vendor-intelligence";
 import { isoDateToUtc } from "@/lib/validation";
 
@@ -78,8 +78,12 @@ export const POST = withErrorHandler(
         vendor: reading.vendor,
         date: reading.date ? isoDateToUtc(reading.date) : null,
         totalAmountCents:
-          reading.totalAmount == null ? null : Math.round(reading.totalAmount * 100),
-        vatDetails: reading.vatDetails?.length ? JSON.stringify(reading.vatDetails) : null,
+          reading.totalAmount == null
+            ? null
+            : creditSigned(Math.round(reading.totalAmount * 100), reading.isCreditNote),
+        vatDetails: reading.vatDetails?.length
+          ? JSON.stringify(creditSignedVatLines(reading.vatDetails, reading.isCreditNote))
+          : null,
         category: reading.category,
         notes: reading.notes,
         reference: reading.reference,

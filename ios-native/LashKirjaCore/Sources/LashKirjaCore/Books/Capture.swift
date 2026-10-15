@@ -28,6 +28,19 @@ public struct Extracted: Decodable, Sendable, Equatable {
     public let fxRate: Double?
     public let fxRateDate: String?
     public let fxSource: String?
+    /// The document is a credit note (hyvityslasku). `totalAmount` and the VAT rows stay positive
+    /// here, as the form shows them; the server books them negative when the reading is saved.
+    public let isCreditNote: Bool?
+    /// The number of the invoice the credit note corrects, when the document prints it.
+    public let creditsInvoiceNumber: String?
+
+    /// "Hyvityslasku" for a credit note's reading, nil otherwise.
+    public var creditNoteLabel: String? { isCreditNote == true ? CreditNoteText.label : nil }
+}
+
+/// The one Finnish name the app gives a credit note, read or saved.
+public enum CreditNoteText {
+    public static let label = "Hyvityslasku"
 }
 
 /// Per-field recognition scores, 0...1.
@@ -179,6 +192,16 @@ public struct ReceiptSaveResult: Decodable, Sendable, Equatable {
             self.dueDate = dueDate
             self.isCreditNote = isCreditNote
         }
+
+        /// "ostolasku luotu, eräpäivä 14.10.2026" (or "hyvityslasku luotu"): the same words after a
+        /// save and after the queue row's "Kuitti ⇄ Ostolasku".
+        public var note: String {
+            if isCreditNote == true { return "hyvityslasku luotu" }
+            if let dueDate, APIDate.day(String(dueDate.prefix(10))) != nil {
+                return "ostolasku luotu, eräpäivä \(APIDate.displayDay(dueDate))"
+            }
+            return "ostolasku luotu"
+        }
     }
 
     public let receipt: Stored
@@ -212,14 +235,15 @@ public struct ReceiptSaveResult: Decodable, Sendable, Equatable {
     /// What the owner is told about the bill, after "Tallennettu ·": "ostolasku luotu, eräpäivä 14.10.2026".
     /// Nil for an ordinary receipt and for a reason the owner has nothing to do with.
     public var purchaseInvoiceNote: String? {
-        if let invoice = purchaseInvoice {
-            if invoice.isCreditNote == true { return "hyvityslasku luotu" }
-            if let due = invoice.dueDate, APIDate.day(String(due.prefix(10))) != nil {
-                return "ostolasku luotu, eräpäivä \(APIDate.displayDay(due))"
-            }
-            return "ostolasku luotu"
-        }
+        if let invoice = purchaseInvoice { return invoice.note }
         if purchaseInvoiceSkipped == "duplicate" { return "ostolaskua ei luotu, sama lasku on jo ostolaskuissa" }
         return nil
+    }
+
+    /// What the AI's reading made of the document, for the queue row's "Kuitti ⇄ Ostolasku": an
+    /// ostolasku when one was filed, else a kuitti. Nil for a credit note, which is no payable to switch.
+    public var filedKind: ReceiptDocumentKind? {
+        guard let invoice = purchaseInvoice else { return .receipt }
+        return invoice.isCreditNote == true ? nil : .invoice
     }
 }

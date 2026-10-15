@@ -481,6 +481,9 @@ struct MeResponse: Decodable { let user: AuthUser }
 struct PendingRoute: Equatable {
     let tab: AppTab
     let route: Route
+    /// False when the screen is placed behind a cover that is about to go down: the cover's
+    /// movement is then the only one the owner sees.
+    var animated = true
 }
 
 struct PendingCapture: Identifiable, Equatable {

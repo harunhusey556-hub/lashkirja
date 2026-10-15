@@ -7,7 +7,7 @@
  */
 import type { Prisma, Receipt } from "@/generated/prisma/client";
 import { prisma } from "./db";
-import type { DocumentType, ExtractedReceipt } from "./ai";
+import { creditSigned, creditSignedVatLines, type DocumentType, type ExtractedReceipt } from "./ai";
 import { removeUserUpload } from "./storage";
 import { UNREADABLE_RECEIPT_NOTE } from "./receipt-unreadable";
 import { foreignFieldsFromExtraction } from "./foreign-purchase";
@@ -140,12 +140,17 @@ export function receiptFieldsFromExtraction(
 ): PendingReceiptFields {
   // Nothing was read: the same empty receipt with the same note on every path.
   if (extracted.unreadable) return unreadableReceiptFields(fallbackDate);
+  const credit = extracted.isCreditNote;
+  const foreign = foreignFieldsFromExtraction(extracted);
   return {
     vendor: extracted.vendor,
     // The fallback is an instant (capture time); the receipt keeps the Helsinki day it fell on.
     date: extracted.date ? new Date(extracted.date) : helsinkiDayUtc(fallbackDate),
-    totalAmountCents: extracted.totalAmount != null ? Math.round(extracted.totalAmount * 100) : null,
-    vatDetails: extracted.vatDetails.length ? JSON.stringify(extracted.vatDetails) : null,
+    totalAmountCents:
+      extracted.totalAmount != null ? creditSigned(Math.round(extracted.totalAmount * 100), credit) : null,
+    vatDetails: extracted.vatDetails.length
+      ? JSON.stringify(creditSignedVatLines(extracted.vatDetails, credit))
+      : null,
     category: extracted.category,
     notes: extracted.notes,
     reference: extracted.reference,
@@ -153,7 +158,9 @@ export function receiptFieldsFromExtraction(
     type: extracted.type,
     confidence: extracted.confidence,
     rawText: extracted.rawText,
-    ...foreignFieldsFromExtraction(extracted),
+    ...foreign,
+    originalAmountCents:
+      foreign.originalAmountCents == null ? null : creditSigned(foreign.originalAmountCents, credit),
   };
 }
 
@@ -178,17 +185,39 @@ export function unreadableReceiptFields(fallbackDate: Date): PendingReceiptField
 
 /** The kind of document a stored reading says an upload is: a bill the owner
  * owes ("invoice"), a mere receipt, or something not to be filed at all. */
-export function storedDocumentKind(
-  extractedJson: string | null
-): { documentType: DocumentType | null; dueDate: string | null } {
-  if (!extractedJson) return { documentType: null, dueDate: null };
+export function storedDocumentKind(extractedJson: string | null): {
+  documentType: DocumentType | null;
+  dueDate: string | null;
+  isCreditNote: boolean;
+  creditsInvoiceNumber: string | null;
+} {
+  const none = { documentType: null, dueDate: null, isCreditNote: false, creditsInvoiceNumber: null };
+  if (!extractedJson) return none;
   try {
-    const read = JSON.parse(extractedJson) as { documentType?: DocumentType | null; dueDate?: string | null };
-    return { documentType: read.documentType ?? null, dueDate: read.dueDate ?? null };
+    const read = JSON.parse(extractedJson) as {
+      documentType?: DocumentType | null;
+      dueDate?: string | null;
+      isCreditNote?: boolean;
+      creditsInvoiceNumber?: string | null;
+    };
+    return {
+      documentType: read.documentType ?? null,
+      dueDate: read.dueDate ?? null,
+      isCreditNote: read.isCreditNote === true,
+      creditsInvoiceNumber: typeof read.creditsInvoiceNumber === "string" ? read.creditsInvoiceNumber : null,
+    };
   } catch {
     // An unreadable stored reading files nothing on its own.
-    return { documentType: null, dueDate: null };
+    return none;
   }
+}
+
+/** Said on a look-alike that was kept anyway, so the review queue tells the two apart
+ * (two identical Shell Polska rows waited side by side, 2026-10-15). */
+export const DUPLICATE_NOTE = "Mahdollinen kaksoiskappale: samalla myyjällä, päivällä ja summalla on jo kuitti.";
+
+export function withDuplicateNote(notes: string | null): string {
+  return notes ? `${DUPLICATE_NOTE}\n${notes}` : DUPLICATE_NOTE;
 }
 
 /** A receipt the user already has with the same vendor, day and sum: the
@@ -220,12 +249,17 @@ export async function findLookAlikeReceipt(
 export async function settleAutoAccept(
   db: Prisma.TransactionClient,
   created: Receipt,
-  signals: { documentType: DocumentType | null; duplicate: boolean }
+  signals: { documentType: DocumentType | null; duplicate: boolean; isCreditNote?: boolean }
 ): Promise<Receipt> {
   return db.receipt.update({
     where: { id: created.id },
     data: {
-      reviewStatus: canAutoAccept({ ...created, documentType: signals.documentType, duplicate: signals.duplicate })
+      reviewStatus: canAutoAccept({
+        ...created,
+        documentType: signals.documentType,
+        duplicate: signals.duplicate,
+        isCreditNote: signals.isCreditNote,
+      })
         ? "approved"
         : "pending",
     },
@@ -302,7 +336,14 @@ export async function createPendingInboxReceipt(
     !isDateLocked(await getLockedThrough(input.userId, tx), receipt.date)
   ) {
     const lookAlike = await findLookAlikeReceipt(tx, input.userId, receipt, receipt.id);
-    receipt = await settleAutoAccept(tx, receipt, { documentType: reading.documentType, duplicate: lookAlike != null });
+    if (lookAlike) {
+      receipt = await tx.receipt.update({ where: { id: receipt.id }, data: { notes: withDuplicateNote(receipt.notes) } });
+    }
+    receipt = await settleAutoAccept(tx, receipt, {
+      documentType: reading.documentType,
+      duplicate: lookAlike != null,
+      isCreditNote: reading.isCreditNote,
+    });
   }
   // A photographed bill becomes an ostolasku like a saved one (the reading is
   // on the upload by now). Best effort: a closed period or an incomplete

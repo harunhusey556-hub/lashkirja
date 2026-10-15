@@ -122,6 +122,26 @@ export async function getEurRate(currency: string | null | undefined, date?: str
   return fetched;
 }
 
+/**
+ * A foreign reading whose "euro" total is only the document's own figure: the
+ * same number as the original amount, or no original amount at all, and no
+ * rate printed. The total is moved to the original amount so the caller prices
+ * it (euroConversion); a failed lookup then leaves the euro figure empty for the
+ * owner instead of booking $10 as 10 €. Seen on OpenCode and OpenRouter receipts
+ * read before the "never guess a rate" rule (2026-10-02).
+ */
+export function unconvertedForeignTotal<
+  T extends { currency?: string | null; totalAmount: number | null; originalAmount?: number | null; fxRate?: number | null },
+>(reading: T): T {
+  const code = reading.currency?.trim().toUpperCase() ?? "";
+  if (!/^[A-Z]{3}$/.test(code) || code === "EUR") return reading;
+  // A credit note's negative figure is left alone: euroConversion prices only a positive total.
+  if (reading.totalAmount == null || reading.totalAmount <= 0 || isUsableRate(reading.fxRate)) return reading;
+  const original = reading.originalAmount;
+  if (original != null && Math.round(original * 100) !== Math.round(reading.totalAmount * 100)) return reading;
+  return { ...reading, originalAmount: reading.totalAmount, totalAmount: null };
+}
+
 /** Whole cents, rounded once: the euro total of a foreign amount at a rate. */
 export function convertToEuros(original: number, rate: number): number {
   return Math.round(original * rate * 100) / 100;

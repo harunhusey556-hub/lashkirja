@@ -44,6 +44,59 @@ public struct ReceiptDocumentKindResult: Decodable, Sendable, Equatable {
     }
 }
 
+extension ReceiptDocumentKind {
+    /// What the upload screen's row calls the document.
+    public var title: String { self == .invoice ? "Ostolasku" : "Kuitti" }
+    /// The kind one tap of "Kuitti ⇄ Ostolasku" asks for.
+    public var other: ReceiptDocumentKind { self == .invoice ? .receipt : .invoice }
+    /// The row's switch, named for what it does.
+    public var switchTitle: String { self == .invoice ? "Muuta kuitiksi" : "Muuta ostolaskuksi" }
+}
+
+/// The body of `POST /api/receipts/[id]/kind`, the upload screen's "Kuitti ⇄ Ostolasku" right after a
+/// save. Unlike the receipt screen's PATCH (which cancels the ostolasku and keeps it), "receipt" here
+/// removes the ostolasku the AI filed a moment ago; the server refuses (409) once it has payments.
+public struct ReceiptKindBody: Encodable, Sendable, Equatable {
+    public let kind: String
+    public init(_ kind: ReceiptDocumentKind) { self.kind = kind.rawValue }
+}
+
+/// The answer to that POST: the ostolasku the receipt is filed as afterwards (nil for a kuitti), and
+/// why none was filed when one was asked for.
+public struct ReceiptKindChange: Decodable, Sendable, Equatable {
+    public let purchaseInvoiceAction: String?
+    public let purchaseInvoiceSkipped: String?
+    public let purchaseInvoice: ReceiptSaveResult.Filed?
+
+    enum CodingKeys: String, CodingKey { case purchaseInvoiceAction, purchaseInvoiceSkipped, purchaseInvoice }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        purchaseInvoiceAction = try c.decodeIfPresent(String.self, forKey: .purchaseInvoiceAction)
+        purchaseInvoiceSkipped = try c.decodeIfPresent(String.self, forKey: .purchaseInvoiceSkipped)
+        purchaseInvoice = try c.decodeIfPresent(ReceiptSaveResult.Filed.self, forKey: .purchaseInvoice)
+    }
+
+    /// What the document is now: an ostolasku while one is filed from it. A refused filing leaves a kuitti.
+    public var kind: ReceiptDocumentKind { purchaseInvoice == nil ? .receipt : .invoice }
+
+    /// The row's note, in the words of a save ("ostolasku luotu, eräpäivä 14.10.2026"); nil for a kuitti.
+    public var invoiceNote: String? { purchaseInvoice?.note }
+
+    /// Said after the tap: what was done, or why no ostolasku could be filed.
+    public func message(asked: ReceiptDocumentKind) -> String {
+        switch asked {
+        case .invoice where purchaseInvoice != nil:
+            return "Muutettu ostolaskuksi"
+        case .invoice:
+            if let reason = purchaseInvoiceSkipped, let text = ReceiptDocumentKindResult.skipText[reason] { return text }
+            return "Ostolaskua ei voitu luoda."
+        case .receipt:
+            return purchaseInvoiceAction == "removed" ? "Muutettu kuitiksi, ostolasku poistettiin" : "Muutettu kuitiksi"
+        }
+    }
+}
+
 /// `GET /api/receipts/[id]/purchase-invoice`: the ostolasku a receipt is filed as, if any.
 public struct ReceiptPurchaseInvoiceView: Decodable, Sendable, Equatable {
     public struct Invoice: Decodable, Sendable, Equatable {

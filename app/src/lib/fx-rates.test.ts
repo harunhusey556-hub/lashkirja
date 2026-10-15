@@ -6,6 +6,7 @@ import {
   setFxFetcherForTests,
   setFxStoreForTests,
   storedFxRate,
+  unconvertedForeignTotal,
   type EurRate,
   type FxFetcher,
 } from "./fx-rates";
@@ -163,5 +164,44 @@ describe("normalizeAIResult fxRate", () => {
     for (const fxRate of [null, undefined, 0, -1, "abc", 1e9]) {
       expect(normalizeAIResult({ currency: "USD", fxRate }, "openai-compatible").fxRate).toBeNull();
     }
+  });
+});
+
+describe("unconvertedForeignTotal", () => {
+  it("moves a dollar figure read as euros to the original amount, so it gets priced", () => {
+    // OpenRouter "Amount paid $6.80" was booked as 6,80 € (2026-10-02).
+    expect(unconvertedForeignTotal({ currency: "USD", totalAmount: 6.8, originalAmount: null, fxRate: null })).toEqual({
+      currency: "USD",
+      totalAmount: null,
+      originalAmount: 6.8,
+      fxRate: null,
+    });
+    // OpenCode $10.00 with the same number in both fields: a 1:1 "rate" nobody printed.
+    expect(unconvertedForeignTotal({ currency: "USD", totalAmount: 10, originalAmount: 10 })).toMatchObject({
+      totalAmount: null,
+      originalAmount: 10,
+    });
+  });
+
+  it("keeps a real euro figure, a printed rate, a euro document and an empty total", () => {
+    const both = { currency: "USD", totalAmount: 9.06, originalAmount: 10 };
+    expect(unconvertedForeignTotal(both)).toBe(both);
+    const printed = { currency: "USD", totalAmount: 9, originalAmount: null, fxRate: 0.9 };
+    expect(unconvertedForeignTotal(printed)).toBe(printed);
+    const euros = { currency: "EUR", totalAmount: 12, originalAmount: null };
+    expect(unconvertedForeignTotal(euros)).toBe(euros);
+    const empty = { currency: "PLN", totalAmount: null, originalAmount: 5707.79 };
+    expect(unconvertedForeignTotal(empty)).toBe(empty);
+    const credit = { currency: "USD", totalAmount: -10, originalAmount: -10 };
+    expect(unconvertedForeignTotal(credit)).toBe(credit);
+  });
+
+  it("then prices it at the ECB rate like any foreign total", async () => {
+    setFxFetcherForTests(fakeEcb().fetcher);
+    const reading = unconvertedForeignTotal({ currency: "USD", totalAmount: 10, originalAmount: null, fxRate: null });
+    expect(await euroConversion({ currency: reading.currency, originalAmount: reading.originalAmount, date: "2026-07-10" })).toMatchObject({
+      totalAmount: 9.12,
+      fxSource: "ECB",
+    });
   });
 });

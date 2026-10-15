@@ -79,7 +79,7 @@ final class StabilityTests: WalkTestCase {
 
     func test05_AddSheetOpensTheReceiptPageNotTheCamera() {
         tab("Lisää"); sleep(1)
-        XCTAssertTrue(tap("Lisää kuitti"), "Lisää kuitti missing from the + sheet")
+        XCTAssertTrue(tap("Lisää tiedosto"), "Lisää tiedosto missing from the + sheet")
         sleep(2)
         XCTAssertTrue(app.navigationBars["Uusi kuitti"].waitForExistence(timeout: 10), "receipt page did not open")
         XCTAssertTrue(app.buttons["Valitse kuvista"].exists || app.staticTexts["Valitse kuvista"].exists, "picker buttons missing")

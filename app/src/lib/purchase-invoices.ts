@@ -32,7 +32,7 @@ import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 import { planPairs } from "./match-gate";
 import { rejectedPurchasePairs } from "./purchase-bank-match";
 import { isPurchaseVatTreatment, type PurchaseVatTreatment } from "./alv";
-import type { ExtractedReceipt } from "./ai";
+import { namesCreditNote, type ExtractedReceipt } from "./ai";
 import { afterListCursorAsc, encodeListCursor, type ListPage } from "./list-cursor";
 
 export type PurchaseStatus = "open" | "paid" | "credited" | "cancelled";
@@ -469,13 +469,15 @@ export async function fileReceiptAsPurchaseInvoice(
     rawText?: string | null;
     fileName?: string | null;
   },
-  reading: Pick<ExtractedReceipt, "documentType" | "dueDate"> | null,
+  reading: Pick<ExtractedReceipt, "documentType" | "dueDate" | "isCreditNote" | "creditsInvoiceNumber"> | null,
   db?: Prisma.TransactionClient
 ): Promise<
   | { created: true; invoice: PublicPurchaseInvoice }
   | { created: false; skipped: ReceiptFilingSkip }
 > {
-  if (isCreditNoteExtraction(receipt, reading)) return fileReceiptAsPurchaseCredit(userId, receipt, db);
+  if (isCreditNoteExtraction(receipt, reading)) {
+    return fileReceiptAsPurchaseCredit(userId, receipt, reading?.creditsInvoiceNumber ?? null, db);
+  }
   if (reading?.documentType !== "invoice") return { created: false, skipped: "not_an_invoice" };
   if (receipt.type === "tulo") return { created: false, skipped: "sales_document" };
   const client = db ?? prisma;
@@ -553,18 +555,26 @@ function storedReading(extractedJson: string | null): {
   documentType: string | null;
   dueDate: string | null;
   dueDateAssumed: boolean;
+  creditsInvoiceNumber: string | null;
 } {
-  if (!extractedJson) return { documentType: null, dueDate: null, dueDateAssumed: false };
+  const none = { documentType: null, dueDate: null, dueDateAssumed: false, creditsInvoiceNumber: null };
+  if (!extractedJson) return none;
   try {
-    const read = JSON.parse(extractedJson) as { documentType?: string | null; dueDate?: string | null; dueDateAssumed?: boolean };
+    const read = JSON.parse(extractedJson) as {
+      documentType?: string | null;
+      dueDate?: string | null;
+      dueDateAssumed?: boolean;
+      creditsInvoiceNumber?: string | null;
+    };
     return {
       documentType: read.documentType ?? null,
       dueDate: read.dueDate ?? null,
       dueDateAssumed: read.dueDateAssumed === true,
+      creditsInvoiceNumber: typeof read.creditsInvoiceNumber === "string" ? read.creditsInvoiceNumber : null,
     };
   } catch {
     // A stored reading that does not parse says nothing about the kind.
-    return { documentType: null, dueDate: null, dueDateAssumed: false };
+    return none;
   }
 }
 
@@ -673,6 +683,7 @@ export async function syncReceiptDocumentKind(
   const filing = await fileReceiptAsPurchaseInvoice(userId, receipt, {
     documentType: "invoice",
     dueDate: reading.dueDate,
+    creditsInvoiceNumber: reading.creditsInvoiceNumber,
   });
   return filing.created ? { action: "filed" } : { action: "none", skipped: filing.skipped };
 }
@@ -901,15 +912,13 @@ export async function getPurchaseInvoice(
 /* Supplier credit notes (hyvityslasku)                                 */
 /* ------------------------------------------------------------------ */
 
-const CREDIT_NOTE_WORDING = /hyvityslasku|hyvitys\s+lasku|credit\s*note|kreditnota|kreditfaktura|gutschrift/i;
-
 /**
  * Whether a document the AI read as a bill is really a supplier's credit note:
  * the reading names it so, the total is negative, or the head of the document
  * says hyvityslasku / credit note. Pure: it only looks at what extraction left on
  * the receipt. The wording is looked for in the notes, the file name and the
  * first lines of the text - a payable that merely mentions credit notes in its
- * terms further down stays a payable.
+ * terms further down stays a payable (ai.ts namesCreditNote, the extraction's own rule).
  */
 export function isCreditNoteExtraction(
   receipt: {
@@ -918,15 +927,15 @@ export function isCreditNoteExtraction(
     rawText?: string | null;
     fileName?: string | null;
   },
-  reading: { documentType?: string | null } | null
+  reading: { documentType?: string | null; isCreditNote?: boolean } | null
 ): boolean {
   const type = reading?.documentType ?? null;
   // A document type the reading step may report itself (never produced by the current prompt).
   if (type === "credit_note" || type === "creditNote") return true;
   if (type !== "invoice") return false;
+  if (reading?.isCreditNote === true) return true;
   if ((receipt.totalAmountCents ?? 0) < 0) return true;
-  const head = [receipt.notes, receipt.fileName, receipt.rawText?.slice(0, 400)].filter(Boolean).join(" ");
-  return CREDIT_NOTE_WORDING.test(head);
+  return namesCreditNote(receipt);
 }
 
 /**
@@ -978,6 +987,8 @@ export interface PurchaseCreditInput {
   date: string;
   /** The number printed on the supplier's credit note, if any. */
   supplierNumber?: string | null;
+  /** The receipt holding the credit note's own file, when it was read from one. */
+  receiptId?: string;
 }
 
 /**
@@ -1050,6 +1061,7 @@ export async function createPurchaseCreditNote(
       throw new ValidationError("Hyvityksen ALV ei voi olla negatiivinen eikä suurempi kuin hyvityksen summa.");
     }
     await assertInvoiceNumberFree(userId, original.supplierName, input.supplierNumber, tx);
+    if (input.receiptId) await assertReceiptAvailable(userId, input.receiptId, undefined, tx);
 
     const created = await tx.purchaseInvoice.create({
       data: {
@@ -1075,6 +1087,7 @@ export async function createPurchaseCreditNote(
             : -Math.round((original.originalAmountCents * amountCents) / original.grossCents),
         vatTreatment: original.vatTreatment,
         creditsInvoiceId: original.id, // wave2-schema: PurchaseInvoice.creditsInvoiceId / creditNotes
+        receiptId: input.receiptId ?? null,
       },
       select: { id: true },
     });
@@ -1090,12 +1103,51 @@ export async function createPurchaseCreditNote(
   };
 }
 
+/** An invoice number compared without spaces, dashes or case: "INV-1234" and "inv 1234" are one number. */
+function invoiceNumberKey(value: string | null | undefined): string {
+  return (value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 /**
- * A document the reading took for a supplier's credit note, filed on its own:
- * the original is not named on it, so the credit is not linked to an ostolasku
- * (the owner sees it under Hyvitetyt). The receipt stays linked as the document
- * and is left out of the VAT return (loadCountedReceipts), so the credit counts
- * once and with a negative sign instead of as an expense.
+ * The ostolasku a credit note read from a document corrects: the same supplier's
+ * invoice whose number it names ("Hyvitettävä lasku 1234"), or else whose viite it
+ * repeats. Null when none or several fit - the credit is then filed on its own.
+ */
+async function findCreditedPurchaseInvoice(
+  client: Prisma.TransactionClient | typeof prisma,
+  userId: string,
+  supplierName: string,
+  creditsInvoiceNumber: string | null,
+  reference: string | null | undefined
+): Promise<string | null> {
+  const numberKey = invoiceNumberKey(creditsInvoiceNumber);
+  const viite = readReference(reference);
+  if (!numberKey && !viite) return null;
+  const supplierKey = supplierName.toLocaleLowerCase("fi");
+  const invoices = (
+    await client.purchaseInvoice.findMany({
+      where: { userId, grossCents: { gt: 0 }, status: { not: "cancelled" } },
+      select: { id: true, supplierName: true, invoiceNumber: true, reference: true },
+    })
+  ).filter((invoice) => invoice.supplierName.trim().toLocaleLowerCase("fi") === supplierKey);
+  const byNumber = numberKey ? invoices.filter((invoice) => invoiceNumberKey(invoice.invoiceNumber) === numberKey) : [];
+  if (byNumber.length > 0) return byNumber.length === 1 ? byNumber[0].id : null;
+  const byReference = viite ? invoices.filter((invoice) => invoice.reference === viite) : [];
+  return byReference.length === 1 ? byReference[0].id : null;
+}
+
+/** Why a credit against the named invoice was refused, yet the credit note itself must still be booked. */
+const UNLINKABLE_CREDIT_CODES = new Set(["ALREADY_CREDITED", "CREDIT_EXCEEDS_REMAINING", "VALIDATION_FAILED"]);
+
+/**
+ * A document the reading took for a supplier's credit note. When it names an
+ * ostolasku of the same supplier (findCreditedPurchaseInvoice) it is recorded
+ * against it through createPurchaseCreditNote, as a credit typed in by hand is;
+ * otherwise - or when that invoice cannot take it (already credited, less left
+ * than this credits, dated before it) - it is filed on its own, linked to nothing
+ * (the owner sees it under Hyvitetyt). Either way the receipt stays linked as the
+ * document and is left out of the VAT return (loadCountedReceipts), so the credit
+ * counts once and with a negative sign instead of as an expense.
  */
 async function fileReceiptAsPurchaseCredit(
   userId: string,
@@ -1104,6 +1156,7 @@ async function fileReceiptAsPurchaseCredit(
     vendor: string | null;
     date: Date | null;
     invoiceNumber: string | null;
+    reference?: string | null;
     totalAmountCents: number | null;
     vatDetails: string | null;
     category: string | null;
@@ -1112,6 +1165,7 @@ async function fileReceiptAsPurchaseCredit(
     vatTreatment: string;
     type: string;
   },
+  creditsInvoiceNumber: string | null,
   // The inbox files inside its own transaction (receipt-staging.ts): writing
   // through the global client there would wait on that transaction's lock.
   db?: Prisma.TransactionClient
@@ -1129,6 +1183,33 @@ async function fileReceiptAsPurchaseCredit(
   const vatCents = Math.min(grossCents, Math.abs(eurosToCents(receiptVatTotalEuros(receipt.vatDetails))));
   const issueDate = receipt.date;
   const client = db ?? prisma;
+
+  const originalId = await findCreditedPurchaseInvoice(client, userId, supplierName, creditsInvoiceNumber, receipt.reference);
+  if (originalId) {
+    try {
+      const { creditNote } = await createPurchaseCreditNote(
+        userId,
+        originalId,
+        {
+          amountCents: grossCents,
+          vatCents,
+          reason: "hyvityslasku luettu tiedostosta",
+          date: issueDate.toISOString().slice(0, 10),
+          supplierNumber: receipt.invoiceNumber,
+          receiptId: receipt.id,
+        },
+        db
+      );
+      return { created: true, invoice: creditNote };
+    } catch (error) {
+      if (error instanceof AppError && (error.code === "DUPLICATE_PURCHASE_INVOICE" || error.code === "RECEIPT_IN_USE")) {
+        return { created: false, skipped: "duplicate" };
+      }
+      if (!(error instanceof AppError && UNLINKABLE_CREDIT_CODES.has(error.code))) throw error;
+      console.warn(`Credit note of receipt ${receipt.id} not linked to ostolasku ${originalId}; filed on its own:`, error.message);
+    }
+  }
+
   try {
     await assertPeriodOpen(userId, [issueDate], client);
     await assertReceiptAvailable(userId, receipt.id, undefined, client);

@@ -43,7 +43,8 @@ private func draft(_ uploadId: String = "u1") -> ReceiptDraft {
         let server = FakeSaveServer([saved("r1", autoApproved: true)])
         let outcome = try await ReceiptSaving.save(draft(), support: .unknown, saveDuplicateAnyway: true) { try server.post($0) }
         #expect(server.bodies.map(\.autoApprove) == [true])
-        #expect(outcome == .init(receiptId: "r1", approved: true, duplicate: false, support: .supported))
+        // A plain receipt saved is a kuitti: the upload row offers "Kuitti ⇄ Ostolasku" for it.
+        #expect(outcome == .init(receiptId: "r1", approved: true, duplicate: false, support: .supported, kind: .receipt))
     }
 
     @Test func aWave1RefusalIsSavedAgainWithoutTheFlagAndRemembered() async throws {

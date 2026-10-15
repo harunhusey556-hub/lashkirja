@@ -18,6 +18,9 @@ public struct Profile: Codable, Sendable, Equatable {
     public var invoiceTerms: String?
     public var lateInterestPercent: Decimal?
     public var reminderFeeCents: Int?
+    /// "Kohdista varmat automaattisesti": a matching run also links a sure pair (viite + exact amount)
+    /// that had a weaker rival. Off by default; nil from a server without the setting.
+    public var autoLinkSureMatches: Bool?
     /// Mailboxes the server reads receipts from (`/api/integrations/imap`); read only here.
     public var imapAccounts: [ImapAccount]?
 }
@@ -71,6 +74,9 @@ public struct ProfilePatch: Encodable {
         // The server takes the fee in euros (`reminderFee`) and stores cents itself.
         if old.reminderFeeCents != new.reminderFeeCents, let cents = new.reminderFeeCents {
             values["reminderFee"] = .number(Decimal(cents) / 100)
+        }
+        if old.autoLinkSureMatches != new.autoLinkSureMatches, let sure = new.autoLinkSureMatches {
+            values["autoLinkSureMatches"] = .flag(sure)
         }
     }
 

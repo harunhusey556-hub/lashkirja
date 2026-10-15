@@ -29,6 +29,7 @@ const patchSchema = z.object({
   entityType: z.enum(ENTITY_TYPES).optional(),
   vatRegistered: z.boolean().optional(),
   vatPeriod: z.enum(["month", "quarter", "year"]).optional(),
+  autoLinkSureMatches: z.boolean().optional(),
   // Seller details printed on sales invoices.
   businessName: z.string().trim().max(SELLER_LIMITS.businessName).nullish(),
   businessId: z.string().trim().max(SELLER_LIMITS.businessId).nullish(),
@@ -75,6 +76,7 @@ export async function GET(req: NextRequest) {
       entityType: true,
       vatRegistered: true,
       vatPeriod: true,
+      autoLinkSureMatches: true,
       ...SELLER_SELECT,
       imapAccounts: {
         select: { id: true, email: true, lastCheckedAt: true }
@@ -163,6 +165,7 @@ export async function PATCH(req: NextRequest) {
       entityType: true,
       vatRegistered: true,
       vatPeriod: true,
+      autoLinkSureMatches: true,
       ...SELLER_SELECT,
       // The same shape as GET: a client that keeps the answer keeps its mailboxes.
       imapAccounts: { select: { id: true, email: true, lastCheckedAt: true } },

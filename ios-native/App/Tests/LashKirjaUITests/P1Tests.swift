@@ -11,7 +11,7 @@ final class P1Tests: WalkTestCase {
         measure("create invoice (Myynti)", reached: app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15))
     }
     func test02_CreateInvoiceFromAdd() {
-        tab("Lisää"); sleep(1); tap("Uusi lasku")
+        tab("Lisää"); sleep(1); tap("Uusi myyntilasku")
         measure("create invoice (Lisää)", reached: app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15))
     }
     func test03_OpenOverdueInvoice() {

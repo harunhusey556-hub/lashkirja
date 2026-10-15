@@ -101,6 +101,10 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
 
     public var isIncome: Bool { type == "tulo" }
     public var title: String { vendor?.isEmpty == false ? vendor! : "Tuntematon myyjä" }
+    /// A saved credit note: the server books it with a negative total and negative VAT rows.
+    public var isCreditNote: Bool { (totalAmount ?? 0) < 0 }
+    /// "Hyvityslasku" for a credit note, nil otherwise.
+    public var creditNoteLabel: String? { isCreditNote ? CreditNoteText.label : nil }
 }
 
 public struct VatDetail: Codable, Sendable, Hashable {

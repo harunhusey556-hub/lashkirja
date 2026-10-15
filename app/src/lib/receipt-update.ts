@@ -16,6 +16,7 @@ import { parseVatDetails } from "./alv";
 import { sameVatLines, vatLinesProblem } from "./receipt-vat";
 import { versionConflict } from "./edit-conflict";
 import type { PurchaseVatTreatment } from "./alv";
+import { VENDOR_CORRECTION_KIND } from "./vendor-intelligence";
 
 export interface ReceiptPatch {
   vendor?: string | null;
@@ -122,6 +123,24 @@ async function applyIn(tx: Db, userId: string, id: string, body: ReceiptPatch, e
           resourceId: id,
           previousValue: owned.category,
           newValue: nextCategory,
+          reason: "käyttäjän korjaus",
+        },
+      });
+    }
+  }
+  // A corrected vendor is what the next reading of the same sender should say (owner
+  // 2026-10-15, "Alvestre SIA" read wrong): getTopVendorsForAiPrompt hands it to the model.
+  if (body.vendor !== undefined) {
+    const nextVendor = sanitizeText(body.vendor);
+    if (nextVendor && nextVendor !== owned.vendor) {
+      await tx.automationEvent.create({
+        data: {
+          userId,
+          kind: VENDOR_CORRECTION_KIND,
+          resourceType: "receipt",
+          resourceId: id,
+          previousValue: owned.vendor,
+          newValue: nextVendor,
           reason: "käyttäjän korjaus",
         },
       });

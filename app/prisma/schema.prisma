@@ -57,6 +57,8 @@ model User {
   stripeDetailsSubmitted Boolean  @default(false)
   /// The owner switched card payments on. Allowed only while charges are enabled.
   posEnabled             Boolean  @default(false)
+  /// Kohdista varmat automaattisesti: a matching run also links a certain pair (viite + exact amount) that had a weaker rival.
+  autoLinkSureMatches    Boolean  @default(false)
   createdAt     DateTime    @default(now())
   receipts      Receipt[]
   statements    Statement[]
