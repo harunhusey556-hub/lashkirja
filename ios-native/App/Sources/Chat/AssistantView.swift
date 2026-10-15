@@ -63,6 +63,7 @@ struct AssistantView: View {
                 if case .success(let url) = result { prepare { await ChatReceiptPrep.file(url) } }
             }
         }
+        .perfReady("chat", model?.historyLoaded == true)
         .task {
             guard model == nil else { return }
             if let existing = app.chat {

@@ -166,6 +166,7 @@ struct BankAccountsView: View {
             app.refreshEverything()
             await load()
         }
+        .perfReady("pankkiTilit", overview != nil)
         .task(id: showArchived) {
             await load()
             askScopeOnce()

@@ -98,6 +98,7 @@ struct AlvView: View {
         .background(Theme.canvas)
         .navigationTitle("ALV-ilmoitus")
         .refreshable { await load() }
+        .perfReady("alv", state.value != nil)
         .task(id: period) {
             failure = nil
             notice = nil

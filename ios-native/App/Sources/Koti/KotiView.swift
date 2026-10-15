@@ -21,6 +21,7 @@ struct KotiView: View {
                 ProgressView()
             }
         }
+        .perfReady("koti", model?.state.value != nil)
         .task(id: app.dataVersion) {
             if model == nil {
                 let app = self.app

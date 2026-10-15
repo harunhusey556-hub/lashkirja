@@ -11,6 +11,8 @@ final class ChatModel {
     var conversationId: String?
     var title = "Avustaja"
     private(set) var messages: [ChatMessage] = []
+    /// The stored conversation has been read once (it may be empty).
+    private(set) var historyLoaded = false
     /// Where the current question stands (see `ChatTurn`); a failed one offers "Yritä uudelleen".
     private(set) var turn: ChatTurn = .idle
     var streaming: Bool { turn.isBusy }
@@ -114,6 +116,7 @@ final class ChatModel {
             let history: ChatHistory = try await app.api.get("/api/ai/chat", query: query)
             guard loads.isCurrent(generation), !streaming, pendingReceipts.isEmpty else { return }
             messages = history.messages.uniquedById()
+            historyLoaded = true
             conversationId = history.conversation?.id
             title = history.conversation?.title ?? "Avustaja"
         } catch is CancellationError {

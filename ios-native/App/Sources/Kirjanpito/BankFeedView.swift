@@ -293,6 +293,7 @@ struct BankFeedView: View {
             await load()
             await loadBankLinks()
         }
+        .perfReady("pankkiFeed", state.value != nil)
         .task(id: loadKey) {
             restore()
             guard state.value == nil || gate.isDue(key: month ?? "", version: app.dataVersion) else { return }

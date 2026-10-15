@@ -57,6 +57,7 @@ struct KirjanpitoView: View {
             gate.mark(version: app.refreshEverything())
             await load()
         }
+        .perfReady("kirjanpito", counts != nil)
         .task(id: app.dataVersion) {
             guard counts == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.

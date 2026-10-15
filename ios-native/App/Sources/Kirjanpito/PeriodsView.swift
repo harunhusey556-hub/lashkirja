@@ -68,6 +68,7 @@ struct PeriodsView: View {
             await loadMonth()
             await loadLock()
         }
+        .perfReady("kaudet", status.value != nil)
         .task(id: "\(month)|\(app.dataVersion)") { await loadMonth() }
         .task(id: app.dataVersion) { await loadLock() }
         .fullScreenCover(item: $captureFor, onDismiss: { Task { await loadMonth() } }) { target in

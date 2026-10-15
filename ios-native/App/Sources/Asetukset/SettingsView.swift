@@ -81,6 +81,7 @@ struct SettingsView: View {
         .navigationTitle("Asetukset")
         // The lock lives outside SwiftUI state; read it again when coming back from its screen.
         .onAppear { lockEnabled = AppLock.shared.isEnabled }
+        .perfReady("asetukset", profile != nil)
         .confirmSheet(isPresented: $confirmLogout, title: "Kirjaudutaanko ulos?", confirmTitle: "Kirjaudu ulos") {
             Task { await app.logout() }
         }

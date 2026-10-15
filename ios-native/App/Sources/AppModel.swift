@@ -134,6 +134,7 @@ final class AppModel {
         // The revoke of an earlier sign-out is a network call: it must not hold up opening the app.
         Task { await auth.revokePending() }
         guard let user = await auth.restore() else {
+            Perf.dropLaunch()
             phase = .signedOut(notice: nil)
             return
         }

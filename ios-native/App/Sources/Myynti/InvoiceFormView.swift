@@ -142,6 +142,7 @@ struct InvoiceFormView: View {
                 draft.lines.adjustVatRates(issueDate: APIDate.dayString(date))
             }
             .onChange(of: snapshot) { _, current in keepDraft(current) }
+            .perfReady("laskuUusi", baseline != nil)
             .task { await prepare() }
             .interactiveDismissDisabled(busy || dirty)
         }
