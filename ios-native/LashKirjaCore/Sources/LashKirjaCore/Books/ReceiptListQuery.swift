@@ -77,6 +77,16 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
 
     public init() {}
 
+    /// The list a link opens on (a report figure, a month, a tab): exactly its filters, nothing remembered.
+    public static func drilled(month: String = "", tab: ReceiptTab = .all, category: String = "", missingVat: Bool = false) -> ReceiptListQuery {
+        var query = ReceiptListQuery()
+        query.month = month
+        query.tab = tab
+        query.category = category
+        query.missingVat = missingVat
+        return query
+    }
+
     private static func amount(_ text: String) -> Decimal?? {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if clean.isEmpty { return .some(nil) }

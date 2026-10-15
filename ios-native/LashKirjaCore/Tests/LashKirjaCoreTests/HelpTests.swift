@@ -43,3 +43,16 @@ import Foundation
     #expect(AssistantCooldown.intro(available: nil).hasPrefix("Autan tilisi tietojen"))
     #expect(AssistantCooldown.shortcuts.map(\.label) == ["Yhdistä pankki", "Kohdista kuitit", "Tämän kuun ALV"])
 }
+
+/// chat-send: the row is laid out while the reply is on its way, so the reply landing does not
+/// insert it (above the messages, it pushed the question down when the answer came).
+@Test func limitedModeShortcutRowWaitsUnderTheConversation() {
+    #expect(AssistantCooldown.shortcutRow(available: false, messageCount: 2, replying: true, lastRole: "assistant") == .reserved)
+    #expect(AssistantCooldown.shortcutRow(available: false, messageCount: 2, replying: false, lastRole: "assistant") == .shown)
+    // The empty conversation has the shortcuts in its greeting; a question with no reply has none.
+    #expect(AssistantCooldown.shortcutRow(available: false, messageCount: 0, replying: false, lastRole: nil) == .none)
+    #expect(AssistantCooldown.shortcutRow(available: false, messageCount: 1, replying: false, lastRole: "user") == .none)
+    // With a model (or before its status is known) the replies carry their own next steps.
+    #expect(AssistantCooldown.shortcutRow(available: true, messageCount: 2, replying: false, lastRole: "assistant") == .none)
+    #expect(AssistantCooldown.shortcutRow(available: nil, messageCount: 2, replying: true, lastRole: "assistant") == .none)
+}
