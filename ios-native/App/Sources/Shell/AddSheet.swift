@@ -82,7 +82,7 @@ struct AddSheet: View {
                 CaptureFlow(transactionId: nil, opensCamera: false, onClose: { dismiss() })
             }
             .sheet(isPresented: $newInvoice, onDismiss: openCreatedInvoice) {
-                InvoiceFormView(existing: nil, onCreated: { id in createdInvoiceId = id })
+                InvoiceFormView(existing: nil, preview: app.invoiceFormPreview(), onCreated: { id in createdInvoiceId = id })
             }
             // A swipe down during an upload would lose its result.
             .interactiveDismissDisabled(busy)

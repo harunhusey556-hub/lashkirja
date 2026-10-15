@@ -150,7 +150,7 @@ struct MyyntiView: View {
             }
         }
         .sheet(item: $newInvoice, onDismiss: openCreated) { _ in
-            InvoiceFormView(existing: nil, onCreated: { id in createdId = id })
+            InvoiceFormView(existing: nil, preview: app.invoiceFormPreview(), onCreated: { id in createdId = id })
         }
         .sheet(isPresented: $showMatch) {
             BankMatchSheet { message in notice = message }

@@ -255,6 +255,9 @@ private struct Report: Decodable, Equatable { let n: Int; let extra: String? }
         #expect(requests.contains(PrefetchRequest(path: "/api/receipts/counts", query: ReceiptListQuery.pendingCountQuery, persist: false)))
         #expect(requests.contains(PrefetchRequest(path: "/api/reports/profit-loss", query: ["from": "2026-01", "to": "2026-12"], persist: false)))
         #expect(requests.contains(PrefetchRequest(path: "/api/ai/chat", persist: false)))
+        // "+" → "Uusi myyntilasku" opens from Koti on these (InvoiceFormPreview), not only from Myynti.
+        #expect(requests.contains(PrefetchRequest(path: "/api/customers", persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/catalog", persist: false)))
         // Only the launch lists go to disk; Myynti's list is one of the screen's own persisted keys.
         #expect(requests.filter(\.persist).map(\.path) == ["/api/invoices"])
     }

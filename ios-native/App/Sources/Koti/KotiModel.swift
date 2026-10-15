@@ -34,10 +34,16 @@ final class KotiModel {
     private var pendingCommit: (() async -> Void)?
     private var toastTask: Task<Void, Never>?
 
-    init(api: APIClient, profile: @escaping () async -> Profile?, app: AppModel? = nil) {
+    /// `opening`: the month's last dashboard (`AppModel.kotiPreview`). The first frame shows it and
+    /// the load refreshes it in place.
+    init(api: APIClient, profile: @escaping () async -> Profile?, app: AppModel? = nil, opening: Dashboard? = nil) {
         self.api = api
         self.profile = profile
         self.app = app
+        if let opening {
+            month = opening.month
+            state.succeed(opening)
+        }
     }
 
     var visibleItems: [DashboardItem] { state.value?.items.filter { !hidden.contains($0.id) } ?? [] }

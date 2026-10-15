@@ -6,10 +6,10 @@ struct InvoiceFormView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let existing: Invoice?
-    var presetCustomerId: String? = nil
+    let presetCustomerId: String?
     /// Called with the new invoice's id after a create, before the sheet closes: the presenter
     /// opens the invoice once the sheet is gone (the web replaces the form with the invoice).
-    var onCreated: ((String) -> Void)? = nil
+    let onCreated: ((String) -> Void)?
 
     @State private var draft = InvoiceDraft(customerId: "", issueDate: APIDate.dayString(Date()), paymentTermDays: 14)
     @State private var issueDate = Date()
@@ -40,6 +40,30 @@ struct InvoiceFormView: View {
     @State private var nextNumber: Int?
     @State private var scrollTarget: InvoiceFormField?
     @FocusState private var focus: InvoiceFormField?
+    /// UI tests only (`-LKUITest`): whether the form was finished when it first appeared.
+    @State private var openedFinished: Bool?
+
+    /// `preview` (`AppModel.invoiceFormPreview`) opens the form finished in its first frame: line,
+    /// customers, catalog and a kept draft in place. Without it `.task` fills them in after the
+    /// first frame (the "Lisää → Uusi lasku" flash, w44).
+    init(existing: Invoice?, presetCustomerId: String? = nil, preview: InvoiceFormPreview? = nil, onCreated: ((String) -> Void)? = nil) {
+        self.existing = existing
+        self.presetCustomerId = presetCustomerId
+        self.onCreated = onCreated
+        guard let preview else { return }
+        let opening = InvoiceForm.opening(existing: existing, presetCustomerId: presetCustomerId, customers: preview.customers,
+                                          sellerRegistered: preview.sellerRegistered, kept: preview.kept,
+                                          today: APIDate.dayString(Date()))
+        _draft = State(initialValue: opening.draft)
+        _issueDate = State(initialValue: APIDate.day(opening.draft.issueDate) ?? Date())
+        _baseline = State(initialValue: opening.baseline)
+        _priceTexts = State(initialValue: opening.priceTexts)
+        _restored = State(initialValue: opening.restored)
+        _showDetails = State(initialValue: !opening.draft.notes.isEmpty)
+        _customers = State(initialValue: preview.customers)
+        _catalog = State(initialValue: preview.catalog)
+        _sellerRegistered = State(initialValue: preview.sellerRegistered)
+    }
 
     var body: some View {
         NavigationStack {
@@ -89,12 +113,16 @@ struct InvoiceFormView: View {
             .navigationTitle(existing == nil ? "Uusi lasku" : "Muokkaa laskua")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if existing == nil, let label = InvoiceSequence.label(nextNumber) {
+                if existing == nil {
                     ToolbarItem(placement: .principal) {
                         VStack(spacing: 0) {
                             Text("Uusi lasku").font(.headline).foregroundStyle(Theme.ink)
-                            Text(label).font(.caption2).foregroundStyle(Theme.ink2)
+                            // The number's line is there from the first frame and fades in once the
+                            // server names it: swapping the plain title for this one moved the title up.
+                            Text(InvoiceSequence.label(nextNumber) ?? " ").font(.caption2).foregroundStyle(Theme.ink2)
+                                .opacity(nextNumber == nil ? 0 : 1)
                         }
+                        .motion(.easeOut(duration: 0.2), value: nextNumber)
                         .accessibilityElement(children: .combine)
                     }
                 }
@@ -143,6 +171,14 @@ struct InvoiceFormView: View {
             }
             .onChange(of: snapshot) { _, current in keepDraft(current) }
             .perfReady("laskuUusi", baseline != nil)
+            .onAppear { if UITestHooks.active, openedFinished == nil { openedFinished = baseline != nil && !draft.lines.isEmpty } }
+            // OwnerScreensTests.testE: a first frame without the line is the "Lisää → Uusi lasku" flash.
+            .overlay(alignment: .topLeading) {
+                if let openedFinished {
+                    Text(openedFinished ? "valmis" : "kesken").font(.caption2).opacity(0.01)
+                        .accessibilityIdentifier("invoice-form-opening")
+                }
+            }
             .task { await prepare() }
             .interactiveDismissDisabled(busy || dirty)
         }
@@ -556,74 +592,40 @@ struct InvoiceFormView: View {
     private func prepare() async {
         guard !loaded else { return }
         loaded = true
-        // Customers, catalog and profile load side by side: the form is ready after one round trip,
-        // none when Myynti already warmed them in the app's cache.
+        // Customers and catalog load side by side: the form is ready after one round trip, none
+        // when Myynti already warmed them in the app's cache.
         // Tasks, not `async let`: finishing these four async lets aborted the app in the Swift
         // runtime (swift_task_dealloc from asyncLet_finish_after_task_completion) every time the
         // form opened in the simulator motion audit (2026-10-15, two crash reports).
         let app = self.app
         let customerList = Task { try? await app.cachedGet("/api/customers") as CustomerList }
         let catalogList = Task { try? await app.cachedGet("/api/catalog") as CatalogList }
-        let profile = Task { await app.cachedProfile() }
         let number = Task { await fetchNextNumber() }
-        // The first line needs only the seller's VAT, and Koti has the profile in memory by now:
-        // the form opens with its line instead of the line popping in after the slowest of the
-        // four loads (motion audit lasku-new).
-        // In memory (Koti loaded the profile, Myynti's warm the lists): the form is ready without an
-        // await. Awaited, these took 0.6-1.1 s on a busy main thread (w41 perf walk trace); the
-        // server's lists then replace them in place below.
-        let shownCustomers: CustomerList? = app.lastPainted("/api/customers")
-        let shownCatalog: CatalogList? = app.lastPainted("/api/catalog")
-        if let profile = app.profile {
-            sellerRegistered = profile.vatRegistered
-        } else if let profile = await profile.value {
-            sellerRegistered = profile.vatRegistered
+        // Opened from a preview, the form is finished already (`init`). Without one (the profile or
+        // the lists not in memory yet) it opens once they are here, by the same rules.
+        if baseline == nil {
+            let registered = await app.cachedProfile()?.vatRegistered ?? true
+            let active = await customerList.value?.customers.filter { $0.archivedAt == nil } ?? []
+            let items = await catalogList.value?.items ?? []
+            let opening = InvoiceForm.opening(existing: existing, presetCustomerId: presetCustomerId, customers: active,
+                                              sellerRegistered: registered, kept: keptDraft, today: APIDate.dayString(Date()))
+            sellerRegistered = registered
+            customers = active
+            catalog = items
+            draft = opening.draft
+            issueDate = APIDate.day(opening.draft.issueDate) ?? Date()
+            priceTexts = opening.priceTexts
+            restored = opening.restored
+            showDetails = !opening.draft.notes.isEmpty
+            baseline = opening.baseline
         }
-        if existing == nil, draft.lines.isEmpty {
-            draft.lines = [.new(sellerRegistered: sellerRegistered)]
-            seedPriceTexts(blankZero: true)
-        }
-        if let list = shownCustomers {
-            customers = list.customers.filter { $0.archivedAt == nil }
-        } else if let list = await customerList.value {
+        // A customer or product added since the lists were painted: replaced in place.
+        if let list = await customerList.value {
             customers = list.customers.filter { $0.archivedAt == nil }
             app.rememberPainted(list, "/api/customers")
         }
         // The form works without the catalog; "Lisää tuotteista" just stays hidden.
-        if let list = shownCatalog {
-            catalog = list.items
-        } else if let list = await catalogList.value {
-            catalog = list.items
-            app.rememberPainted(list, "/api/catalog")
-        }
-        if let existing {
-            draft.customerId = existing.customer.id
-            draft.issueDate = existing.issueDate
-            issueDate = APIDate.day(existing.issueDate) ?? Date()
-            if let term = InvoiceForm.termDays(issueDate: existing.issueDate, dueDate: existing.dueDate) {
-                draft.paymentTermDays = term
-            }
-            draft.notes = existing.notes ?? ""
-            draft.lines = existing.lines.map { .init(description: $0.description, quantity: $0.quantity, unit: $0.unit, unitPrice: $0.unitPrice, vatRate: $0.vatRate) }
-            seedPriceTexts(blankZero: false)
-        } else {
-            if let presetCustomerId { pickCustomer(presetCustomerId) }
-            if draft.lines.isEmpty { draft.lines = [.new(sellerRegistered: sellerRegistered)] }
-            seedPriceTexts(blankZero: true)
-        }
-        draft.followSellerVat(registered: sellerRegistered)
-        // What the date change below would do anyway, done before the baseline so it does not
-        // count as the owner's change (a 14 % draft line dated in 2026 can only be 13,5 %).
-        draft.lines.adjustVatRates(issueDate: APIDate.dayString(issueDate))
-        baseline = snapshot
-        restoreKeptDraft()
-        showDetails = !draft.notes.isEmpty
-        // A customer or product added since the lists were painted.
-        if shownCustomers != nil, let list = await customerList.value {
-            customers = list.customers.filter { $0.archivedAt == nil }
-            app.rememberPainted(list, "/api/customers")
-        }
-        if shownCatalog != nil, let list = await catalogList.value {
+        if let list = await catalogList.value {
             catalog = list.items
             app.rememberPainted(list, "/api/catalog")
         }
@@ -631,23 +633,10 @@ struct InvoiceFormView: View {
         nextNumber = await number.value
     }
 
-    /// "Uusi lasku" again after closing an unsaved one: the owner continues where they left off.
-    /// Not when the form was opened for another customer than the kept draft's.
-    private func restoreKeptDraft() {
-        guard existing == nil, let owner, let kept = SalesDraftStore.shared.entry(owner: owner) else { return }
-        if let presetCustomerId, kept.draft.customerId != presetCustomerId { return }
-        var restoredDraft = kept.draft
-        // The VAT status may have changed since; the kept customer may since have been archived.
-        restoredDraft.followSellerVat(registered: sellerRegistered)
-        if !restoredDraft.customerId.isEmpty, !customers.contains(where: { $0.id == restoredDraft.customerId }) {
-            restoredDraft.customerId = baseline?.customerId ?? ""
-        }
-        draft = restoredDraft
-        issueDate = APIDate.day(restoredDraft.issueDate) ?? Date()
-        draft.lines.adjustVatRates(issueDate: APIDate.dayString(issueDate))
-        priceTexts = [:]
-        seedPriceTexts(blankZero: true)
-        restored = true
+    /// The unsaved new invoice kept for this owner, if any.
+    private var keptDraft: InvoiceDraft? {
+        guard existing == nil, let owner else { return nil }
+        return SalesDraftStore.shared.entry(owner: owner)?.draft
     }
 
     /// "Tallenna tuotteeksi": the line becomes a catalog product for later invoices.
@@ -717,6 +706,29 @@ struct InvoiceFormView: View {
             failure = error.userMessage
             Haptics.error()
         }
+    }
+}
+
+/// What the invoice form opens on before any await: the seller's VAT status, the active customers,
+/// the catalog and the kept unsaved new invoice, all from memory.
+struct InvoiceFormPreview {
+    let sellerRegistered: Bool
+    let customers: [Customer]
+    let catalog: [CatalogItem]
+    let kept: InvoiceDraft?
+}
+
+extension AppModel {
+    /// Nil until the profile and both lists are in memory (Koti loads the profile; the launch and
+    /// Myynti's warm fill the lists): the form then opens after its loads, as before.
+    func invoiceFormPreview() -> InvoiceFormPreview? {
+        guard let profile, case .signedIn(let user) = phase,
+              let customers: CustomerList = lastPainted("/api/customers"),
+              let catalog: CatalogList = lastPainted("/api/catalog") else { return nil }
+        return InvoiceFormPreview(sellerRegistered: profile.vatRegistered,
+                                  customers: customers.customers.filter { $0.archivedAt == nil },
+                                  catalog: catalog.items,
+                                  kept: SalesDraftStore.shared.entry(owner: user.userId)?.draft)
     }
 }
 

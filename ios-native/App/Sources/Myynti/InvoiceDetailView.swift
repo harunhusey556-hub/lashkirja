@@ -130,7 +130,7 @@ struct InvoiceDetailView: View {
                 case .close: CloseReasonSheet { reason in Task { await setStatus(.close(reason: reason)) } }
                 case .credit: InvoiceCreditSheet(invoice: invoice) { id in creditedId = id }
                 case .pdf: DocumentPreviewSheet(path: "/api/invoices/\(invoice.id)/pdf", fileName: "Lasku-\(invoice.number).pdf", cacheKey: invoice.updatedAt)
-                case .edit: InvoiceFormView(existing: invoice)
+                case .edit: InvoiceFormView(existing: invoice, preview: app.invoiceFormPreview())
                 case .reminder:
                     if let reminder {
                         ReminderSheet(invoice: invoice, preview: reminder) { message in notice = message }
