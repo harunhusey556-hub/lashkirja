@@ -58,6 +58,13 @@ struct KirjanpitoView: View {
             await load()
         }
         .task(id: app.dataVersion) {
+            // Kuukauden sulku's first month and lock, warmed so that screen opens on its content.
+            let app = self.app
+            Task {
+                let month = PeriodClose.startMonth(nil, current: MonthKey.current())
+                _ = try? await app.cachedGet("/api/dashboard/month", query: ["month": month]) as PeriodMonthStatus
+                _ = try? await app.cachedGet("/api/period-lock") as PeriodLockState
+            }
             guard counts == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion

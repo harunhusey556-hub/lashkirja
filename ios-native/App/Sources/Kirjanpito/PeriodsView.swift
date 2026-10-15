@@ -65,8 +65,8 @@ struct PeriodsView: View {
         .background(Theme.canvas)
         .navigationTitle("Kuukauden sulku")
         .refreshable {
-            await loadMonth()
-            await loadLock()
+            await fetchMonth(force: true)
+            await fetchLock(force: true)
         }
         .task(id: "\(month)|\(app.dataVersion)") { await loadMonth() }
         .task(id: app.dataVersion) { await loadLock() }
@@ -331,13 +331,22 @@ struct PeriodsView: View {
         return PeriodClose.confirmMessage(facts(data), earlierOpen: earlierOpen)
     }
 
-    private func loadMonth() async {
+    private func loadMonth() async { await fetchMonth(force: false) }
+
+    /// Through the app's cache (KirjanpitoView warms the first month): a month seen before paints
+    /// at once instead of a spinner that the month's sections then push down.
+    private func fetchMonth(force: Bool) async {
         let key = month
         // Another month's figures must not stay under this month's heading while it loads.
-        if status.value?.month != key { status.restart() }
+        if status.value?.month != key {
+            status.restart()
+            if let cached: PeriodMonthStatus = await app.cachedValue("/api/dashboard/month", query: ["month": key]), month == key {
+                status.succeed(cached)
+            }
+        }
         status.begin()
         do {
-            let data: PeriodMonthStatus = try await app.api.get("/api/dashboard/month", query: ["month": key])
+            let data: PeriodMonthStatus = try await app.cachedGet("/api/dashboard/month", query: ["month": key], force: force)
             try Task.checkCancellation()
             status.succeed(data)
             if data.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: key, kind: data.vatPeriod) {
@@ -532,10 +541,15 @@ struct PeriodsView: View {
         }
     }
 
-    private func loadLock() async {
+    private func loadLock() async { await fetchLock(force: false) }
+
+    private func fetchLock(force: Bool) async {
+        if lockedThrough.value == nil, let cached: PeriodLockState = await app.cachedValue("/api/period-lock") {
+            lockedThrough.succeed(cached)
+        }
         lockedThrough.begin()
         do {
-            let state: PeriodLockState = try await app.api.get("/api/period-lock")
+            let state: PeriodLockState = try await app.cachedGet("/api/period-lock", force: force)
             lockedThrough.succeed(state)
         } catch is CancellationError {
         } catch {
