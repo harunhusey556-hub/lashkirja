@@ -94,7 +94,8 @@ jobs:
           SUITE: ${{ matrix.suite }}
           LK_DEDICATED_MAC: "1"
         run: |
-          set -u
+          # Errors are handled where they matter: a walk that fails some steps still has a report.
+          set +e -u
           OUT="$GITHUB_WORKSPACE/motion-gate"
           API_PID=
           fresh_api() {
