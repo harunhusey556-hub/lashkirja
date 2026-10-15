@@ -44,6 +44,10 @@ struct ReceiptsView: View {
     @State private var toast: Toast?
     @State private var toastAction: (() async -> Void)?
     @State private var toastTask: Task<Void, Never>?
+    /// False while a pushed screen or a cover hides Kuitit.
+    @State private var onScreen = false
+
+    private var listMotion: Animation? { onScreen ? .snappy : nil }
 
     /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
     /// Also read by the launch prefetch, so it asks for the list this screen opens on.
@@ -249,16 +253,22 @@ struct ReceiptsView: View {
             guard !Task.isCancelled else { return }
             withMotion(.snappy) { sure = list }
         }
-        .onDisappear { toastTask?.cancel() }
+        .onAppear { onScreen = true }
+        .onDisappear {
+            onScreen = false
+            toastTask?.cancel()
+        }
         .motion(.snappy, value: pending.map(\.id))
         .motion(.snappy, value: rejected.map(\.id))
         // A changed list, a notice, a filter chip or the bulk bar eases in and out: the rows below
-        // glide to their new place instead of jumping there.
-        .motion(.snappy, value: visibleIds)
-        .motion(.snappy, value: failure)
-        .motion(.snappy, value: notice)
-        .motion(.snappy, value: query)
-        .motion(.snappy, value: selected.isEmpty)
+        // glide to their new place instead of jumping there. Only while Kuitit is on screen: an
+        // answer landing under a pushed receipt just takes its place (animating there kept the
+        // receipt's delete sheet from closing on Peruuta in CI).
+        .motion(listMotion, value: visibleIds)
+        .motion(listMotion, value: failure)
+        .motion(listMotion, value: notice)
+        .motion(listMotion, value: query)
+        .motion(listMotion, value: selected.isEmpty)
         // Photos kept while offline are sent from here too, not only from the capture screen.
         .task { OfflineReceiptQueueModel.shared.start(app: app) }
     }
