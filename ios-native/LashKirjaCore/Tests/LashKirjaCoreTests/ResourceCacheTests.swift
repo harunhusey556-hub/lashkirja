@@ -271,7 +271,9 @@ private struct Report: Decodable, Equatable { let n: Int; let extra: String? }
     }
 
     @Test func myyntiWarmsTheNewInvoiceForm() {
-        #expect(NextPrefetch.myynti().map(\.path) == ["/api/customers", "/api/catalog"])
+        #expect(NextPrefetch.myynti().map(\.path) == ["/api/customers", "/api/catalog", "/api/recurring-invoices"])
+        // Toistuvat laskut opens on its active plans: no query, so the screen finds this answer.
+        #expect(NextPrefetch.myynti().last?.query == [:])
     }
 }
 

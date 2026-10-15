@@ -569,14 +569,33 @@ struct InvoiceFormView: View {
         // The first line needs only the seller's VAT, and Koti has the profile in memory by now:
         // the form opens with its line instead of the line popping in after the slowest of the
         // four loads (motion audit lasku-new).
-        if let profile = await profile.value { sellerRegistered = profile.vatRegistered }
+        // In memory (Koti loaded the profile, Myynti's warm the lists): the form is ready without an
+        // await. Awaited, these took 0.6-1.1 s on a busy main thread (w41 perf walk trace); the
+        // server's lists then replace them in place below.
+        let shownCustomers: CustomerList? = app.lastPainted("/api/customers")
+        let shownCatalog: CatalogList? = app.lastPainted("/api/catalog")
+        if let profile = app.profile {
+            sellerRegistered = profile.vatRegistered
+        } else if let profile = await profile.value {
+            sellerRegistered = profile.vatRegistered
+        }
         if existing == nil, draft.lines.isEmpty {
             draft.lines = [.new(sellerRegistered: sellerRegistered)]
             seedPriceTexts(blankZero: true)
         }
-        if let list = await customerList.value { customers = list.customers.filter { $0.archivedAt == nil } }
+        if let list = shownCustomers {
+            customers = list.customers.filter { $0.archivedAt == nil }
+        } else if let list = await customerList.value {
+            customers = list.customers.filter { $0.archivedAt == nil }
+            app.rememberPainted(list, "/api/customers")
+        }
         // The form works without the catalog; "Lisää tuotteista" just stays hidden.
-        if let list = await catalogList.value { catalog = list.items }
+        if let list = shownCatalog {
+            catalog = list.items
+        } else if let list = await catalogList.value {
+            catalog = list.items
+            app.rememberPainted(list, "/api/catalog")
+        }
         if let existing {
             draft.customerId = existing.customer.id
             draft.issueDate = existing.issueDate
@@ -599,6 +618,15 @@ struct InvoiceFormView: View {
         baseline = snapshot
         restoreKeptDraft()
         showDetails = !draft.notes.isEmpty
+        // A customer or product added since the lists were painted.
+        if shownCustomers != nil, let list = await customerList.value {
+            customers = list.customers.filter { $0.archivedAt == nil }
+            app.rememberPainted(list, "/api/customers")
+        }
+        if shownCatalog != nil, let list = await catalogList.value {
+            catalog = list.items
+            app.rememberPainted(list, "/api/catalog")
+        }
         // Only a hint, and the form does not wait for it: a failed read leaves the title as it was.
         nextNumber = await number.value
     }

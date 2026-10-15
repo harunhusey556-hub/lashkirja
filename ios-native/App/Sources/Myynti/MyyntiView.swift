@@ -17,7 +17,8 @@ struct MyyntiView: View {
     @State private var query = ""
     /// A days-late figure narrows the late invoices to its bucket (on top of the Myöhässä chip).
     @State private var lateBucket: AgingBucket?
-    @State private var showNew = false
+    /// The new-invoice sheet, one request per tap (`SheetRequest`).
+    @State private var newInvoice: SheetRequest?
     @State private var showMatch = false
     @State private var notice: String?
     @State private var openedNew = false
@@ -31,10 +32,19 @@ struct MyyntiView: View {
     enum Shortcut: Hashable { case customers, recurring }
 
     /// A link opens exactly the list it names: its status chip, or Kaikki when it names none.
-    init(openNewInvoice: Bool = false, scope: InvoiceScope = InvoiceScope(), status: SalesFilter = .all) {
+    /// `preview` (the app's `salesPreview` for the same scope and chip) is on screen in the first
+    /// frame: painted from `load` instead, after an await on the cache, the tab showed a spinner and
+    /// then the list (motion audit offline-tab-myynti), and a tap could land on that late swap.
+    init(openNewInvoice: Bool = false, scope: InvoiceScope = InvoiceScope(), status: SalesFilter = .all,
+         preview: SalesPreview? = nil) {
         self.openNewInvoice = openNewInvoice
         self.scope = scope
         _filter = State(initialValue: status)
+        guard let preview else { return }
+        var shown = ScreenLoad<InvoiceList>()
+        shown.succeed(preview.list)
+        _state = State(initialValue: shown)
+        _counts = State(initialValue: preview.counts)
     }
 
     var body: some View {
@@ -136,10 +146,10 @@ struct MyyntiView: View {
         .navigationTitle(scope.isEmpty ? "Myynti" : "Laskut")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { Perf.beginOpen("laskuUusi"); showNew = true } label: { Label("Uusi lasku", systemImage: "plus") }
+                Button { Perf.beginOpen("laskuUusi"); newInvoice = SheetRequest() } label: { Label("Uusi lasku", systemImage: "plus") }
             }
         }
-        .sheet(isPresented: $showNew, onDismiss: openCreated) {
+        .sheet(item: $newInvoice, onDismiss: openCreated) { _ in
             InvoiceFormView(existing: nil, onCreated: { id in createdId = id })
         }
         .sheet(isPresented: $showMatch) {
@@ -149,13 +159,13 @@ struct MyyntiView: View {
         .navigationDestination(item: $shortcut) { target in
             switch target {
             case .customers: CustomersView()
-            case .recurring: RecurringInvoicesView()
+            case .recurring: RecurringInvoicesView(preview: app.lastPainted("/api/recurring-invoices"))
             }
         }
         .onAppear {
             guard openNewInvoice, !openedNew else { return }
             openedNew = true
-            showNew = true
+            newInvoice = SheetRequest()
         }
         .perfReady("myynti", state.value != nil)
         .task(id: "\(app.dataVersion)|\(listKey)") {
@@ -275,6 +285,7 @@ struct MyyntiView: View {
     private func load() async {
         let timing = ScreenTiming("Myynti")
         let listQuery = SalesListQuery.query(scope: scope, filter: filter, search: query)
+        if state.value != nil { timing.painted(fromCache: true) }
         if state.value == nil, let cached: InvoiceList = await app.cachedValue("/api/invoices", query: listQuery) {
             state.succeed(cached)
             if let cachedCounts: InvoiceCounts = await app.cachedValue("/api/invoices/counts", query: scope.query) { counts = cachedCounts.counts }
@@ -286,6 +297,7 @@ struct MyyntiView: View {
         do {
             let list: InvoiceList = try await app.cachedGet("/api/invoices", query: listQuery, persist: listQuery.isEmpty)
             state.succeed(list)
+            app.rememberPainted(list, "/api/invoices", query: listQuery)
             timing.dataReady()
             warmDetails(list.invoices)
             app.indexForSpotlight(list.invoices.compactMap {
@@ -295,7 +307,10 @@ struct MyyntiView: View {
         }
         catch is CancellationError {}
         catch { state.fail(error) }
-        if let fresh = await fresh { counts = fresh }
+        if let fresh = await fresh {
+            counts = fresh
+            app.rememberPainted(fresh, "/api/invoices/counts", query: scope.query)
+        }
     }
 
     /// The first rows' details (and an overdue one's reminder) into the cache and the app's
@@ -325,6 +340,29 @@ struct MyyntiView: View {
             return nil
         }
     }
+}
+
+/// What Myynti opens on before its own load: the list and chip counts it last painted.
+struct SalesPreview {
+    let list: InvoiceList
+    let counts: [String: Int]?
+}
+
+extension AppModel {
+    /// The list (and counts) last painted for this scope and chip with no search; nil when there is none.
+    func salesPreview(scope: InvoiceScope = InvoiceScope(), filter: SalesFilter = .all) -> SalesPreview? {
+        let query = SalesListQuery.query(scope: scope, filter: filter, search: "")
+        guard let list: InvoiceList = lastPainted("/api/invoices", query: query) else { return nil }
+        let counts: [String: Int]? = lastPainted("/api/invoices/counts", query: scope.query)
+        return SalesPreview(list: list, counts: counts)
+    }
+}
+
+/// One tap that opens a sheet: a new identity each time, so every tap changes what the sheet is bound
+/// to. With a Bool, a presentation SwiftUI did not carry out (the tap landed while the screen was still
+/// settling) left it true, and each later tap set true again: no change, so no sheet (P1 01's FAIL-NAV).
+struct SheetRequest: Identifiable, Equatable {
+    let id = UUID()
 }
 
 /// "Saatavat, avoinna": the paid / waiting / late bar (web `receivablesSegments`), each part opening

@@ -119,9 +119,11 @@ public enum NextPrefetch {
         return requests
     }
 
-    /// Myynti chosen: the new-invoice form's customers and catalog.
+    /// Myynti chosen: the new-invoice form's customers and catalog, and Toistuvat laskut (active
+    /// only, as the screen opens): its first visit was a spinner the list then replaced.
     public static func myynti() -> [PrefetchRequest] {
-        [PrefetchRequest(path: "/api/customers", persist: false), PrefetchRequest(path: "/api/catalog", persist: false)]
+        [PrefetchRequest(path: "/api/customers", persist: false), PrefetchRequest(path: "/api/catalog", persist: false),
+         PrefetchRequest(path: "/api/recurring-invoices", persist: false)]
     }
 }
 

@@ -8,7 +8,7 @@ name: iOS motion gate
 # Artifact motion-gate-<suite>: {baseline,pr-run1,pr-run2}/motion-report.{json,md} and gate.md.
 on:
   push:
-    branches: ["fix/w33-motion-audit"]
+    branches: ["fix/w33-motion-audit", "fix/w41-perf-myynti"]
     paths: [".github/workflows/ios-motion-gate.yml"]
   workflow_dispatch:
     inputs:
@@ -82,7 +82,11 @@ jobs:
         run: |
           set -euo pipefail
           git worktree add --detach "$RUNNER_TEMP/baseline" "$BASE"
-          git -C "$RUNNER_TEMP/baseline" -c user.name=ci -c user.email=ci@localhost cherry-pick $INSTRUMENT
+          # Native has the instrument since #14: only commits the base lacks are laid on.
+          for c in $INSTRUMENT; do
+            git merge-base --is-ancestor "$c" "$BASE" && continue
+            git -C "$RUNNER_TEMP/baseline" -c user.name=ci -c user.email=ci@localhost cherry-pick "$c"
+          done
           # The walk, probe and analyzer exactly as on this branch, so all three walks are driven alike.
           for f in scripts/sim ios-native/App/Tests/LashKirjaUITests/MotionAuditTests.swift ios-native/App/Sources/Observe/MotionProbe.swift; do
             rm -rf "$RUNNER_TEMP/baseline/$f"; cp -R "$f" "$RUNNER_TEMP/baseline/$f"

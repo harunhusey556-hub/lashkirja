@@ -107,7 +107,8 @@ struct MainTabView: View {
     @ViewBuilder private func root(_ item: AppTab) -> some View {
         switch item {
         case .koti: KotiView()
-        case .myynti: MyyntiView()
+        // Built again when the tab is chosen (`tab` changes), so it carries the list as painted by then.
+        case .myynti: MyyntiView(preview: app.salesPreview())
         case .kirjanpito: KirjanpitoView()
         case .raportit: RaportitView()
         default: PlaceholderScreen(title: item.title)
