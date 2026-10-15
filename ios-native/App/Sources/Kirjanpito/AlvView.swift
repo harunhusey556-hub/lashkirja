@@ -22,7 +22,7 @@ struct AlvView: View {
             periodSections
             if let r = state.value {
                 if let banner = state.banner {
-                    Section { RefreshFailureBanner(failure: banner, retry: load) }
+                    Section { RefreshFailureBanner(failure: banner, retry: { await load() }) }
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
@@ -91,13 +91,14 @@ struct AlvView: View {
                     if ReportDrill.alvScope(period).isEmpty { Text("Neljännesvuoden kuitit ja laskut avautuvat koko listana.") }
                 }
             } else {
-                ScreenStateView(state: state, retry: load) { (_: AlvReport) in EmptyView() }.listRowBackground(Color.clear)
+                ScreenStateView(state: state, retry: { await load() }) { (_: AlvReport) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("ALV-ilmoitus")
-        .refreshable { await load() }
+        .refreshable { await load(force: true) }
+        .perfReady("alv", state.value != nil)
         .task(id: period) {
             failure = nil
             notice = nil
@@ -346,13 +347,19 @@ struct AlvView: View {
     /// An answer (or failure) is shown only while its period (and so its kind) is still on screen
     /// and no later load has started: a slow pull-to-refresh or a load from before a period
     /// change must not put another period's figures under this one's heading.
-    private func load() async {
+    private func load(force: Bool = false) async {
         let asked = period
         loadGeneration += 1
         let mine = loadGeneration
+        // The period's last return at once (Koti and Kirjanpito warm the one due); the server's
+        // replaces it in place.
+        if state.value == nil, let cached: AlvReport = await app.cachedValue("/api/alv", query: ["period": asked]),
+           asked == period, mine == loadGeneration, state.value == nil {
+            state.succeed(cached)
+        }
         state.begin()
         do {
-            let report: AlvReport = try await app.api.get("/api/alv", query: ["period": asked])
+            let report: AlvReport = try await app.cachedGet("/api/alv", query: ["period": asked], force: force)
             guard asked == period, mine == loadGeneration else { return }
             state.succeed(report)
         }

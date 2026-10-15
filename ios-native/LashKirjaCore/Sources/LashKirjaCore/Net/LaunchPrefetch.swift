@@ -79,6 +79,45 @@ public enum LaunchPrefetch {
     }
 }
 
+/// The screens one tap away, warmed before the owner taps: after the launch prefetch (Koti is on
+/// screen) and when a tab is chosen. Exactly the screens' queries, so each opens painted from
+/// `ResourceCache` and refreshes in place. Kept in memory only; the launch lists are the ones on disk.
+public enum NextPrefetch {
+    /// With Koti on screen: Myynti's list and chip counts, the Kirjanpito hub's waiting count,
+    /// Raportit's year and the assistant's latest conversation.
+    public static func afterKoti(month: String) -> [PrefetchRequest] {
+        let year = String(month.prefix(4))
+        return [
+            PrefetchRequest(path: "/api/invoices", query: SalesListQuery.query(scope: InvoiceScope(), filter: .all, search: "")),
+            PrefetchRequest(path: "/api/invoices/counts", query: InvoiceScope().query, persist: false),
+            PrefetchRequest(path: "/api/receipts/counts", query: ReceiptListQuery.pendingCountQuery, persist: false),
+            PrefetchRequest(path: "/api/reports/profit-loss", query: ["from": "\(year)-01", "to": "\(year)-12"], persist: false),
+            PrefetchRequest(path: "/api/ai/chat", persist: false),
+        ]
+    }
+
+    /// Kirjanpito chosen: Pankkitapahtumat's first page, the bank connections (the feed's menu and
+    /// Pankkiyhteys), the month-close checklist and lock, and the ALV return the screen opens on
+    /// (`alvPeriod`, known once the profile tells the VAT period's kind).
+    public static func kirjanpito(month: String, alvPeriod: String?) -> [PrefetchRequest] {
+        var requests = [
+            PrefetchRequest(path: "/api/statements", query: CursorPaging.firstQuery(BankFeed.query(month: nil)), persist: false),
+            PrefetchRequest(path: "/api/bank/connections", persist: false),
+            PrefetchRequest(path: "/api/dashboard/month", query: ["month": PeriodClose.startMonth(nil, current: month)], persist: false),
+            PrefetchRequest(path: "/api/period-lock", persist: false),
+        ]
+        if let alvPeriod, !alvPeriod.isEmpty {
+            requests.append(PrefetchRequest(path: "/api/alv", query: ["period": alvPeriod], persist: false))
+        }
+        return requests
+    }
+
+    /// Myynti chosen: the new-invoice form's customers and catalog.
+    public static func myynti() -> [PrefetchRequest] {
+        [PrefetchRequest(path: "/api/customers", persist: false), PrefetchRequest(path: "/api/catalog", persist: false)]
+    }
+}
+
 extension ReceiptCounts {
     /// The `/api/receipts/counts` answer's bytes for these counts, to stand in the cache for it.
     public static func answer(_ counts: Counts) throws -> Data {

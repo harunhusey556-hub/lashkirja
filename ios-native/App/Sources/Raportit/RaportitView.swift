@@ -99,6 +99,7 @@ struct RaportitView: View {
             gate.mark(key: String(year), version: app.refreshEverything())
             await load()
         }
+        .perfReady("raportit", state.value != nil)
         .task(id: "\(year)|\(app.dataVersion)") {
             let key = String(year)
             guard state.value == nil || gate.isDue(key: key, version: app.dataVersion) else { return }

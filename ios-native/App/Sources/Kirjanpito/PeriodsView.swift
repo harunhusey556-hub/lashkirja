@@ -50,13 +50,13 @@ struct PeriodsView: View {
             monthPicker
             if let data = status.value, data.month == month {
                 if let banner = status.banner {
-                    Section { RefreshFailureBanner(failure: banner, retry: loadMonth) }
+                    Section { RefreshFailureBanner(failure: banner, retry: { await loadMonth() }) }
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
                 monthSections(data)
             } else {
-                ScreenStateView(state: status, retry: loadMonth) { (_: PeriodMonthStatus) in EmptyView() }
+                ScreenStateView(state: status, retry: { await loadMonth() }) { (_: PeriodMonthStatus) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
             lockSections
@@ -65,9 +65,10 @@ struct PeriodsView: View {
         .background(Theme.canvas)
         .navigationTitle("Kuukauden sulku")
         .refreshable {
-            await loadMonth()
-            await loadLock()
+            await loadMonth(force: true)
+            await loadLock(force: true)
         }
+        .perfReady("kaudet", status.value != nil)
         .task(id: "\(month)|\(app.dataVersion)") { await loadMonth() }
         .task(id: app.dataVersion) { await loadLock() }
         .fullScreenCover(item: $captureFor, onDismiss: { Task { await loadMonth() } }) { target in
@@ -331,17 +332,22 @@ struct PeriodsView: View {
         return PeriodClose.confirmMessage(facts(data), earlierOpen: earlierOpen)
     }
 
-    private func loadMonth() async {
+    private func loadMonth(force: Bool = false) async {
         let key = month
         // Another month's figures must not stay under this month's heading while it loads.
         if status.value?.month != key { status.restart() }
+        // The month's last checklist at once (Kirjanpito warms it); the server's replaces it in place.
+        if status.value == nil, let cached: PeriodMonthStatus = await app.cachedValue("/api/dashboard/month", query: ["month": key]),
+           key == month, status.value == nil {
+            status.succeed(cached)
+        }
         status.begin()
         do {
-            let data: PeriodMonthStatus = try await app.api.get("/api/dashboard/month", query: ["month": key])
+            let data: PeriodMonthStatus = try await app.cachedGet("/api/dashboard/month", query: ["month": key], force: force)
             try Task.checkCancellation()
             status.succeed(data)
             if data.vatRegistered, let period = PeriodClose.vatPeriodEnding(in: key, kind: data.vatPeriod) {
-                if let report: AlvReport = try? await app.api.get("/api/alv", query: ["period": period]) {
+                if let report: AlvReport = try? await app.cachedGet("/api/alv", query: ["period": period], force: force) {
                     let facts = PeriodClose.vat(filedAt: report.filing?.filedAt, paidAt: report.filing?.paidAt,
                                                 filedAmount: report.filing?.filedAmount,
                                                 amount: report.field308.amount, isRefund: report.field308.isRefund)
@@ -425,13 +431,13 @@ struct PeriodsView: View {
                 precheckSection(precheck)
             }
             if let banner = lockedThrough.banner {
-                Section { RefreshFailureBanner(failure: banner, retry: loadLock) }
+                Section { RefreshFailureBanner(failure: banner, retry: { await loadLock() }) }
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
             }
         case .failed(let failure):
             Section {
-                LoadFailureView(failure: failure, retry: loadLock)
+                LoadFailureView(failure: failure, retry: { await loadLock() })
                     .listRowBackground(Color.clear)
             } header: {
                 Text("Suljetut kaudet")
@@ -532,10 +538,13 @@ struct PeriodsView: View {
         }
     }
 
-    private func loadLock() async {
+    private func loadLock(force: Bool = false) async {
+        if lockedThrough.value == nil, let cached: PeriodLockState = await app.cachedValue("/api/period-lock") {
+            lockedThrough.succeed(cached)
+        }
         lockedThrough.begin()
         do {
-            let state: PeriodLockState = try await app.api.get("/api/period-lock")
+            let state: PeriodLockState = try await app.cachedGet("/api/period-lock", force: force)
             lockedThrough.succeed(state)
         } catch is CancellationError {
         } catch {

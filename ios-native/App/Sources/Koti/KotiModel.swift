@@ -89,7 +89,13 @@ final class KotiModel {
         if due?.key != vatDue?.key { vatFigures = nil }
         vatDue = due
         guard let due else { return }
-        let figures: VatDueFigures? = try? await api.get("/api/alv", query: ["period": due.key])
+        // Through the app's cache: the ALV screen opens on this return and finds it there.
+        let figures: VatDueFigures?
+        if let app {
+            figures = try? await app.cachedGet("/api/alv", query: ["period": due.key])
+        } else {
+            figures = try? await api.get("/api/alv", query: ["period": due.key])
+        }
         guard loads.isCurrent(generation), vatDue?.key == due.key, let figures else { return }
         vatFigures = figures
     }
