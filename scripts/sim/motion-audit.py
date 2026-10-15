@@ -31,6 +31,10 @@ DISTINCT = 9.0          # signature distance over which a screen is not the star
 FLASH_LUMA = 40.0       # mean-luminance spike against both neighbours
 BLANK_STD = 2.0         # a frame this uniform is blank
 HOLD_S = 0.25           # an intermediate screen stands at least this long
+GESTURE_HOLD_S = 0.8    # ... in a drag-driven step, where XCTest's finger pauses mid-drag
+# Steps driven by a drag (edge swipe-back, a sheet pulled down): a frame held mid-drag is the
+# finger, not the app. Matched by id so a "before" run's steps.json reads the same way.
+GESTURE = re.compile(r"swipe|chat-close|zip-close|^kirjanpito-.*-back$|^pankki-feed-back$")
 QUIET_S = 0.6           # no new frame for this long: the step's motion is over
 SHIFT_AREA = 0.015      # share of the screen that must change after settling to call it a shift
 PROBE_MIN_PT = 3        # probe moves smaller than this are rounding
@@ -80,7 +84,7 @@ def vertical_shift(a, b):
     return best
 
 
-def analyze_video(video, tap_s):
+def analyze_video(video, tap_s, hold_s=HOLD_S, quiet_s=QUIET_S):
     times, data = frames(video)
     if not times:
         return {"error": "no frames"}
@@ -98,7 +102,7 @@ def analyze_video(video, tap_s):
     if moving:
         last = moving[0]
         for i in moving[1:]:
-            if times[i] - times[last] > QUIET_S:
+            if times[i] - times[last] > quiet_s:
                 break
             last = i
         settle_i = last
@@ -120,7 +124,7 @@ def analyze_video(video, tap_s):
             held = (times[i] if i < n else times[-1]) - times[run]
             d_start = float(np.abs(sigs[run] - start_sig).mean())
             d_end = float(np.abs(sigs[run] - end_sig).mean())
-            if held >= HOLD_S and d_start > DISTINCT and d_end > DISTINCT and i < n:
+            if held >= hold_s and d_start > DISTINCT and d_end > DISTINCT and i < n:
                 inter.append({"frame": run, "t": round(times[run] - tap_s, 2), "held_s": round(held, 2),
                               "d_start": round(d_start, 1), "d_end": round(d_end, 1)})
                 flags.add(run)
@@ -247,7 +251,8 @@ def main():
                    "crashed": bool(s.get("crashed"))}
             if s.get("video") and s.get("recStart") and os.path.exists(os.path.join(d, s["video"])):
                 tap_s = s["tapAt"] - s["recStart"]
-                res = analyze_video(os.path.join(d, s["video"]), tap_s)
+                res = analyze_video(os.path.join(d, s["video"]), tap_s,
+                                    *((GESTURE_HOLD_S, GESTURE_HOLD_S + 0.4) if GESTURE.search(s["id"]) else (HOLD_S, QUIET_S)))
                 if "error" not in res:
                     sheet = f"{suite}/sheet-{s['id']}.png"  # the run's directory
                     contact_sheet(os.path.join(out, sheet), res, tap_s)
@@ -277,7 +282,7 @@ def main():
              f"shift (video) {count('shift_video')}, shift (probe) {count('shift_probe')}; "
              f"crashes {sum(1 for r in rows if r['crashed'])}.", "",
              "## Calibration", "", CALIBRATION, "",
-             f"Thresholds: STATIC_DIFF={STATIC_DIFF}, DISTINCT={DISTINCT}, FLASH_LUMA={FLASH_LUMA}, QUIET_S={QUIET_S}, "
+             f"Thresholds: STATIC_DIFF={STATIC_DIFF}, DISTINCT={DISTINCT}, HOLD_S={HOLD_S} (drag steps {GESTURE_HOLD_S}, quiet {GESTURE_HOLD_S + 0.4}), FLASH_LUMA={FLASH_LUMA}, QUIET_S={QUIET_S}, "
              f"SHIFT_AREA={SHIFT_AREA}, PROBE_MIN_PT={PROBE_MIN_PT}.", "",
              "Jank is not judged: the simulator writes ~4 frames a second, so 'dropped' counts every animation.", "",
              "## Steps", "",
