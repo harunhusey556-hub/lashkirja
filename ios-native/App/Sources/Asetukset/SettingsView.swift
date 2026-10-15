@@ -10,7 +10,9 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-            if let profile {
+            // The profile Koti already loaded paints at once; without it the sections below would
+            // be pushed down by these when the server answered.
+            if let profile = profile ?? app.profile {
                 Section {
                     NavigationLink { ProfileForm(original: profile, section: .person) { saved($0) } } label: {
                         SettingRow(title: [profile.firstName, profile.lastName].compactMap { $0 }.joined(separator: " "), subtitle: profile.email, symbol: "person.crop.circle")
@@ -41,7 +43,7 @@ struct SettingsView: View {
                     Button("Yritä uudelleen") { Task { await loadProfile() } }
                 }
             } else {
-                ProgressView().task { await loadProfile() }
+                ProgressView()
             }
             Section("Tili ja turvallisuus") {
                 NavigationLink { PasswordView() } label: { SettingRow(title: "Vaihda salasana", subtitle: nil, symbol: "key") }
@@ -69,6 +71,7 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Asetukset")
+        .task { await loadProfile() }
         // The lock lives outside SwiftUI state; read it again when coming back from its screen.
         .onAppear { lockEnabled = AppLock.shared.isEnabled }
         .confirmSheet(isPresented: $confirmLogout, title: "Kirjaudutaanko ulos?", confirmTitle: "Kirjaudu ulos") {
@@ -89,7 +92,7 @@ struct SettingsView: View {
     /// PATCH /api/profile answers without the mailboxes; keep the ones already loaded.
     private func saved(_ new: Profile) {
         var merged = new
-        if merged.imapAccounts == nil { merged.imapAccounts = profile?.imapAccounts }
+        if merged.imapAccounts == nil { merged.imapAccounts = (profile ?? app.profile)?.imapAccounts }
         profile = merged
         app.profileChanged(merged)
     }
