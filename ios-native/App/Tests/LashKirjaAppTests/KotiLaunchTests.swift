@@ -53,7 +53,8 @@ final class KotiLaunchTests: XCTestCase {
         await app.start()
         guard case .signedIn = app.phase else { return XCTFail("the stored session did not open the app") }
         let look = try XCTUnwrap(atSignIn, "the phase never changed")
-        let shown = try XCTUnwrap(await look.value, "Koti had no dashboard when the tabs appeared: its first frame was a spinner")
+        let seen = await look.value
+        let shown = try XCTUnwrap(seen, "Koti had no dashboard when the tabs appeared: its first frame was a spinner")
         XCTAssertEqual(shown.month, MonthKey.current())
         XCTAssertEqual(shown.income, 120)
     }
