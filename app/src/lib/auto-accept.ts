@@ -7,7 +7,8 @@
  *
  * A reading is accepted only when nothing about it needs a human: vendor, a
  * positive euro amount and a date are present, the reading was confident, it
- * is a receipt or a bill (not a flyer), and it is not a likely duplicate.
+ * is a receipt or a bill (not a flyer), it is not a credit note, and it is
+ * not a likely duplicate.
  * Everything else is saved as pending and lands in the review queue.
  *
  * Pure: no Prisma, no fetch, so the client bundle can import it.
@@ -40,10 +41,13 @@ export interface AutoAcceptInput {
   documentType?: string | null;
   /** The save route found (or the client acknowledged) the same vendor, date and sum. */
   duplicate?: boolean;
+  /** The reading is a credit note (ExtractedReceipt.isCreditNote). */
+  isCreditNote?: boolean;
 }
 
 export type AutoAcceptBlock =
   | "unreadable"
+  | "credit_note"
   | "amount"
   | "vendor"
   | "date"
@@ -64,6 +68,9 @@ function confident(score: number | null | undefined): boolean {
 /** Why this reading must wait for the owner; null = accept it automatically. */
 export function autoAcceptBlock(input: AutoAcceptInput): AutoAcceptBlock | null {
   if (input.unreadable || input.source === "manual") return "unreadable";
+  // A credit note lowers costs and deductible VAT: the owner sees it before it is
+  // booked. The reading shows a positive size, so the amount rule below would pass it.
+  if (input.isCreditNote) return "credit_note";
   // The same gate the manual approve path uses (review/route.ts), plus: a zero
   // or negative "receipt" is a misread or a credit, never something to book blind.
   const cents = amountCents(input);

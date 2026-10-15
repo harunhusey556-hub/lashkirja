@@ -7,6 +7,8 @@ struct SettingsView: View {
     @State private var profileFailure: String?
     @State private var lockEnabled = AppLock.shared.isEnabled
     @State private var confirmLogout = false
+    @State private var savingAutoLink = false
+    @State private var settingFailure: String?
 
     var body: some View {
         List {
@@ -33,6 +35,14 @@ struct SettingsView: View {
                 Section("Kuitit") {
                     NavigationLink { EmailImportView { self.profile = $0; app.profileChanged($0) } } label: {
                         SettingRow(title: "Sähköpostien tuonti", subtitle: mailSubtitle(profile.imapAccounts ?? []), symbol: "envelope")
+                    }
+                    // Off by default; "Kohdista varmat (N)" in Kuitit does the same by hand (owner 2026-10-15).
+                    Toggle(isOn: Binding(get: { profile.autoLinkSureMatches ?? false }, set: { on in Task { await setAutoLink(on) } })) {
+                        SettingRow(title: "Kohdista varmat automaattisesti", subtitle: "Kun viite ja summa täsmäävät, kuitti kohdistetaan pankkitapahtumaan heti.", symbol: "link")
+                    }
+                    .disabled(profile.autoLinkSureMatches == nil || savingAutoLink)
+                    if let settingFailure {
+                        Text(settingFailure).font(.footnote).foregroundStyle(Theme.danger)
                     }
                 }
             } else if let profileFailure {
@@ -84,6 +94,24 @@ struct SettingsView: View {
         }
         catch is CancellationError {}
         catch { profileFailure = error.userMessage }
+    }
+
+    private func setAutoLink(_ on: Bool) async {
+        guard let current = profile, !savingAutoLink else { return }
+        var next = current
+        next.autoLinkSureMatches = on
+        savingAutoLink = true
+        settingFailure = nil
+        defer { savingAutoLink = false }
+        do {
+            let response: ProfileResponse = try await app.api.send("PATCH", "/api/profile", body: ProfilePatch(from: current, to: next))
+            Haptics.success()
+            saved(response.profile)
+        } catch is CancellationError {
+        } catch {
+            settingFailure = error.userMessage
+            Haptics.error()
+        }
     }
 
     /// PATCH /api/profile answers without the mailboxes; keep the ones already loaded.

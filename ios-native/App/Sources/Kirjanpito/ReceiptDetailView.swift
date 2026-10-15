@@ -16,6 +16,10 @@ struct ReceiptDetailView: View {
     @State private var reviewBusy = false
     /// The file is being read again on the server ("Lue uudelleen").
     @State private var rereadBusy = false
+    /// A fresh reading of an approved receipt: the edit sheet opens with it for the owner to save.
+    @State private var rereadReading: Extracted?
+    /// "Valitse muu pankkitapahtuma": every free bank row, not only the suggestions.
+    @State private var pickingBankRow = false
     /// The ostolasku this receipt is filed as (nil until known, or while the server lacks the route).
     @State private var ostolasku: ReceiptPurchaseInvoiceView?
     @State private var kindBusy = false
@@ -37,15 +41,33 @@ struct ReceiptDetailView: View {
                 Section {
                     VStack(spacing: 6) {
                         if let amount = r.totalAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
+                        // The euro total above is what the books count; the document's own figure says its currency.
+                        if let original = ReceiptCurrency.originalLine(currency: r.currency, originalAmount: r.originalAmount) {
+                            Text("Alkuperäinen summa \(original)").font(.subheadline).foregroundStyle(Theme.ink2)
+                        }
                         // Which rate priced a foreign-currency document ("Kurssi 1 USD = 0,8749 EUR (EKP 10.7.2026)").
                         if let rateLine = r.fxRateLine {
                             Text(rateLine).font(.caption).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
                         }
                         Text(r.title).font(.headline)
-                        Text(r.isIncome ? "Tulo" : "Meno").font(.caption).foregroundStyle(Theme.ink2)
+                        // A credit note is said in words too, not only by the minus sign.
+                        Text([r.creditNoteLabel, r.isIncome ? "Tulo" : "Meno"].compactMap { $0 }.joined(separator: " · "))
+                            .font(.caption).foregroundStyle(Theme.ink2)
                     }
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
+                }
+                // A reading that guessed (confidence under 0,5) or found no vendor or amount: what to do,
+                // and the button that does it, before anything else (owner 2026-10-15).
+                if ReceiptReadHelp.needsReread(r) {
+                    Section {
+                        Text(ReceiptReadHelp.hint).font(.subheadline).foregroundStyle(Theme.ink)
+                        Button { Task { await reread() } } label: {
+                            Label(rereadBusy ? "Luetaan…" : "Lue uudelleen", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(rereadBusy)
+                    }
+                    .listRowBackground(Theme.accentSoft)
                 }
                 ostolaskuSection(r)
                 // Review screen: the picture is on the page, so the fields are checked against it
@@ -76,8 +98,11 @@ struct ReceiptDetailView: View {
                     Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
                     // Ask the server to read the stored file again: a bill that came back wrong,
                     // or with nothing at all (Kymenlaakson Sähkö's), can be retried from here.
-                    Button { Task { await reread() } } label: { Label("Lue uudelleen", systemImage: "arrow.clockwise") }
-                        .disabled(rereadBusy)
+                    // A poor reading already offers it at the top; it is not repeated here.
+                    if r.hasOriginalFile && !ReceiptReadHelp.needsReread(r) {
+                        Button { Task { await reread() } } label: { Label("Lue uudelleen", systemImage: "arrow.clockwise") }
+                            .disabled(rereadBusy)
+                    }
                     if r.reviewStatus == "pending" {
                         Button { Task { await review("approved") } } label: { Label("Hyväksy", systemImage: "checkmark.circle") }
                             .disabled(reviewBusy)
@@ -124,11 +149,16 @@ struct ReceiptDetailView: View {
         .sheet(isPresented: $showFile) {
             DocumentPreviewSheet(path: "/api/receipts/\(receiptId)/file", query: Self.fileQuery, fileName: state.value?.fileName ?? "kuitti", cacheKey: Self.fileCacheKey)
         }
-        .sheet(isPresented: $editing) {
+        .sheet(isPresented: $editing, onDismiss: { rereadReading = nil }) {
             if let r = state.value {
-                ReceiptEditSheet(receipt: r) { saved, categoryChanged in
+                ReceiptEditSheet(receipt: r, reading: rereadReading) { saved, categoryChanged in
                     Task { await afterSave(saved, categoryChanged: categoryChanged) }
                 }
+            }
+        }
+        .sheet(isPresented: $pickingBankRow) {
+            if let r = state.value {
+                ReceiptBankPickerSheet(receipt: r) { Task { await load() } }
             }
         }
         .confirmSheet(isPresented: $confirmDelete, title: deleteTitle, message: deleteNote, confirmTitle: "Poista") {
@@ -337,6 +367,13 @@ struct ReceiptDetailView: View {
             } else {
                 Text("Sopivaa pankkitapahtumaa ei löytynyt.").foregroundStyle(Theme.ink2)
             }
+            // The suggestions are the matcher's few; the owner may know better (2026-10-15).
+            if r.linkedTransaction == nil {
+                Button { pickingBankRow = true } label: {
+                    Label("Valitse muu pankkitapahtuma", systemImage: "magnifyingglass")
+                }
+                .disabled(matchBusy)
+            }
         } header: {
             Text("Pankkitapahtuma")
         } footer: {
@@ -478,7 +515,21 @@ struct ReceiptDetailView: View {
     /// deleting and re-uploading it.
     private func reread() async {
         struct Body: Encodable { let again: Bool }
-        struct Result: Decodable { let saved: Bool; let reason: String? }
+        struct Result: Decodable {
+            let saved: Bool
+            let reason: String?
+            let reading: Extracted?
+
+            enum CodingKeys: String, CodingKey { case saved, reason, reading }
+
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                saved = try c.decode(Bool.self, forKey: .saved)
+                reason = try c.decodeIfPresent(String.self, forKey: .reason)
+                // The fresh reading only prefills the form; an odd field must not hide the answer.
+                reading = try? c.decodeIfPresent(Extracted.self, forKey: .reading)
+            }
+        }
         guard !rereadBusy else { return }
         rereadBusy = true
         failure = nil
@@ -490,6 +541,12 @@ struct ReceiptDetailView: View {
             await load()
             if result.saved {
                 Haptics.success()
+            } else if result.reason == "approved", let reading = result.reading {
+                // Already in the books, so nothing was written: the fresh reading opens in the form
+                // and the owner saves what is right (the Kymenlaakson bills dated the upload day).
+                Haptics.success()
+                rereadReading = reading
+                editing = true
             } else {
                 // Nothing was written, so say why rather than leaving the button looking dead.
                 failure = result.reason == "approved"
@@ -544,14 +601,21 @@ struct ReceiptEditSheet: View {
     @State private var busy = false
     @State private var customCategory: Bool
     @State private var confirmDiscard = false
+    /// Opened with a fresh "Lue uudelleen" reading of a receipt already in the books.
+    private let fromReread: Bool
     let saved: (Receipt, Bool) -> Void
 
-    init(receipt: Receipt, saved: @escaping (Receipt, Bool) -> Void) {
-        let form = ReceiptForm(receipt: receipt)
+    /// `reading`: a fresh reading fills the form over the stored values; the baseline stays the
+    /// stored receipt, so saving sends exactly what the new reading changed.
+    init(receipt: Receipt, reading: Extracted? = nil, saved: @escaping (Receipt, Bool) -> Void) {
+        let stored = ReceiptForm(receipt: receipt)
+        var form = stored
+        if let reading { form.apply(reading: reading) }
         _receipt = State(initialValue: receipt)
-        _baseline = State(initialValue: form)
+        _baseline = State(initialValue: stored)
         _form = State(initialValue: form)
         _customCategory = State(initialValue: !form.category.isEmpty && !form.isKnownCategory)
+        fromReread = reading != nil
         self.saved = saved
     }
 
@@ -572,11 +636,29 @@ struct ReceiptEditSheet: View {
                     fieldError("vendor")
                     DatePicker("Päivä", selection: dateBinding, displayedComponents: .date)
                     fieldError("date")
-                    TextField("Summa €", text: Binding(get: { form.totalText }, set: { form.setTotal($0) }))
-                        .moneyInput()
+                    // The euro sign stays beside the figure: a placeholder "Summa €" vanished once the
+                    // field held 1 319,18, and next to "PLN" the owner read it as złoty (2026-10-15).
+                    LabeledContent("Summa") {
+                        HStack(spacing: 4) {
+                            TextField("0,00", text: Binding(get: { form.totalText }, set: { form.setTotal($0) }))
+                                .moneyInput()
+                                .multilineTextAlignment(.trailing)
+                            Text("€").foregroundStyle(Theme.ink2).accessibilityHidden(true)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Summa euroina")
                     fieldError("totalAmount")
+                    if let original = ReceiptCurrency.originalLine(currency: receipt.currency, originalAmount: receipt.originalAmount) {
+                        LabeledContent("Alkuperäinen summa", value: original)
+                        if let rate = receipt.fxRateLine {
+                            Text(rate).font(.caption).foregroundStyle(Theme.ink2)
+                        }
+                    }
                 } header: {
                     Text("Kuitin tiedot")
+                } footer: {
+                    if fromReread { Text("Tiedot luettiin tiedostosta uudelleen. Tarkista ja tallenna.") }
                 }
                 Section {
                     ReceiptCategoryField(category: $form.category, custom: $customCategory)
@@ -652,9 +734,12 @@ struct ReceiptEditSheet: View {
                 }
             }
             .pickerStyle(.navigationLink)
-            TextField("Valuutta", text: $form.currency)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
+            LabeledContent("Alkuperäinen valuutta") {
+                TextField("EUR", text: $form.currency)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .multilineTextAlignment(.trailing)
+            }
         } header: {
             Text("ALV-käsittely")
         } footer: {

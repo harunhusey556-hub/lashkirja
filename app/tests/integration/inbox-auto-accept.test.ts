@@ -200,6 +200,7 @@ describe("phone inbox capture with auto-accept (W31)", () => {
     await createReceipt(user.id, { vendor: "K-Market Kamppi", date: "2026-09-14", totalAmountCents: 1240 });
     const lookAlike = await capture({ cookie, userId: user.id }, kuitti);
     expect(lookAlike.reviewStatus).toBe("pending");
+    expect(lookAlike.notes).toMatch(/^Mahdollinen kaksoiskappale/);
   });
 
   it("leaves a capture dated in a closed period pending", async () => {

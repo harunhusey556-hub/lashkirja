@@ -23,10 +23,13 @@ struct AddSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Button { capture = true } label: { Label("Lisää kuitti", systemImage: "doc.badge.plus") }
+                // One button for receipts and bills alike (owner, 2026-10-15): the reading decides
+                // kuitti or ostolasku, and the upload screen's row turns a wrong decision around.
+                Button { capture = true } label: { Label("Lisää tiedosto", systemImage: "doc.badge.plus") }
                 Button { importing = true } label: { Label("Tuo tiliote", systemImage: "square.and.arrow.down") }
                     .disabled(busy)
-                Button { newInvoice = true } label: { Label("Uusi lasku", systemImage: "doc.badge.plus") }
+                // A sales invoice to a customer; a supplier's bill comes in through "Lisää tiedosto".
+                Button { newInvoice = true } label: { Label("Uusi myyntilasku", systemImage: "doc.text") }
                 if hasMailbox == false {
                     Button { openEmailImport() } label: { Label("Yhdistä sähköposti", systemImage: "envelope.badge") }
                         .disabled(busy)
@@ -60,7 +63,11 @@ struct AddSheet: View {
             }
             // Screens reload when something was actually saved: every accepted write bumps
             // AppModel.dataVersion, so a cancelled flow reloads nothing.
-            .fullScreenCover(isPresented: $capture, onDismiss: { dismiss() }) { CaptureFlow(transactionId: nil, opensCamera: false) }
+            // The capture closes through this sheet: the sheet's dismissal takes the cover with it,
+            // so the owner sees the cover go down once and never this sheet in between.
+            .fullScreenCover(isPresented: $capture, onDismiss: { dismiss() }) {
+                CaptureFlow(transactionId: nil, opensCamera: false, onClose: { dismiss() })
+            }
             .sheet(isPresented: $newInvoice, onDismiss: openCreatedInvoice) {
                 InvoiceFormView(existing: nil, onCreated: { id in createdInvoiceId = id })
             }

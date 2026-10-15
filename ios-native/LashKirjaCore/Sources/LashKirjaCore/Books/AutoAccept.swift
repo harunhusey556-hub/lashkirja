@@ -10,13 +10,16 @@ public enum AutoAccept {
 
     /// Why a reading must wait for the owner (the web's `AutoAcceptBlock`).
     public enum Block: String, Sendable, Equatable {
-        case unreadable, amount, vendor, date, notAReceipt, lowConfidence, duplicate
+        case unreadable, creditNote, amount, vendor, date, notAReceipt, lowConfidence, duplicate
     }
 
     /// Why this reading must wait for the owner; nil = it may be accepted automatically.
     /// `duplicate`: the same vendor, date and sum is already on file (only the server knows).
     public static func block(_ reading: Extracted, duplicate: Bool = false) -> Block? {
         if reading.unreadable == true || reading.source == "manual" { return .unreadable }
+        // A credit note lowers costs and deductible VAT: the owner sees it before it is booked.
+        // Its reading shows a positive size, so the amount rule below would pass it.
+        if reading.isCreditNote == true { return .creditNote }
         // A zero or negative "receipt" is a misread or a credit, never something to book blind.
         // The web rounds to whole cents first, so a sum under half a cent counts as zero.
         guard let amount = reading.totalAmount, amount * 100 >= Decimal(5) / Decimal(10) else { return .amount }

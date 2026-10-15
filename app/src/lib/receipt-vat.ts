@@ -252,6 +252,7 @@ export function vatLinesProblem(
   }
   if (totalAmount == null) return null;
   const vatCents = lines.reduce((sum, line) => sum + eurosToCents(line.amount), 0);
-  if (vatCents > eurosToCents(totalAmount)) return VAT_TOO_LARGE_MESSAGE;
+  // A credit note's total and VAT are both negative: its VAT is held to the total's size.
+  if (Math.abs(vatCents) > Math.abs(eurosToCents(totalAmount))) return VAT_TOO_LARGE_MESSAGE;
   return null;
 }

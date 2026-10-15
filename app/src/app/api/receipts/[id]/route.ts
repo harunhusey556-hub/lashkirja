@@ -7,13 +7,13 @@ import { dismissIncomeDraft } from "@/lib/income-automation";
 import { centsToEuros } from "@/lib/money";
 import { storedFxRate } from "@/lib/fx-rates";
 import { removeUserUpload } from "@/lib/storage";
-import { isoDateSchema, nonnegativeMoneySchema } from "@/lib/validation";
+import { isoDateSchema, moneySchema } from "@/lib/validation";
 import {
   noStoreJson,
   rejectCrossSite,
   rejectOversizedContentLength,
 } from "@/lib/http-security";
-import { withErrorHandler, UnauthorizedError, AppError } from "@/lib/api-errors";
+import { withErrorHandler, UnauthorizedError, AppError, ValidationError } from "@/lib/api-errors";
 
 import { assertPeriodOpen } from "@/lib/period-lock";
 import { expectedUpdatedAtDate } from "@/lib/edit-conflict";
@@ -21,13 +21,15 @@ import { applyReceiptPatch, UPDATED_RECEIPT_SELECT } from "@/lib/receipt-update"
 import { matchPurchasePaymentsFromBank, syncReceiptDocumentKind } from "@/lib/purchase-invoices";
 import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
 import { currencySchema } from "@/lib/foreign-purchase-input";
+// Signed so a stored credit note (negative total) can be edited as it reads; any
+// other receipt is refused a negative amount below.
 const patchSchema = z.object({
   vendor: z.string().trim().max(300).nullish(),
   date: isoDateSchema.nullish(),
-  totalAmount: nonnegativeMoneySchema.nullish(),
+  totalAmount: moneySchema.nullish(),
   vatDetails: z.array(z.object({
     rate: z.number().finite().min(0).max(100),
-    amount: nonnegativeMoneySchema,
+    amount: moneySchema,
   })).max(20).nullish(),
   category: z.string().trim().max(100).nullish(),
   notes: z.string().trim().max(500).nullish(),
@@ -35,7 +37,7 @@ const patchSchema = z.object({
   reference: z.string().trim().max(40).nullish(),
   invoiceNumber: z.string().trim().max(40).nullish(),
   currency: currencySchema.optional(),
-  originalAmount: nonnegativeMoneySchema.nullish(),
+  originalAmount: moneySchema.nullish(),
   vatTreatment: z.enum(PURCHASE_VAT_TREATMENTS).optional(),
   // The owner's own kuitti / lasku choice: "invoice" files (or reopens) the ostolasku, "receipt" cancels it.
   documentType: z.enum(["invoice", "receipt"]).optional(),
@@ -170,6 +172,11 @@ export const PATCH = withErrorHandler(async (
   const { expectedUpdatedAt, documentType, ...body } = parsed.data;
   if (Object.keys(body).length === 0 && !documentType) {
     return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
+  }
+  const negative = [body.totalAmount, body.originalAmount, ...(body.vatDetails ?? []).map((line) => line.amount)]
+    .some((amount) => amount != null && amount < 0);
+  if (negative && !((owned.totalAmountCents ?? 0) < 0)) {
+    throw new ValidationError("Negatiivinen summa kirjataan vain hyvityslaskulle.");
   }
   const expected = expectedUpdatedAtDate(expectedUpdatedAt);
 

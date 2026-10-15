@@ -269,6 +269,20 @@ public struct ReceiptForm: Sendable, Equatable {
         return fx.line
     }
 
+    /// "Lue uudelleen" on a receipt already in the books: the fresh reading fills the form and the
+    /// owner saves it, nothing is written before. A field the reading left empty keeps its value.
+    public mutating func apply(reading e: Extracted) {
+        if let value = e.vendor?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty { vendor = value }
+        if let value = e.date, !value.isEmpty { date = String(value.prefix(10)) }
+        if let value = e.totalAmount { totalText = ReceiptAmount.field(value) }
+        if let value = e.category, !value.isEmpty { category = value }
+        if let value = e.reference, !value.isEmpty { reference = value }
+        if let value = e.invoiceNumber, !value.isEmpty { invoiceNumber = value }
+        if let rows = e.vatDetails, !rows.isEmpty {
+            vatRows = rows.map { ReceiptVatRow(rate: $0.rate, amountText: ReceiptAmount.field($0.amount), auto: false) }
+        }
+    }
+
     // MARK: VAT rows
 
     private func autoAmount(_ rate: Decimal) -> String {

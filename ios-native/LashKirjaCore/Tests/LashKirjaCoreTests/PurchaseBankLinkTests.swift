@@ -141,3 +141,40 @@ private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
     let linked = String(decoding: try JSONEncoder().encode(PurchasePaymentBody(amount: 10, paidDate: "2026-01-25", transactionId: "t1")), as: UTF8.self)
     #expect(linked.contains(#""transactionId":"t1""#))
 }
+
+// Owner 2026-10-15: "599 rows, but after 'näytä 20 enemmän', 'näytä 10 enemmän' there is no more".
+@Test func purchaseBankCandidatesPageUntilEveryRowIsLoaded() throws {
+    func row(_ id: Int) -> String {
+        #"{"transactionId":"t\#(id)","amount":\#(id),"score":0,"exactAmount":false,"reasons":[]}"#
+    }
+    var list = try decode(PurchaseBankCandidateList.self, #"{"candidates":[\#((1...30).map(row).joined(separator: ","))],"total":599,"offset":0,"hasMore":true,"months":[]}"#)
+    #expect(list.hasMore)
+    #expect(list.cappedNote == nil)
+    #expect(PagedShowMore.title(ShowMore(), loaded: list.candidates.count, total: list.total, serverHasMore: list.hasMore) == "Näytä enemmän (589)")
+
+    // The next page, with one row the first already had: shown once.
+    let next = try decode(PurchaseBankCandidateList.self, #"{"candidates":[\#((30...59).map(row).joined(separator: ","))],"total":599,"offset":30,"hasMore":true,"months":[]}"#)
+    list.append(next)
+    #expect(list.candidates.count == 59)
+    #expect(Set(list.candidates.map(\.id)).count == 59)
+    #expect(list.hasMore)
+
+    let last = try decode(PurchaseBankCandidateList.self, #"{"candidates":[\#(row(600))],"total":599,"offset":598,"hasMore":false,"months":[]}"#)
+    list.append(last)
+    #expect(!list.hasMore)
+    #expect(list.candidates.last?.id == "t600")
+}
+
+@Test func purchaseInvoiceCandidatesPageToo() throws {
+    func invoice(_ id: Int) -> String {
+        #"{"invoice":{"id":"pi\#(id)","supplierName":"T","issueDate":"2026-01-10","dueDate":"2026-01-24","gross":1,"open":1},"score":0,"reasons":[]}"#
+    }
+    var list = try decode(PurchaseInvoiceCandidateList.self, #"{"candidates":[\#(invoice(1)),\#(invoice(2))],"total":3,"offset":0,"hasMore":true}"#)
+    #expect(list.hasMore)
+    list.append(try decode(PurchaseInvoiceCandidateList.self, #"{"candidates":[\#(invoice(2)),\#(invoice(3))],"total":3,"offset":2,"hasMore":false}"#))
+    #expect(list.candidates.map(\.id) == ["pi1", "pi2", "pi3"])
+    #expect(!list.hasMore)
+    // An older server sends no hasMore: the list ends where it ends.
+    let old = try decode(PurchaseInvoiceCandidateList.self, #"{"candidates":[\#(invoice(1))],"total":40}"#)
+    #expect(!old.hasMore)
+}

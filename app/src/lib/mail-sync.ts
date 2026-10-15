@@ -2,7 +2,7 @@ import { ImapFlow, SearchObject } from "imapflow";
 import { simpleParser } from "mailparser";
 import { prisma } from "./db";
 import { decrypt } from "./encryption";
-import { extractReceipt, type ExtractedReceipt } from "./ai";
+import { creditSigned, creditSignedVatLines, extractReceipt, type ExtractedReceipt } from "./ai";
 import { fileReceiptAsPurchaseInvoice } from "./purchase-invoices";
 import { runMatching } from "./matching";
 import { writePrivateUpload } from "./storage";
@@ -15,7 +15,7 @@ import { createHash } from "crypto";
 import { withTrackedJob } from "./job-tracker";
 import { ARCHIVED_NOTE, isMarketingMail, isTooSmallToBeABill, looksLikeBill } from "./mail-classify";
 import { foreignFieldsFromExtraction } from "./foreign-purchase";
-import { euroConversion } from "./fx-rates";
+import { euroConversion, unconvertedForeignTotal } from "./fx-rates";
 import { helsinkiDayUtc } from "./validation";
 // We only process attachments that are likely to be receipts.
 const VALID_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".heic"];
@@ -128,7 +128,9 @@ export async function storeEmailDocument(input: {
   let extraction = input.extraction;
   // Same pricing as an uploaded document (document-jobs.ts): a foreign bill with
   // no euro total printed gets one, so it is recognised as a bill and filed in
-  // euros; a failed lookup leaves the gap for the owner.
+  // euros; a failed lookup leaves the gap for the owner. A dollar figure the
+  // reading passed off as euros is priced the same way.
+  extraction = unconvertedForeignTotal(extraction);
   if (!extraction.unreadable && extraction.totalAmount == null && extraction.currency && extraction.currency !== "EUR") {
     const fx = await euroConversion({
       currency: extraction.currency,
@@ -171,6 +173,8 @@ export async function storeEmailDocument(input: {
     },
   });
 
+  const credit = extraction.isCreditNote;
+  const foreign = foreignFieldsFromExtraction(extraction);
   const receipt = await prisma.receipt.create({
     data: {
       userId,
@@ -178,8 +182,10 @@ export async function storeEmailDocument(input: {
       vendor: extraction.vendor,
       // The mail's send time is an instant; the receipt keeps the Helsinki day it arrived on.
       date: extraction.date ? new Date(extraction.date) : input.mailDate && helsinkiDayUtc(input.mailDate),
-      totalAmountCents: extraction.totalAmount ? Math.round(extraction.totalAmount * 100) : null,
-      vatDetails: extraction.vatDetails.length ? JSON.stringify(extraction.vatDetails) : null,
+      totalAmountCents: extraction.totalAmount ? creditSigned(Math.round(extraction.totalAmount * 100), credit) : null,
+      vatDetails: extraction.vatDetails.length
+        ? JSON.stringify(creditSignedVatLines(extraction.vatDetails, credit))
+        : null,
       category: extraction.category,
       notes: sameInvoice
         ? `Kaksoiskappale: sama osto kuin lasku ${sameInvoice.invoiceNumber} (${sameInvoice.vendor ?? "sama myyjä"}). Ei kirjata toiseen kertaan.`
@@ -195,7 +201,9 @@ export async function storeEmailDocument(input: {
       reviewStatus: isBill ? "pending" : "rejected",
       confidence: extraction.confidence,
       rawText: extraction.rawText,
-      ...foreignFieldsFromExtraction(extraction),
+      ...foreign,
+      originalAmountCents:
+        foreign.originalAmountCents == null ? null : creditSigned(foreign.originalAmountCents, credit),
     }
   });
 

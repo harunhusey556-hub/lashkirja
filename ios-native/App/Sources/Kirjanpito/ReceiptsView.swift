@@ -36,6 +36,14 @@ struct ReceiptsView: View {
     @State private var deleteIds: [String] = []
     @State private var confirmDelete = false
     @State private var limit = ShowMore()
+    /// "Ei kohdistettu": the sure pairs "Kohdista varmat (N)" links in one tap (owner 2026-10-15).
+    @State private var sure: SureMatchList?
+    @State private var sureBusy = false
+    /// One key per batch: a retry after a lost answer is the same batch, not a second one.
+    @State private var sureKey = UUID().uuidString
+    @State private var toast: Toast?
+    @State private var toastAction: (() async -> Void)?
+    @State private var toastTask: Task<Void, Never>?
 
     /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
     /// Also read by the launch prefetch, so it asks for the list this screen opens on.
@@ -87,6 +95,11 @@ struct ReceiptsView: View {
 
     private struct ReloadKey: Hashable {
         let query: ReceiptListQuery
+        let version: Int
+    }
+
+    private struct SureKey: Hashable {
+        let tab: ReceiptTab
         let version: Int
     }
 
@@ -173,6 +186,14 @@ struct ReceiptsView: View {
                         confirmDelete = true
                     }
                 }
+            } else if !selecting, query.tab == .unlinked, let count = sure?.count, count > 0, toast == nil {
+                // Under the list, not above it: the rows never move when the count arrives.
+                sureBar(count)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let toast {
+                ToastView(toast: toast) { runToastAction() }.padding(.bottom, 8)
             }
         }
         .confirmSheet(isPresented: $confirmDelete, title: deleteTitle, message: deleteNote, confirmTitle: "Poista") {
@@ -209,6 +230,14 @@ struct ReceiptsView: View {
             if remembers { UserDefaults.standard.set(next.remembered, forKey: Self.filterKey) }
             limit.reset()
         }
+        .task(id: SureKey(tab: query.tab, version: app.dataVersion)) {
+            // Only "Ei kohdistettu" offers it; a failed count just leaves the bar away.
+            guard query.tab == .unlinked else { sure = nil; return }
+            let list: SureMatchList? = try? await app.api.get("/api/matching/sure")
+            guard !Task.isCancelled else { return }
+            withMotion(.snappy) { sure = list }
+        }
+        .onDisappear { toastTask?.cancel() }
         .motion(.snappy, value: pending.map(\.id))
         .motion(.snappy, value: rejected.map(\.id))
         // Photos kept while offline are sent from here too, not only from the capture screen.
@@ -361,6 +390,82 @@ struct ReceiptsView: View {
         return (0..<24).map { MonthKey.shift(now, by: -$0) }
     }
 
+    private var filtered: Bool {
+        !(query.month.isEmpty && query.category.isEmpty && query.source == .all && query.amountLabel == nil)
+    }
+
+    // MARK: Kohdista varmat
+
+    private func sureBar(_ count: Int) -> some View {
+        Button { Task { await linkSure() } } label: {
+            HStack(spacing: 8) {
+                if sureBusy { ProgressView().tint(Theme.onInk) }
+                Text(SureMatchText.buttonTitle(count)).font(.headline)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.primary)
+        .disabled(sureBusy)
+        .accessibilityHint(SureMatchText.explanation)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .transition(.opacity)
+    }
+
+    private func linkSure() async {
+        guard !sureBusy else { return }
+        sureBusy = true
+        failure = nil
+        defer { sureBusy = false }
+        do {
+            let batch: SureMatchBatch = try await app.api.send("POST", "/api/matching/sure", body: EmptyBody(), idempotencyKey: sureKey)
+            sureKey = UUID().uuidString
+            Haptics.success()
+            withMotion(.snappy) { sure = nil }
+            app.dataVersion += 1
+            if let batchId = batch.batchId {
+                showToast(SureMatchText.linked(batch.linked.count), action: "Kumoa") { await undoSure(batchId) }
+            }
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    private func undoSure(_ batchId: String) async {
+        do {
+            let result: SureMatchUndone = try await app.api.send("POST", "/api/matching/sure/undo", body: SureMatchUndo(batchId: batchId))
+            Haptics.success()
+            app.dataVersion += 1
+            showToast(SureMatchText.restored(result.restored), action: nil, run: nil)
+        } catch is CancellationError {
+        } catch {
+            failure = error.userMessage
+            Haptics.error()
+        }
+    }
+
+    private func showToast(_ text: String, action: String?, run: (() async -> Void)?) {
+        toastTask?.cancel()
+        toastAction = run
+        withMotion(.snappy) { toast = Toast(text: text, actionLabel: action) }
+        toastTask = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            withMotion { toast = nil }
+            toastAction = nil
+        }
+    }
+
+    private func runToastAction() {
+        let action = toastAction
+        toastTask?.cancel()
+        toastAction = nil
+        withMotion { toast = nil }
+        if let action { Task { await action() } }
+    }
+
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
             if selecting {
@@ -414,14 +519,18 @@ struct ReceiptsView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: query.month.isEmpty && query.category.isEmpty && query.source == .all && query.amountLabel == nil
-                          ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                    // Three glyphs of one family on one 44 pt grid (owner 2026-10-15: a text "Valitse"
+                    // between a circled and a plain icon looked misaligned). An active filter fills it.
+                    Image(systemName: filtered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        .tapTarget()
                 }
-                .accessibilityLabel("Suodata kuitteja")
-                if receipts.value?.isEmpty == false {
-                    Button("Valitse") { selecting = true }
-                }
-                Button { capture = true } label: { Image(systemName: "camera") }.accessibilityLabel("Kuvaa kuitti")
+                .accessibilityLabel(filtered ? "Suodata kuitteja, suodatin käytössä" : "Suodata kuitteja")
+                // Always there, so the toolbar does not rearrange itself when the list arrives.
+                Button { selecting = true } label: { Image(systemName: "checkmark.circle").tapTarget() }
+                    .accessibilityLabel("Valitse kuitteja")
+                    .disabled(receipts.value?.isEmpty ?? true)
+                Button { capture = true } label: { Image(systemName: "camera.circle").tapTarget() }
+                    .accessibilityLabel("Kuvaa kuitti")
             }
         }
     }
