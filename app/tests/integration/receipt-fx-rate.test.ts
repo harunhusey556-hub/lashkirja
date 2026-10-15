@@ -114,6 +114,14 @@ describe("a USD bill with no euro total printed", () => {
     expect(body.fx).toBeNull();
   });
 
+  it("is priced too when the reading passed the dollar figure off as euros", async () => {
+    // OpenCode / OpenRouter (2026-10-02): "$10.00" came back as totalAmount 10 and was booked as 10 €.
+    const { reading } = await readOne({ ...usdBill, totalAmount: 50.1, originalAmount: null });
+    expect(reading).toMatchObject({ currency: "USD", originalAmount: 50.1, totalAmount: 45.71, fxSource: "ECB" });
+    const { reading: same } = await readOne({ ...usdBill, totalAmount: 50.1, originalAmount: 50.1 }, 1);
+    expect(same).toMatchObject({ originalAmount: 50.1, totalAmount: 45.71 });
+  });
+
   it("reuses the cached rate for the next document of that day", async () => {
     await readOne(usdBill);
     await readOne({ ...usdBill, invoiceNumber: "INV-89", originalAmount: 10 }, 1);

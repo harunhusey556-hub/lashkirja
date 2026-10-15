@@ -15,7 +15,7 @@ import { createHash } from "crypto";
 import { withTrackedJob } from "./job-tracker";
 import { ARCHIVED_NOTE, isMarketingMail, isTooSmallToBeABill, looksLikeBill } from "./mail-classify";
 import { foreignFieldsFromExtraction } from "./foreign-purchase";
-import { euroConversion } from "./fx-rates";
+import { euroConversion, unconvertedForeignTotal } from "./fx-rates";
 import { helsinkiDayUtc } from "./validation";
 // We only process attachments that are likely to be receipts.
 const VALID_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".heic"];
@@ -128,7 +128,9 @@ export async function storeEmailDocument(input: {
   let extraction = input.extraction;
   // Same pricing as an uploaded document (document-jobs.ts): a foreign bill with
   // no euro total printed gets one, so it is recognised as a bill and filed in
-  // euros; a failed lookup leaves the gap for the owner.
+  // euros; a failed lookup leaves the gap for the owner. A dollar figure the
+  // reading passed off as euros is priced the same way.
+  extraction = unconvertedForeignTotal(extraction);
   if (!extraction.unreadable && extraction.totalAmount == null && extraction.currency && extraction.currency !== "EUR") {
     const fx = await euroConversion({
       currency: extraction.currency,
