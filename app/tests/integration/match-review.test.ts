@@ -75,7 +75,7 @@ async function receipt(data: { vendor: string; date: string; cents: number; refe
   });
 }
 
-/** Rows: phone bill (amount + name, uncertain), rent (viite + amount, certain), two look-alike kuitit, an amount-only coincidence. */
+/** Rows: phone bill (amount + name, dates 6 days apart: uncertain), rent (viite + amount, certain), two look-alike kuitit, an amount-only coincidence. */
 async function fixtures() {
   const phone = await receipt({ vendor: "Puhelinfirma Oy", date: "2026-09-10", cents: 4_990 });
   // Pending, so the certain pair stays a suggestion instead of linking itself.
@@ -86,7 +86,7 @@ async function fixtures() {
   const rows = await statement([
     { date: "2026-09-04", amountCents: -120_000, counterparty: "VUOKRA", reference: "1232" },
     { date: "2026-09-05", amountCents: -1_500, counterparty: "SHELL HELSINKI" },
-    { date: "2026-09-12", amountCents: -4_990, counterparty: "PUHELINFIRMA OY" },
+    { date: "2026-09-16", amountCents: -4_990, counterparty: "PUHELINFIRMA OY" },
     { date: "2026-09-21", amountCents: -890, counterparty: "KAHVILA LUMO" },
   ]);
   const [rentRow, fuelRow, phoneRow, coffeeRow] = rows;
@@ -131,7 +131,7 @@ describe("the gate in the stored suggestions", () => {
     expect(matchExplanation(JSON.parse(byId.get(f.phoneRow.id)!.matchReasons!))).toEqual([
       "summa sama",
       "nimi vastaa",
-      "veloitettu 2 päivää oston jälkeen",
+      "veloitettu 6 päivää oston jälkeen",
     ]);
 
     // The look-alikes are both offered inline for the owner to choose; the coincidence is not.
@@ -161,7 +161,7 @@ describe("review_matches (chat tool)", () => {
     expect(passed[f.rentRow.id]).toMatchObject({ status: "certain", kind: "kuitti", shownAsCard: true });
     expect(passed[f.rentRow.id].reasons).toEqual(expect.arrayContaining(["viite täsmää", "summa sama"]));
     expect(passed[f.phoneRow.id]).toMatchObject({ status: "ai_accepted", confidence: 0.9 });
-    expect(passed[f.phoneRow.id].reasons).toEqual(["summa sama", "nimi vastaa", "veloitettu 2 päivää oston jälkeen", "sama operaattori"]);
+    expect(passed[f.phoneRow.id].reasons).toEqual(["summa sama", "nimi vastaa", "veloitettu 6 päivää oston jälkeen", "sama operaattori"]);
     expect(passed[f.fuelRow.id]).toBeUndefined();
     expect(result.ambiguous.map((row: { transactionId: string }) => row.transactionId)).toEqual([f.coffeeRow.id]);
     expect(result.ambiguous[0].options).toHaveLength(2);

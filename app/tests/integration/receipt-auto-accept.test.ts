@@ -108,8 +108,10 @@ describe("POST /api/receipts/save with autoApprove", () => {
     // Manual path: the receipt waits in the review queue, the owner taps Hyväksy.
     const manualUser = await createUser();
     const manualCookie = await sessionCookie(manualUser);
+    // The bank row is six days after the kuitti: a suggestion on both paths. Inside three days
+    // amount + name confirm by themselves (match-gate TIGHT_DATE_DAYS), which is not this test.
     await createStatementWithTransactions(manualUser.id, {
-      transactions: [{ date: "2026-01-14", amountCents: -1240, counterparty: "K-Market Kamppi" }],
+      transactions: [{ date: "2026-01-20", amountCents: -1240, counterparty: "K-Market Kamppi" }],
     });
     const manual = await save(manualCookie, saveBody(await stagedUpload(manualUser.id, complete), complete, { autoApprove: true, forceDuplicate: true }));
     expect(manual.status).toBe(200);
@@ -127,7 +129,7 @@ describe("POST /api/receipts/save with autoApprove", () => {
 
     // Auto path: one POST.
     await createStatementWithTransactions(user.id, {
-      transactions: [{ date: "2026-01-14", amountCents: -1240, counterparty: "K-Market Kamppi" }],
+      transactions: [{ date: "2026-01-20", amountCents: -1240, counterparty: "K-Market Kamppi" }],
     });
     const auto = await save(cookie, saveBody(await stagedUpload(user.id, complete), complete, { autoApprove: true }));
     expect(auto.status).toBe(200);
