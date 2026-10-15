@@ -120,8 +120,8 @@ jobs:
           ( shopt -s nullglob
             while true; do
               for r in "$SH"/*.req; do xcrun simctl io "$SIM_UDID" screenshot "${r%.req}.png" >/dev/null 2>&1; rm -f "$r"; done
-              # Not waited for: while "Open in LashKirja?" is unanswered it can hold up the shots.
-              for o in "$SH"/*.openurl; do xcrun simctl openurl "$SIM_UDID" "$(cat "$o")" >/dev/null 2>&1 & rm -f "$o"; done
+              # Waited for, as on the Mac: openURL() gives the call up to 10 s before it looks for "Open".
+              for o in "$SH"/*.openurl; do xcrun simctl openurl "$SIM_UDID" "$(cat "$o")" >/dev/null 2>&1; rm -f "$o"; done
               for c in "$SH"/*.contentsize; do xcrun simctl ui "$SIM_UDID" content_size "$(cat "$c")" >/dev/null 2>&1; rm -f "$c"; done
               sleep 0.3
             done ) &
