@@ -236,6 +236,16 @@ import Foundation
         #expect(OfflineReceiptRules.title(createdAt: Date(timeIntervalSince1970: 1_790_586_000)) == "Kuitti 28.9.")
     }
 
+    // W39: the capture screen shows the queue the Kuitit card under its cover shows, in one line.
+    @Test func captureGlanceCountsEveryState() {
+        #expect(OfflineReceiptRules.glance([]) == nil)
+        #expect(OfflineReceiptRules.glance([item("a")]) == "1 odottaa yhteyttä")
+        let all = [item("a", status: .done), item("b", status: .failed), item("c"), item("d", status: .sending),
+                   item("e"), item("f", status: .done), item("g", status: .done)]
+        #expect(OfflineReceiptRules.glance(all) == "1 lähetetään · 2 odottaa yhteyttä · 1 epäonnistui · 3 lähetetty")
+        #expect(OfflineReceiptRules.glance([item("a", status: .done)]) == "1 lähetetty")
+    }
+
     @Test func capturedAtIsISOWithMilliseconds() {
         #expect(OfflineReceiptRules.isoString(Date(timeIntervalSince1970: 0)) == "1970-01-01T00:00:00.000Z")
     }

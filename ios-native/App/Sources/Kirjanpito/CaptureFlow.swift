@@ -92,18 +92,28 @@ struct CaptureFlow: View {
             Group {
                 switch model.step {
                 case .pick:
-                    ScrollView { picker.padding(24) }
+                    if scannerInline {
+                        scanner.transition(.opacity)
+                    } else {
+                        ScrollView { picker.padding(24) }.transition(.opacity)
+                    }
                 case .queue:
-                    queueList
+                    queueList.transition(.opacity)
                 case .edit(let rowId, let draft):
                     ReceiptEditor(model: model, rowId: rowId, draft: draft, preview: model.previews[rowId], dirty: $formDirty) { outcome in
                         model.saved(rowId, autoApproved: outcome.approved, invoiceNote: outcome.invoiceNote,
                                     receiptId: outcome.receiptId, kind: outcome.kind)
                     }
                     .id(rowId)
+                    .transition(.opacity)
                 }
             }
+            // The page changes (picker → queue → form → queue) fade into each other instead of
+            // swapping in one frame.
+            .motion(.snappy, value: stepKey)
+            .motion(.snappy, value: scannerInline)
             .background(Theme.canvas)
+            .toolbar(scannerInline ? .hidden : .automatic, for: .navigationBar)
             // A bill saved as an ostolasku is said aloud; the queue row keeps saying it.
             .overlay(alignment: .bottom) {
                 if let notice = model.notice {
@@ -111,6 +121,7 @@ struct CaptureFlow: View {
                         .padding(.bottom, 8)
                 }
             }
+            .motion(.snappy, value: model.notice)
             .formKeyboard()
             .navigationTitle("Uusi kuitti")
             .onAppear {
@@ -145,7 +156,7 @@ struct CaptureFlow: View {
             .onChange(of: model.closeRequested) { _, now in
                 if now { close() }
             }
-            .fullScreenCover(isPresented: $showCamera) {
+            .fullScreenCover(isPresented: cameraCover) {
                 if VNDocumentCameraViewController.isSupported {
                     DocumentScanner { images in
                         showCamera = false
@@ -178,6 +189,35 @@ struct CaptureFlow: View {
 
     // MARK: Pieces
 
+    /// Which page is up, for the fade between pages.
+    private var stepKey: String {
+        switch model.step {
+        case .pick: return "pick"
+        case .queue: return "queue"
+        case .edit(let rowId, _): return "edit-\(rowId)"
+        }
+    }
+
+    /// With nothing picked yet the scanner is this cover's own page, not a second cover over the
+    /// empty picker page: "Kuvaa kuitti" slid up the picker and then the camera over it, two
+    /// movements with a page in between. Over the queue the camera stays a cover of its own.
+    private var scannerInline: Bool {
+        guard showCamera, VNDocumentCameraViewController.isSupported, case .pick = model.step else { return false }
+        return true
+    }
+
+    private var cameraCover: Binding<Bool> {
+        Binding(get: { showCamera && !scannerInline }, set: { showCamera = $0 })
+    }
+
+    private var scanner: some View {
+        DocumentScanner { images in
+            showCamera = false
+            addScanned(images)
+        }
+        .ignoresSafeArea()
+    }
+
     /// Back from the form to the queue (every other row as it was); closing the queue leaves it
     /// going. Matching a bank row is one receipt: "Peruuta" asks before dropping it.
     @ViewBuilder private var leadingButton: some View {
@@ -199,9 +239,19 @@ struct CaptureFlow: View {
             Image(systemName: "doc.viewfinder").scaledFont(size: 54, relativeTo: .largeTitle).foregroundStyle(Theme.accent).accessibilityHidden(true)
             Text("Lisää kuva tai PDF kuitista tai laskusta").font(.headline).multilineTextAlignment(.center)
             pickButtons
-            if let importFailure { Text(importFailure).font(.footnote).foregroundStyle(Theme.danger) }
+            if let importFailure { Text(importFailure).font(.footnote).foregroundStyle(Theme.danger).transition(.opacity) }
+            // Under the buttons, so they never move when it comes or goes.
+            if showsQueued {
+                QueuedReceiptsStatus().padding(.top, 8).transition(.opacity)
+            }
         }
+        .motion(.snappy, value: importFailure)
+        .motion(.snappy, value: showsQueued)
     }
+
+    /// The offline queue (Kuitit's card, under this cover) has photos or a stop to show. A bank-row
+    /// match never puts its file there, so it shows only the bulk queue's own rows.
+    private var showsQueued: Bool { !single && QueuedReceiptsStatus.shows }
 
     @ViewBuilder private var pickButtons: some View {
         if Self.cameraAvailable {
@@ -215,7 +265,10 @@ struct CaptureFlow: View {
         Button { showFiles = true } label: { Label("Valitse tiedosto", systemImage: "doc").frame(maxWidth: .infinity, minHeight: 44) }
             .buttonStyle(.bordered)
         // UI tests only (Debug + `-LKUITest`): the simulator has no camera to take a picture with.
-        if UITestHooks.active { fixtureButton }
+        if UITestHooks.active {
+            fixtureButton
+            queueFixtureButton
+        }
     }
 
     private var fixtureButton: some View {
@@ -224,6 +277,17 @@ struct CaptureFlow: View {
         } label: { Label("Testikuitti", systemImage: "testtube.2").frame(maxWidth: .infinity, minHeight: 44) }
             .buttonStyle(.bordered)
             .accessibilityIdentifier("capture-fixture")
+    }
+
+    /// UI tests only: the fixture kept on the phone the way a file read without a connection is
+    /// (`CaptureQueueModel.keepOffline`), since the simulator's network cannot be cut from a test.
+    private var queueFixtureButton: some View {
+        Button {
+            guard let data = ReceiptImageEncoder.jpeg(from: UITestHooks.fixtureReceipt()) else { return }
+            OfflineReceiptQueueModel.shared.enqueue(app: app, data: data, fileName: UITestHooks.fixtureName, mimeType: "image/jpeg")
+        } label: { Label("Testikuitti jonoon", systemImage: "tray.and.arrow.down").frame(maxWidth: .infinity, minHeight: 44) }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("capture-queue-fixture")
     }
 
     /// Nothing is ever inserted above the rows or taken from between them while files finish (owner,
@@ -265,13 +329,26 @@ struct CaptureFlow: View {
                 // UI tests only (Debug + `-LKUITest`): the simulator has no camera to take a picture with.
                 if UITestHooks.active {
                     fixtureButton.listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    queueFixtureButton.listRowBackground(Color.clear).listRowSeparator(.hidden)
                 }
                 if let importFailure {
                     Text(importFailure).font(.footnote).foregroundStyle(Theme.danger).listRowSeparator(.hidden)
+                        .transition(.opacity)
                 }
+            }
+            // Last, under the actions: nothing above it moves when it comes or goes. A row kept for
+            // later says "Odottaa yhteyttä" above for good; this says when it is sent or refused.
+            if showsQueued {
+                Section { QueuedReceiptsStatus() }.transition(.opacity)
             }
         }
         .scrollContentBackground(.hidden)
+        // The bank-row match's primary button, "Lisää tiedostoja" and an import failure come and
+        // go as the queue works: faded, with the rows around them easing into place.
+        .motion(.snappy, value: queue.isFinished)
+        .motion(.snappy, value: queue.holdsWork)
+        .motion(.snappy, value: importFailure)
+        .motion(.snappy, value: showsQueued)
     }
 
     private var primaryTitle: String { queue.reviewButtonTitle ?? "Valmis" }
@@ -284,7 +361,7 @@ struct CaptureFlow: View {
         let summary = queue.summaryLine
         return VStack(alignment: .leading, spacing: 6) {
             if queue.offlineCount > 0 {
-                Text(OfflineReceiptRules.offlineNotice).foregroundStyle(Theme.ink)
+                Text(OfflineReceiptRules.offlineNotice).foregroundStyle(Theme.ink).transition(.opacity)
             }
             ZStack(alignment: .topLeading) {
                 Text(single ? " " : "Lähetys jatkuu, vaikka suljet tämän näkymän. Kesken olevat kuitit löytyvät Kuiteista.")
@@ -296,6 +373,7 @@ struct CaptureFlow: View {
             }
             .motion(.easeInOut(duration: 0.2), value: working)
         }
+        .motion(.snappy, value: queue.offlineCount > 0)
     }
 
     /// "Lisää tiedostoja": camera, photos or files in one compact row instead of three big buttons.
@@ -347,7 +425,14 @@ struct CaptureFlow: View {
             HStack(spacing: 8) {
                 Text(row.name).lineLimitUnlessLarge().truncationMode(.middle)
                 Spacer(minLength: 8)
-                if row.status == .uploading || row.status == .processing || row.status == .saving { ProgressView().controlSize(.small) }
+                // A fixed slot the spinner fades into: the name keeps its width when a file starts or
+                // finishes. Not a hidden spinner: one spinning unseen keeps the app from going idle.
+                ZStack {
+                    if row.status == .uploading || row.status == .processing || row.status == .saving {
+                        ProgressView().controlSize(.small).transition(.opacity)
+                    }
+                }
+                .frame(width: 20, height: 20)
                 // A saved document says what the AI made of it, on the line the status had, so the
                 // row keeps its height; one tap turns it around (`CaptureQueueModel.switchKind`).
                 if row.canSwitchKind, let kind = row.kind {
@@ -356,14 +441,16 @@ struct CaptureFlow: View {
                     Text(row.status.label).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
                 }
             }
-            if let progress = row.progress, row.status != .ready {
-                Text(progress).font(.caption).foregroundStyle(Theme.ink2)
-            }
-            if let outcome = row.outcomeText {
-                Text(outcome).font(.caption).foregroundStyle(Theme.ink2)
-            }
-            if let error = row.error {
-                Text(error).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
+            // One line under the name from the start, its words swapped by a fade: "Jonossa" gaining
+            // "Lähetetään" under it moved every row below, and the buttons under the queue, by a line.
+            let detail = (row.status != .ready ? row.progress : nil) ?? row.outcomeText
+            Text(detail ?? row.error ?? " ")
+                .font(.caption)
+                .foregroundStyle(detail == nil && row.error != nil && row.status == .failed ? Theme.danger : Theme.ink2)
+                .contentTransition(.opacity)
+                .accessibilityHidden(detail == nil && row.error == nil)
+            if detail != nil, let error = row.error {
+                Text(error).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2).transition(.opacity)
             }
             // A save the server refused: the form takes the reading from there (web "Käytä lomakkeessa").
             if row.canOpenForm {
@@ -379,6 +466,8 @@ struct CaptureFlow: View {
                     .foregroundStyle(Theme.accent)
             }
         }
+        // A row's own lines change as its file goes through: the row eases to its new height.
+        .motion(.snappy, value: row)
     }
 
     /// "Kuitti ⇄ Ostolasku": the decided kind, and the tap that changes it. While the server works the
@@ -614,7 +703,7 @@ struct ReceiptEditor: View {
             } header: {
                 Text("Lisätiedot")
             }
-            if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
+            if let failure { Section { Text(failure).foregroundStyle(Theme.danger) }.transition(.opacity) }
             if duplicate {
                 // Both answers to the look-alike question; before W27 "no" had no button and the
                 // file waited under "Kesken" for good.
@@ -634,6 +723,15 @@ struct ReceiptEditor: View {
                 .listRowBackground(Color.clear)
             }
         }
+        // Field errors, the duplicate question, a currency or VAT row coming or going: the rows
+        // below ease to their new place.
+        .motion(.snappy, value: errors)
+        .motion(.snappy, value: failure)
+        .motion(.snappy, value: duplicate)
+        .motion(.snappy, value: form.type)
+        .motion(.snappy, value: form.isForeign)
+        .motion(.snappy, value: form.vatRows.map(\.id))
+        .motion(.snappy, value: customCategory)
         .onAppear {
             if form.date.isEmpty { form.setDate(APIDate.dayString(Date())) }
             baseline = form

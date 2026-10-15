@@ -49,7 +49,9 @@ final class CaptureQueueModel {
     let transactionId: String?
     /// Called after each receipt is saved (and matched); set by the screen.
     @ObservationIgnored var onSaved: (() -> Void)?
-    @ObservationIgnored private var visible = false
+    /// The screen is up, from its first appearance until it has gone. Observed by Kuitit's card,
+    /// which lies under the cover meanwhile.
+    private(set) var visible = false
     @ObservationIgnored private var app: AppModel?
     @ObservationIgnored private var userId: String?
     /// Nil for a bank-row match: nothing of it is kept after its screen.

@@ -44,6 +44,10 @@ struct ReceiptsView: View {
     @State private var toast: Toast?
     @State private var toastAction: (() async -> Void)?
     @State private var toastTask: Task<Void, Never>?
+    /// False while a pushed screen or a cover hides Kuitit.
+    @State private var onScreen = false
+
+    private var listMotion: Animation? { onScreen ? .snappy : nil }
 
     /// Month, tab, category, source and sort are kept between visits (as the purchase invoices' filter).
     /// Also read by the launch prefetch, so it asks for the list this screen opens on.
@@ -125,12 +129,12 @@ struct ReceiptsView: View {
                     }
                 )
             }
-            if let failure { Text(failure).foregroundStyle(Theme.danger) }
-            if let notice { Text(notice).foregroundStyle(Theme.ink2) }
+            if let failure { Text(failure).foregroundStyle(Theme.danger).transition(.opacity) }
+            if let notice { Text(notice).foregroundStyle(Theme.ink2).transition(.opacity) }
             Section {
                 tabChips
                 if query.isFiltered && (!query.month.isEmpty || !query.category.isEmpty || query.source != .all || query.amountLabel != nil || query.missingVat) {
-                    activeFilters
+                    activeFilters.transition(.opacity)
                 }
             }
             .listRowBackground(Color.clear)
@@ -173,8 +177,10 @@ struct ReceiptsView: View {
             if selecting && !picked.isEmpty {
                 let approvable = ReceiptBulk.approvable(picked)
                 BulkBar(count: picked.count, busy: busy, onCancel: {
-                    selecting = false
-                    selected = []
+                    withMotion(.snappy) {
+                        selecting = false
+                        selected = []
+                    }
                 }) {
                     if !approvable.isEmpty {
                         BulkBarButton(title: ReceiptBulk.approveLabel(ready: approvable.count, notReady: picked.count - approvable.count)) {
@@ -199,7 +205,13 @@ struct ReceiptsView: View {
         .confirmSheet(isPresented: $confirmDelete, title: deleteTitle, message: deleteNote, confirmTitle: "Poista") {
             Task { await delete(deleteIds) }
         }
-        .fullScreenCover(isPresented: $capture, onDismiss: { Task { await load() } }) { CaptureFlow(transactionId: nil) }
+        .fullScreenCover(isPresented: $capture, onDismiss: {
+            Task {
+                let version = app.dataVersion
+                await load()
+                if !Task.isCancelled { gate.mark(key: String(describing: query), version: version) }
+            }
+        }) { CaptureFlow(transactionId: nil) }
         .alert("Summarajaus", isPresented: $editingAmount) {
             TextField("Vähintään €", text: $minDraft).moneyInput()
             TextField("Enintään €", text: $maxDraft).moneyInput()
@@ -215,6 +227,10 @@ struct ReceiptsView: View {
         }
         .task(id: ReloadKey(query: query, version: app.dataVersion)) {
             guard receipts.value == nil || gate.isDue(key: String(describing: query), version: app.dataVersion) else { return }
+            // Each save under the capture cover bumps the version: the list stays as it was behind
+            // the cover and is asked once, when the cover has gone (the audit saw 103 layers move
+            // 163 pt back here, and the owner came back to a moved list).
+            guard !capture || receipts.value == nil else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion
             await load()
@@ -237,9 +253,22 @@ struct ReceiptsView: View {
             guard !Task.isCancelled else { return }
             withMotion(.snappy) { sure = list }
         }
-        .onDisappear { toastTask?.cancel() }
+        .onAppear { onScreen = true }
+        .onDisappear {
+            onScreen = false
+            toastTask?.cancel()
+        }
         .motion(.snappy, value: pending.map(\.id))
         .motion(.snappy, value: rejected.map(\.id))
+        // A changed list, a notice, a filter chip or the bulk bar eases in and out: the rows below
+        // glide to their new place instead of jumping there. Only while Kuitit is on screen: an
+        // answer landing under a pushed receipt just takes its place (animating there kept the
+        // receipt's delete sheet from closing on Peruuta in CI).
+        .motion(listMotion, value: visibleIds)
+        .motion(listMotion, value: failure)
+        .motion(listMotion, value: notice)
+        .motion(listMotion, value: query)
+        .motion(listMotion, value: selected.isEmpty)
         // Photos kept while offline are sent from here too, not only from the capture screen.
         .task { OfflineReceiptQueueModel.shared.start(app: app) }
     }
@@ -268,6 +297,12 @@ struct ReceiptsView: View {
 
     /// The loaded rows minus the ones deleted a moment ago (`app.removedIds`).
     private var shownReceipts: [Receipt] { (receipts.value ?? []).filter { !app.removedIds.contains($0.id) } }
+
+    /// The ids of the rows on screen, in order: a new answer that changes them is animated.
+    private var visibleIds: [String] {
+        let all = shownReceipts
+        return all.prefix(limit.visible(all.count)).map(\.id)
+    }
 
     /// The picked rows that are on screen: a folded list never acts on hidden receipts (web BOOKS-12).
     private var selectedVisible: [Receipt] {
@@ -311,7 +346,12 @@ struct ReceiptsView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text(tab.title)
-                            if let counts { Text("\(tab.count(in: counts))").foregroundStyle(active ? Theme.onInk : Theme.ink2) }
+                            // Laid out before the counts arrive, only faded in: the chips keep their place.
+                            Text(counts.map { "\(tab.count(in: $0))" } ?? "0")
+                                .foregroundStyle(active ? Theme.onInk : Theme.ink2)
+                                .opacity(counts == nil ? 0 : 1)
+                                .contentTransition(.numericText())
+                                .accessibilityHidden(counts == nil)
                         }
                         .font(.subheadline.weight(active ? .semibold : .regular))
                         .foregroundStyle(active ? Theme.onInk : Theme.ink)
@@ -398,10 +438,17 @@ struct ReceiptsView: View {
 
     private func sureBar(_ count: Int) -> some View {
         Button { Task { await linkSure() } } label: {
+            // The spinner fades into a fixed slot mirrored on the other side, so the title stays
+            // centred and still when the linking starts.
             HStack(spacing: 8) {
-                if sureBusy { ProgressView().tint(Theme.onInk) }
+                ZStack {
+                    if sureBusy { ProgressView().tint(Theme.onInk).transition(.opacity) }
+                }
+                .frame(width: 20, height: 20)
                 Text(SureMatchText.buttonTitle(count)).font(.headline)
+                Color.clear.frame(width: 20, height: 20)
             }
+            .motion(.easeOut(duration: 0.15), value: sureBusy)
             .frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(.primary)
@@ -476,8 +523,10 @@ struct ReceiptsView: View {
                     if allPicked { selected.subtract(onScreen) } else { selected.formUnion(onScreen) }
                 }
                 Button("Valmis") {
-                    selecting = false
-                    selected = []
+                    withMotion(.snappy) {
+                        selecting = false
+                        selected = []
+                    }
                 }
             } else {
                 Menu {
@@ -526,7 +575,7 @@ struct ReceiptsView: View {
                 }
                 .accessibilityLabel(filtered ? "Suodata kuitteja, suodatin käytössä" : "Suodata kuitteja")
                 // Always there, so the toolbar does not rearrange itself when the list arrives.
-                Button { selecting = true } label: { Image(systemName: "checkmark.circle").tapTarget() }
+                Button { withMotion(.snappy) { selecting = true } } label: { Image(systemName: "checkmark.circle").tapTarget() }
                     .accessibilityLabel("Valitse kuitteja")
                     .disabled(receipts.value?.isEmpty ?? true)
                 Button { capture = true } label: { Image(systemName: "camera.circle").tapTarget() }
@@ -560,14 +609,6 @@ struct ReceiptsView: View {
         let list: ReceiptList
         do {
             list = try await app.cachedGet("/api/receipts", query: listQuery, force: force, persist: true)
-            guard asked == query else {
-                if let q = await queue { applyPending(q) }
-                if let r = await rejectedResponse { applyRejected(r) }
-                return
-            }
-            applyList(list, tab: asked.tab)
-            failure = nil
-            timing.dataReady()
         } catch is CancellationError {
             return
         } catch {
@@ -577,13 +618,18 @@ struct ReceiptsView: View {
             if let r = await rejectedResponse { applyRejected(r) }
             return
         }
-        if let c = await countsResponse, asked == query {
-            counts = c.counts
-            // A paging server may leave the count to the counts answer.
-            total = ReceiptListPaging.total(list, tab: asked.tab, counts: c.counts)
-        }
-        if let q = await queue { applyPending(q) }
-        if let r = await rejectedResponse { applyRejected(r) }
+        // The four answers go on screen together: the review queue arriving after the list
+        // was inserted above the rows and pushed every one of them down.
+        let pendingList = await queue
+        let rejectedList = await rejectedResponse
+        let countsList = await countsResponse
+        if let pendingList { applyPending(pendingList) }
+        if let rejectedList { applyRejected(rejectedList) }
+        guard asked == query else { return }
+        if let countsList { counts = countsList.counts }
+        applyList(list, tab: asked.tab)
+        failure = nil
+        timing.dataReady()
     }
 
     private func applyList(_ list: ReceiptList, tab: ReceiptTab) {
@@ -872,16 +918,22 @@ struct PagedShowMoreButton: View {
             } label: {
                 HStack {
                     Text(title).font(.subheadline.weight(.semibold))
+                        .contentTransition(.opacity)
                     Spacer()
-                    if loading {
-                        ProgressView()
-                    } else {
+                    // One fixed slot for the chevron and the spinner: the row keeps its size when a
+                    // page starts or ends loading. The spinner is there only while loading (one
+                    // spinning unseen keeps the app from going idle).
+                    ZStack {
                         Image(systemName: limit.visible(loaded) >= loaded && !serverHasMore ? "chevron.up" : "chevron.down")
                             .font(.caption.weight(.semibold))
+                            .opacity(loading ? 0 : 1)
                             .accessibilityHidden(true)
+                        if loading { ProgressView().transition(.opacity) }
                     }
+                    .frame(width: 20, height: 20)
                 }
                 .foregroundStyle(Theme.accent)
+                .motion(.snappy, value: loading)
             }
             .disabled(loading)
         }
