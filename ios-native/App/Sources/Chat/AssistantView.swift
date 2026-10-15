@@ -29,7 +29,9 @@ struct AssistantView: View {
                 }
             }
             .background(Theme.canvas)
-            .navigationTitle(model?.title ?? "Avustaja")
+            // The conversation's title with its fade-in (ChatModel.ready), not a beat before the
+            // conversation it names is on screen (motion audit koti-assistant-sheet).
+            .navigationTitle((model ?? app.chat).flatMap { $0.ready ? $0.title : nil } ?? "Avustaja")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
