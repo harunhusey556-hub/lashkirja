@@ -63,3 +63,10 @@ scripts/sim/motion-audit.sh --collect test01_Koti # a run already started: wait,
   fine jank. Jank is for Instruments: signposts `Motion/settle` and `Screens/first-paint` on a device.
 - Checks and thresholds are in the analyzer's docstring; the calibration (known good and known bad
   steps in `test00_Calibration`) is stated at the top of every report.
+- Limits seen on the first runs (2026-10-15): `xctrace --template 'Animation Hitches'` answers
+  "Hitches is not supported on this platform" on the simulator. Each suite starts from a fresh
+  launch and opens screens seconds later, while the launch prefetch is still waiting on the
+  `next dev` demo API (a route's first hit compiles it), so a first visit measures the cold worst
+  case; a cache or prefetch fix shows on the revisit steps. Run-to-run noise follows the iMac's
+  load: compare a step across runs, not only the totals. A step started while the previous screen
+  was still loading gets that screen's late content.
