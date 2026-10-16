@@ -75,7 +75,9 @@ struct OfflineBanner: View {
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(Theme.ink.opacity(0.9), in: Capsule())
                     .padding(.top, 4)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    // Fades in where it stays: sliding in from the top moved the pill 17–18 pt after
+                    // the screen had settled (motion audit offline-tab-myynti, w47).
+                    .transition(.opacity)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("offline-banner")
             }
