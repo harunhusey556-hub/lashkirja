@@ -150,6 +150,49 @@ final class StabilityTests: WalkTestCase {
         assertResponsive("receipt linked")
     }
 
+    /// A stored token the server no longer accepts, as the motion gate's pr-run1 restored from the
+    /// walk before it (CI 2026-10-15): the app paints the tabs, drops to the sign-in screen once the
+    /// server refuses the token, and a fresh launch signs in from there instead of losing the walk.
+    func test09_RefusedStoredSessionSignsInAgain() {
+        app.terminate()
+        XCTAssertTrue(revokeAppSessions(), "could not revoke the app's session on the demo API")
+        let started = Date()
+        XCTAssertTrue(launchSignedIn(), "the refused session never reached the sign-in screen")
+        note("MARK refused-session launch to tabs \(Int(Date().timeIntervalSince(started))) s")
+        XCTAssertTrue(app.tabBars.firstMatch.exists, "no tab bar after signing in again")
+        XCTAssertTrue(launchPhase(["signedIn"]).waitForExistence(timeout: 10), "the new session was not accepted")
+    }
+
+    /// Revokes the demo user's app sessions on the demo API, so the token in the simulator's
+    /// Keychain is refused at the next launch. Test values from app/scripts/demo-seed.ts; only ever
+    /// against the throwaway local server (the runner shares the Mac's loopback).
+    private func revokeAppSessions() -> Bool {
+        func call(_ path: String, _ body: [String: String]?, _ token: String?) -> [String: Any]? {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:3999\(path)")!)
+            if let body {
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "content-type")
+                request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            }
+            if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "authorization") }
+            var result: [String: Any]?
+            let done = DispatchSemaphore(value: 0)
+            URLSession.shared.dataTask(with: request) { data, _, _ in
+                result = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                done.signal()
+            }.resume()
+            _ = done.wait(timeout: .now() + 30)
+            return result
+        }
+        guard let token = call("/api/auth/token", ["email": "demo@lashkirja.fi", "password": "demo123"], nil)?["token"] as? String,
+              let sessions = call("/api/auth/sessions", nil, token)?["sessions"] as? [[String: Any]] else { return false }
+        // The app signs in as "ios-app"; this token (a plain one) is the current session and stays.
+        let appSessions = sessions.filter { $0["label"] as? String == "iPhone · LashKirja-sovellus" && $0["current"] as? Bool != true }
+        let revoked = appSessions.compactMap { $0["id"] as? String }
+            .filter { call("/api/auth/sessions", ["id": $0], token)?["ok"] as? Bool == true }
+        return !appSessions.isEmpty && revoked.count == appSessions.count
+    }
+
     /// Opens ALV and then reads nothing for 25 s: the app's own hang watchdog (event log) tells
     /// whether ALV blocks the main thread, without the test's accessibility queries in the way.
     func test07_AlvLeftAlone() {
