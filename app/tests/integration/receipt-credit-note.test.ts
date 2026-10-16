@@ -11,7 +11,7 @@ import { processDocumentJob, setDocumentExtractorForTests } from "@/lib/document
 import { storeEmailDocument } from "@/lib/mail-sync";
 import { loadLedger } from "@/lib/ledger/load";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
-import { createUpload, createUser, resetDatabase, type TestUser } from "./helpers/factories";
+import { createReceipt, createUpload, createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildFormRequest, buildRequest, readJson, routeContext, sessionCookie } from "./helpers/http";
 
 /**
@@ -215,6 +215,50 @@ describe("POST /api/receipts/save with a credit note", () => {
     );
     expect(edit.status).toBe(200);
     expect((await readJson<Json>(edit)).receipt).toMatchObject({ totalAmount: -125.5, category: "muut" });
+  });
+});
+
+describe("a credit's VAT follows its total's sign (review 2026-10-16)", () => {
+  const patch = (id: string, body: Record<string, unknown>) =>
+    patchReceipt(buildRequest("PATCH", `/api/receipts/${id}`, body, { cookie }), routeContext({ id }));
+
+  it("PATCH refuses positive VAT on a negative total, and a positive total under stored negative VAT", async () => {
+    const saved = await save({ ...fiCredit, creditsInvoiceNumber: null });
+    const id = saved.body.receipt.id;
+    const positiveVat = await patch(id, { totalAmount: -125.5, vatDetails: [{ rate: 25.5, amount: 25.5 }] });
+    expect(positiveVat.status).toBe(400);
+    expect((await readJson<Json>(positiveVat)).error.message).toMatch(/etumerkki/);
+    const positiveTotal = await patch(id, { totalAmount: 125.5 });
+    expect(positiveTotal.status).toBe(400);
+    expect((await readJson<Json>(positiveTotal)).error.message).toMatch(/etumerkki/);
+    const stored = await prisma.receipt.findUniqueOrThrow({ where: { id } });
+    expect(stored.totalAmountCents).toBe(-12_550);
+    expect(JSON.parse(stored.vatDetails!)).toEqual([{ rate: 25.5, amount: -25.5 }]);
+  });
+
+  it("save books a credit note read with mixed signs negative throughout", async () => {
+    const saved = await save({ ...fiCredit, creditsInvoiceNumber: null }, { total: -125.5, vat: 25.5 });
+    expect(saved.status).toBe(200);
+    const stored = await prisma.receipt.findUniqueOrThrow({ where: { id: saved.body.receipt.id } });
+    expect(stored.totalAmountCents).toBe(-12_550);
+    expect(JSON.parse(stored.vatDetails!).every((line: { amount: number }) => line.amount <= 0)).toBe(true);
+  });
+
+  it("a negative 'tulo' (a refund of a sale) posts the mirror of a sale, as the VAT return counts it", async () => {
+    const refund = await createReceipt(user.id, {
+      type: "tulo",
+      date: `${PERIOD}-10`,
+      totalAmountCents: -12_550,
+      category: "myynti",
+      vendor: "Asiakas",
+      vatDetails: JSON.stringify([{ rate: 25.5, amount: -25.5 }]),
+    });
+    const entries = await loadLedger(user.id, new Date("2026-12-31T00:00:00.000Z"));
+    const entry = entries.find((candidate) => candidate.sourceId === refund.id);
+    expect(entry).toBeDefined();
+    const net = Object.fromEntries(entry!.lines.map((line) => [line.account, line.debitCents - line.creditCents]));
+    // Not linked to a bank row: the payer side is the suspense account. Sales and output VAT go down.
+    expect(net).toEqual({ "2990": -12_550, "3000": 10_000, "2939": 2_550 });
   });
 });
 
