@@ -221,8 +221,12 @@ final class OwnerScreensTests: WalkTestCase {
         guard back.exists else { XCTFail("the form has no Takaisin"); return }
         back.tap()
         sleep(1)
+        let discard = app.buttons["Hylkää muutokset"]
+        // A tap while the form is still settling (its picture grows in after c2) can be lost on a
+        // loaded host: run 38868746775 shot the form still up, nothing asked. Tapped again only then.
+        if !discard.exists && !waitGone(vendor, timeout: 4) && !discard.exists && back.exists { back.tap(); sleep(1) }
         // A reading the form changed asks first; nothing was typed, but the answer is the same.
-        if app.buttons["Hylkää muutokset"].exists { app.buttons["Hylkää muutokset"].tap(); sleep(1) }
+        if discard.exists { discard.tap(); sleep(1) }
         let queued = app.staticTexts["testikuitti.jpg"].firstMatch
         XCTAssertTrue(queued.waitForExistence(timeout: 5), "Takaisin lost the queue's row")
         let reopen = app.buttons["Käytä lomakkeessa"].firstMatch
