@@ -37,6 +37,9 @@ jobs:
           print(ids[0] if ids else "")')
           echo "Simulator: $DEST"
           echo "SIM_UDID=$DEST" >> "$GITHUB_ENV"
+          # Booted now, so its first-boot work runs during the API setup and the build instead of
+          # under the first test (CI 2026-10-16: OwnerScreens A, 58 s to set up the automation session).
+          xcrun simctl bootstatus "$DEST" -b
       # A throwaway demo API on this runner's loopback, as docs/quality/SIMULATOR.md does by hand: a
       # fresh SQLite file, the demo seed, no cloud AI, no mail. Nothing here reaches a real server.
       - uses: actions/setup-node@v4
