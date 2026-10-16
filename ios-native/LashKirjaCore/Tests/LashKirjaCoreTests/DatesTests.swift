@@ -11,6 +11,22 @@ import Foundation
     #expect(APIDate.displayDay("nonsense") == "nonsense")
 }
 
+// w47: the app warms the formatters off the main thread while the first screen already formats
+// dates; both sides share the same formatters and get the same answers.
+@Test func warmUpOffTheMainThreadWhileDatesAreFormatted() async {
+    await withTaskGroup(of: Void.self) { group in
+        for _ in 0..<8 { group.addTask { APIDate.warmUp() } }
+        for _ in 0..<8 {
+            group.addTask {
+                #expect(MonthKey.current(APIDate.day("2026-10-02")!) == "2026-10")
+                #expect(APIDate.displayDay("2026-10-02") == "2.10.2026")
+            }
+        }
+    }
+    #expect(APIDate.timestamp("2026-10-02T09:05:00.000Z") == "2.10.2026 klo 12.05")
+    #expect(APIDate.instant("2026-10-02T09:05:00Z") != nil)
+}
+
 @Test func timestampsShowHelsinkiTime() {
     #expect(APIDate.timestamp("2026-10-02T09:05:00.000Z") == "2.10.2026 klo 12.05")
     #expect(APIDate.timestamp("2026-01-15T22:30:00Z") == "16.1.2026 klo 0.30")
