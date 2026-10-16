@@ -154,6 +154,16 @@ final class AppModel {
         // Behind the launch's burst of loads a revoked session reached the sign-in screen only
         // 7–9 s later (CI, w45); offline or a slow server leaves the owner signed in.
         let check = await api.checkSession("/api/auth/me", hold: SessionCheck.hold)
+        // The calm launch look stays until the verdict, at most the hold (owner, 2026-10-16): a
+        // refused token goes straight to the sign-in screen and the tabs are never built. Building
+        // them first kept the main thread busy and the 401 waited behind it (~1–6 s on CI, w52).
+        let verdict = await SessionCheck.verdict(of: check, within: SessionCheck.hold)
+        UITestHooks.mark("verdict")
+        guard verdict != .refused, await auth.currentToken() != nil else {
+            Perf.dropLaunch()
+            if case .launching = phase { phase = .signedOut(notice: "Istunto vanheni. Kirjaudu uudelleen.") }
+            return
+        }
         // A lock set up before its owner was recorded belongs to this session's account.
         AppLock.shared.adoptOwnerIfUnknown(user.userId)
         AppLock.shared.keepOnly(for: user.userId)

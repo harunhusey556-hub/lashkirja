@@ -137,6 +137,33 @@ private func eventually(_ condition: () async -> Bool) async -> Bool {
     #expect(await signOuts.value == 0)
 }
 
+@Test func launchWaitsForARefusalOnlyUntilTheSignOutHasRun() async {
+    let t = PathTransport { _ in refused }
+    let c = APIClient(baseURL: base, transport: t, tokens: StoredToken(), sleep: realSleep)
+    let signOuts = Tally()
+    await c.setOnUnauthorized { _ in await signOuts.bump() }
+    let check = await c.checkSession("/api/auth/me", hold: 10)
+    // The launch learns of the refusal only after the sign-out ran: it never puts the tabs up.
+    #expect(await SessionCheck.verdict(of: check, within: 10) == .refused)
+    #expect(await signOuts.value == 1)
+}
+
+@Test func launchStopsWaitingForTheVerdictAfterTheHold() async {
+    let gate = Gate()
+    let t = PathTransport { _ in try await gate.wait(); return refused }
+    let c = APIClient(baseURL: base, transport: t, tokens: StoredToken(), sleep: realSleep)
+    let signOuts = Tally()
+    await c.setOnUnauthorized { _ in await signOuts.bump() }
+    let check = await c.checkSession("/api/auth/me", hold: 0.05)
+    let started = Date()
+    #expect(await SessionCheck.verdict(of: check, within: 0.05) == nil)
+    #expect(Date().timeIntervalSince(started) < 5)
+    // The check keeps running: its late 401 still signs out.
+    await gate.release()
+    #expect(await check.value == .refused)
+    #expect(await signOuts.value == 1)
+}
+
 @Test func firstUnauthorizedCancelsTheSessionsOtherRequestsAndSignsOutOnce() async {
     let gate = Gate()
     let t = PathTransport { path in

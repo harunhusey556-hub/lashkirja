@@ -17,6 +17,8 @@ struct LashKirjaApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        // The revoked-session walk's timeline: what comes before `main` (dyld) and what `init` costs.
+        UITestHooks.mark("main")
         Perf.beginLaunch()
         let app = AppModel()
         _app = State(initialValue: app)
@@ -28,6 +30,7 @@ struct LashKirjaApp: App {
         MotionProbe.shared.start()
         // A quick action that launched the app is already waiting in QuickActions.
         QuickActions.attach { url in app.handle(url: url) }
+        UITestHooks.mark("init")
     }
 
     var body: some Scene {

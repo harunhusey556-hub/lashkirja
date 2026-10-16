@@ -283,8 +283,25 @@ public enum SessionCheck: Sendable, Equatable {
     /// No verdict: offline, a timeout, or a failure that is not the session's. The owner stays signed in.
     case unanswered
 
-    /// How long the launch's other requests wait for the verdict before going out anyway.
-    public static let hold: TimeInterval = 1.5
+    /// How long the launch waits for the verdict (on its calm launch look, with every other request
+    /// held) before the cached screens and the loads go ahead anyway. Owner, 2026-10-16: at most 1 s.
+    public static let hold: TimeInterval = 1.0
+
+    /// `check`'s verdict if it comes within `seconds`, nil once they have passed first. The check
+    /// itself keeps running: its later 401 still ends the session.
+    public static func verdict(of check: Task<SessionCheck, Never>, within seconds: TimeInterval) async -> SessionCheck? {
+        let (first, sink) = AsyncStream.makeStream(of: SessionCheck?.self)
+        let answer = Task { sink.yield(await check.value) }
+        let timer = Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            sink.yield(nil)
+        }
+        var next = first.makeAsyncIterator()
+        let verdict = await next.next() ?? nil
+        timer.cancel()
+        answer.cancel()
+        return verdict
+    }
 }
 
 extension Result where Failure == Error {
