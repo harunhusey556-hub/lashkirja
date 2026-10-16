@@ -81,6 +81,29 @@ export function isAmountWithinRange(amountCents: number, intel: VendorIntelligen
   return amountCents >= minExpected && amountCents <= maxExpected;
 }
 
+const PROMPT_VENDOR_MAX = 60;
+// Words of an instruction, not of a company name. Losing a real vendor that happens to
+// contain one only costs a reading hint; letting an instruction through steers the model.
+const INSTRUCTION_WORDS = /ignore|system|assistant|prompt|instruction|ohita|unohda/i;
+
+/**
+ * A vendor name as it may stand in a reading prompt, or null when it must not
+ * stand there at all. The name is typed by the owner (or read from a document),
+ * so it goes in as one short line of plain text: no line breaks or control
+ * characters to open a new prompt line, no quotes to close the one around it
+ * (review 2026-10-16).
+ */
+export function promptSafeVendor(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const text = raw
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ")
+    .replace(/["'`\u2018\u2019\u201a\u201b\u201c\u201d\u201e\u201f\u00ab\u00bb]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || INSTRUCTION_WORDS.test(text)) return null;
+  return text.slice(0, PROMPT_VENDOR_MAX).trim();
+}
+
 /** AutomationEvent kind of a vendor name the owner corrected on a receipt (receipt-update.ts). */
 export const VENDOR_CORRECTION_KIND = "vendor";
 const CORRECTIONS_IN_PROMPT = 8;
@@ -99,9 +122,11 @@ async function vendorCorrectionsForAiPrompt(userId: string): Promise<string> {
   });
   const lines = new Map<string, string>();
   for (const event of events) {
-    const corrected = event.newValue?.trim();
+    const corrected = promptSafeVendor(event.newValue);
     if (!corrected) continue;
-    const read = event.previousValue?.trim();
+    const read = promptSafeVendor(event.previousValue);
+    // A misread name that is not safe to quote drops the whole line, not only its first half.
+    if (!read && event.previousValue?.trim()) continue;
     const key = `${read?.toLowerCase() ?? ""}→${corrected.toLowerCase()}`;
     if (lines.has(key)) continue;
     lines.set(key, read ? `- luettu "${read}" → oikea myyjä ${corrected}` : `- ${corrected}`);
@@ -132,10 +157,11 @@ async function vendorCategoriesForAiPrompt(userId: string): Promise<string> {
 
   const vendorToCatCounts = new Map<string, Map<string, number>>();
   for (const r of receipts) {
-    if (!r.vendor || !r.category) continue;
-    const vendorMap = vendorToCatCounts.get(r.vendor) || new Map<string, number>();
+    const vendor = promptSafeVendor(r.vendor);
+    if (!vendor || !r.category) continue;
+    const vendorMap = vendorToCatCounts.get(vendor) || new Map<string, number>();
     vendorMap.set(r.category, (vendorMap.get(r.category) || 0) + 1);
-    vendorToCatCounts.set(r.vendor, vendorMap);
+    vendorToCatCounts.set(vendor, vendorMap);
   }
 
   const vendorPriors = Array.from(vendorToCatCounts.entries())
