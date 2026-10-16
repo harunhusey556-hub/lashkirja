@@ -213,7 +213,9 @@ final class AppModel {
     /// on the device for when the same owner signs in again; nothing else of theirs stays.
     /// A 401 for an earlier session (sent before a sign-in) leaves the current one alone.
     func sessionExpired(sentToken: String) async {
+        UITestHooks.mark("refused")
         guard await auth.handleUnauthorized(sentToken: sentToken) else { return }
+        UITestHooks.mark("cleared")
         OfflineReceiptQueueModel.shared.detach()
         endLocalSession()
         // A 401 seen outside `api` (the assistant's stream, a receipt upload): its loads still out

@@ -43,14 +43,16 @@ private struct LaunchPhaseMarker: View {
 
     private var value: String {
         switch phase {
-        case .launching: return "launching"
+        case .launching:
+            UITestHooks.mark("launching")
+            return "launching"
         case .signedOut:
-            UITestHooks.firstBuilt("signedOut")
+            UITestHooks.mark("signedOut")
             return "signedOut"
         // AuthService.restore() knows only the user id; /api/auth/me fills in the email once the
         // server has accepted the stored token.
         case .signedIn(let user):
-            UITestHooks.firstBuilt("tabs")
+            UITestHooks.mark("tabs")
             return user.email.isEmpty ? "restored" : "signedIn"
         }
     }

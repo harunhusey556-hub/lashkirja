@@ -30,10 +30,10 @@ enum UITestHooks {
         return Int((Date().timeIntervalSince1970 - started) * 1000)
     }
 
-    /// "<moment>=<ms after launch>" for the first build of each launch moment (RootView's marker).
+    /// "<moment>=<ms after launch>" for the first time each launch moment came (RootView's marker).
     @MainActor private static var timeline: [String] = []
     @MainActor static var launchTimeline: String { timeline.isEmpty ? "launch phase" : timeline.joined(separator: " ") }
-    @MainActor static func firstBuilt(_ moment: String) {
+    @MainActor static func mark(_ moment: String) {
         guard launchPhase, !timeline.contains(where: { $0.hasPrefix(moment + "=") }) else { return }
         timeline.append("\(moment)=\(processAgeMs() ?? -1)")
     }
