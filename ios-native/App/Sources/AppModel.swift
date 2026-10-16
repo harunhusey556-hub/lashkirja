@@ -160,8 +160,12 @@ final class AppModel {
         phase = .signedIn(user)
         let started = session.current
         await auth.refreshIfDue()
-        // A refused refresh already signed out (with the notice): stop here.
-        guard await auth.currentToken() != nil else { return }
+        // A refused refresh already signed out (with the notice): stop here. The session check's
+        // 401 can land before the tabs were put up above, and is not undone by them.
+        guard await auth.currentToken() != nil else {
+            if case .signedIn = phase { phase = .signedOut(notice: "Istunto vanheni. Kirjaudu uudelleen.") }
+            return
+        }
         // After the refresh: the first look at the version goes out with a current token.
         startVersionPolling()
         prefetch()
