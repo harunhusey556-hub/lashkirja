@@ -4,7 +4,8 @@ import LashKirjaCore
 /// New invoice, or edit of a draft (`existing`).
 struct InvoiceFormView: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.dismiss) private var dismiss
+    /// The sheet's dismiss action, kept out of `body`'s dependencies (`SheetDismiss`).
+    @State private var dismiss = SheetDismiss()
     let existing: Invoice?
     let presetCustomerId: String?
     /// Called with the new invoice's id after a create, before the sheet closes: the presenter
@@ -65,7 +66,15 @@ struct InvoiceFormView: View {
         _sellerRegistered = State(initialValue: preview.sellerRegistered)
     }
 
+    #if DEBUG
+    /// Tests only (SheetDismissTests): how many times the body has run.
+    static var builds = 0
+    #endif
+
     var body: some View {
+        #if DEBUG
+        let _ = (Self.builds += 1)
+        #endif
         NavigationStack {
             ScrollViewReader { proxy in
                 Form {
@@ -182,6 +191,7 @@ struct InvoiceFormView: View {
             .task { await prepare() }
             .interactiveDismissDisabled(busy || dirty)
         }
+        .sheetDismiss(dismiss)
     }
 
     // MARK: Sections
