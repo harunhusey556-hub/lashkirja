@@ -24,14 +24,38 @@ class WalkTestCase: XCTestCase {
     override func setUp() {
         continueAfterFailure = true
         app = XCUIApplication()
-        app.launch()
-        let signingIn = app.secureTextFields.firstMatch.waitForExistence(timeout: 8)
-        if signingIn { signIn(app) }
-        _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
+        app.launchArguments.append("-LKLaunchPhase")
+        let signingIn = launchSignedIn()
         // On a fresh simulator the save offer comes seconds after the tab bar, over the first test's
         // taps (CI 2026-10-15: P0 A, P1 01, P2 A, Integration A). Only a sign-in brings it.
         if signingIn { probe { _ = savePasswordPrompt.waitForExistence(timeout: 10) } }
         sleep(1); dismissSystemPrompts()
+    }
+
+    /// RootView's marker (`-LKLaunchPhase` or `-LKUITest`): "launching", "restored" (a stored token
+    /// the server has not answered for yet), "signedOut" or "signedIn".
+    func launchPhase(_ phases: [String]) -> XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier == %@ AND value IN %@", "lk.launch-phase", phases)).firstMatch
+    }
+
+    /// Launches and signs in once the app has settled on a phase. A token stored by an earlier walk
+    /// against another demo DB paints the tabs first and drops to the sign-in screen only when the
+    /// server refuses it: past a fixed 8 s look for the password field (motion gate pr-run1, CI
+    /// 2026-10-15), after which the walk waited on a tab bar that never came. Returns whether it
+    /// signed in.
+    @discardableResult
+    func launchSignedIn() -> Bool {
+        app.launch()
+        let settled = launchPhase(["signedOut", "signedIn"])
+        // An app without the marker (or a restored session the server never answers): the
+        // sign-in screen is still taken if it is up.
+        let signingIn = settled.waitForExistence(timeout: 60)
+            ? settled.value as? String == "signedOut"
+            : app.secureTextFields.firstMatch.exists
+        if signingIn { signIn(app) }
+        _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
+        return signingIn
     }
 
     /// Runs a look for a system prompt (SpringBoard's "Open", the password manager's "Not Now").

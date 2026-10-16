@@ -9,6 +9,14 @@ enum UITestHooks {
     static let active = false
     #endif
 
+    /// RootView's launch-phase marker for the walks' launch helper (WalkTestCase.launchSignedIn).
+    /// Its own argument too: the acceptance walks run without `-LKUITest`'s capture fixture.
+    #if DEBUG
+    static let launchPhase = active || ProcessInfo.processInfo.arguments.contains("-LKLaunchPhase")
+    #else
+    static let launchPhase = false
+    #endif
+
     static let fixtureName = "testikuitti.jpg"
 
     /// A receipt-like photo for the capture flow, because the simulator has no camera and its photo

@@ -17,6 +17,8 @@ struct RaportitView: View {
     @State private var selectedMonth: String?
     /// Reloads after a change elsewhere (`dataVersion`) as well as on another year.
     @State private var gate = ReloadGate()
+    /// Asks each receipts drill's list once while the screen lives, not again on every reload (row 23).
+    @State private var drillWarmer = ReportDrillWarmer()
 
     struct ExportKind: Identifiable { let type: String; let title: String; var id: String { type } }
     private let exports = [
@@ -111,10 +113,12 @@ struct RaportitView: View {
         }
         // Once the figures are on screen, the Kuitit lists they open go into the cache: a drill
         // paints its rows with the push, not grey rows the answer replaces after the push has
-        // settled (motion audit raportit-drill-open).
-        .task(id: "\(year)|\(app.dataVersion)|\(state.value == nil)") {
-            guard let report = state.value else { return }
-            await warmDrills(report, year: String(year))
+        // settled (motion audit raportit-drill-open). Keyed on the lists themselves, not on
+        // `dataVersion`: a reload with the same figures asks nothing, other figures cancel the
+        // warm of the old ones.
+        .task(id: drillWarms) {
+            guard !drillWarms.isEmpty else { return }
+            await warmDrills(drillWarms)
         }
         .onChange(of: year) { _, _ in categoryLimit.reset() }
         .sheet(isPresented: $showPackage) {
@@ -291,28 +295,45 @@ struct RaportitView: View {
     }
 
     /// The receipts lists this screen links to, as `ReceiptsView` asks for them: the Tulot and
-    /// Menot figures, the data-quality rows and the categories shown. Fills the cache only; a
-    /// failure is the list's to show when it is opened.
-    private func warmDrills(_ report: ProfitLoss, year: String) async {
-        var drills = ReportDrill.incomeTargets(report.total, key: year)
-        drills += [ReportDrill.expenseTarget(report.total, key: year)].compactMap { $0 }
-        drills += ReportDrill.dataQuality(missingVat: report.total.missingVatCount, undated: report.undatedCount, year: year).map(\.drill)
+    /// Menot figures, the data-quality rows and the categories shown.
+    private var drillWarms: [ReportDrillWarm.Request] {
+        guard let report = state.value else { return [] }
+        let key = String(year)
+        var drills = ReportDrill.incomeTargets(report.total, key: key)
+        drills += [ReportDrill.expenseTarget(report.total, key: key)].compactMap { $0 }
+        drills += ReportDrill.dataQuality(missingVat: report.total.missingVatCount, undated: report.undatedCount, year: key).map(\.drill)
         if let kind = ReportCategoryKind.resolve(categoryChoice, in: report.total) {
             let rows = kind.rows(report.total)
-            drills += rows.prefix(categoryLimit.visible(rows.count)).map { ReportDrill.target(kind: kind, category: $0.category, year: year) }
+            drills += rows.prefix(categoryLimit.visible(rows.count)).map { ReportDrill.target(kind: kind, category: $0.category, year: key) }
         }
-        let queries = Set(drills.compactMap(\.receiptQuery))
-        let requests = Set(queries.map { DrillRequest(path: "/api/receipts", query: ReceiptListPaging.firstQuery($0)) }
-            + queries.map { DrillRequest(path: "/api/receipts/counts", query: $0.countsQuery()) })
-        let app = app
-        await withTaskGroup(of: Void.self) { group in
-            for request in requests {
-                group.addTask { let _: Ignored? = try? await app.cachedGet(request.path, query: request.query, persist: true) }
-            }
-        }
+        return ReportDrillWarm.requests(drills)
     }
 
-    private struct DrillRequest: Hashable { let path: String; let query: [String: String] }
+    /// Fills the cache only, for the lists it holds no answer for; a failure is the list's to show
+    /// when it is opened. Decoded as the list decodes them, so its first paint reuses the value.
+    /// Not kept on disk: the drills would push the main lists out of the launch snapshot.
+    private func warmDrills(_ requests: [ReportDrillWarm.Request]) async {
+        let app = app
+        await drillWarmer.warm(requests, isCached: { request in
+            switch request.kind {
+            case .list:
+                let list: ReceiptList? = await app.cachedValue(request.path, query: request.query)
+                return list != nil
+            case .counts:
+                let counts: ReceiptCounts? = await app.cachedValue(request.path, query: request.query)
+                return counts != nil
+            }
+        }, fetch: { request in
+            switch request.kind {
+            case .list:
+                let list: ReceiptList? = try? await app.cachedGet(request.path, query: request.query)
+                return list != nil
+            case .counts:
+                let counts: ReceiptCounts? = try? await app.cachedGet(request.path, query: request.query)
+                return counts != nil
+            }
+        })
+    }
 
     /// Through the app's cache: a year looked at before shows at once, then refreshes when stale.
     private func load() async {
