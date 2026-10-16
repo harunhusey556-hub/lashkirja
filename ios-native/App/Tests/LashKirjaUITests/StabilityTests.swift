@@ -165,8 +165,8 @@ final class StabilityTests: WalkTestCase {
 
     /// A revoked stored session reaches the sign-in screen within 1.5 s of launch (w49, row 27; it
     /// took 7–9 s). Three launches, each from a painted Koti whose session was then revoked on the
-    /// demo API. Asserted on the app's own clock (process start → sign-in screen, the marker's
-    /// label); XCUITest's `launch()` → password field, which adds its own launch handshake, is noted.
+    /// demo API. Asserted on the app's own clock (process start → sign-in screen first built, the
+    /// marker's label); XCUITest's `launch()` → password field, which adds its own launch handshake, is noted.
     func test10_RevokedSessionReachesSignInFast() {
         var appTimes: [Int] = []
         for round in 1...3 {
@@ -177,14 +177,20 @@ final class StabilityTests: WalkTestCase {
             XCTAssertTrue(revokeAppSessions(), "round \(round): could not revoke the app's session on the demo API")
             let started = Date()
             app.launch()
+            let launched = Int(Date().timeIntervalSince(started) * 1000)
             XCTAssertTrue(app.secureTextFields.firstMatch.waitForExistence(timeout: 30), "round \(round): no sign-in screen")
             let wall = Int(Date().timeIntervalSince(started) * 1000)
             let marker = launchPhase(["signedOut"])
-            // "signed out <ms> ms after launch"
-            let words = marker.exists ? marker.label.split(separator: " ") : []
-            let ms = words.count > 2 ? Int(words[2]) : nil
+            // "tabs=<ms> signedOut=<ms>": when each was first built, in ms after the process started.
+            let timeline = marker.waitForExistence(timeout: 5) ? marker.label : ""
+            var moments: [String: Int] = [:]
+            for entry in timeline.split(separator: " ") {
+                let pair = entry.split(separator: "=")
+                if pair.count == 2, let ms = Int(pair[1]) { moments[String(pair[0])] = ms }
+            }
+            let ms = moments["signedOut"].flatMap { $0 >= 0 ? $0 : nil }
             if let ms { appTimes.append(ms) }
-            note("MARK revoked-session round \(round): app \(ms.map(String.init) ?? "?") ms, launch() → password field \(wall) ms")
+            note("MARK revoked-session round \(round): app \(ms.map(String.init) ?? "?") ms (\(timeline)), launch() returned \(launched) ms, → password field \(wall) ms")
             // A calm way out: no load failure or offline notice on the way to the sign-in screen.
             let failure = app.staticTexts.matching(NSPredicate(format: "label IN %@", ["Lataus epäonnistui", "Palvelimeen ei saada yhteyttä", "Istunto on päättynyt"])).firstMatch
             XCTAssertFalse(failure.exists, "round \(round): an error showed on the way out: \(failure.label)")

@@ -21,12 +21,21 @@ enum UITestHooks {
     /// that include what happens before `main`.
     static func processAgeMs() -> Int? {
         var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
+        var size = MemoryLayout<kinfo_proc>.size
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
-        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return nil }
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
         let start = info.kp_proc.p_un.__p_starttime
+        guard start.tv_sec > 0 else { return nil }
         let started = Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
         return Int((Date().timeIntervalSince1970 - started) * 1000)
+    }
+
+    /// "<moment>=<ms after launch>" for the first build of each launch moment (RootView's marker).
+    @MainActor private static var timeline: [String] = []
+    @MainActor static var launchTimeline: String { timeline.isEmpty ? "launch phase" : timeline.joined(separator: " ") }
+    @MainActor static func firstBuilt(_ moment: String) {
+        guard launchPhase, !timeline.contains(where: { $0.hasPrefix(moment + "=") }) else { return }
+        timeline.append("\(moment)=\(processAgeMs() ?? -1)")
     }
 
     static let fixtureName = "testikuitti.jpg"
