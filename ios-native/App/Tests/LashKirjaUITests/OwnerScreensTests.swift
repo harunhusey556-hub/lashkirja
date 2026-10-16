@@ -297,4 +297,26 @@ final class OwnerScreensTests: WalkTestCase {
         XCTAssertTrue(!status.frame.isEmpty && app.windows.firstMatch.frame.contains(status.frame),
                       "the block is not on screen: \(status.frame)")
     }
+
+    // Row 6 (w34's note): "+" → "Uusi myyntilasku" flashed. The form appeared without its line and its
+    // bottom bar, and they came in one frame later from its load. It must open finished: the app
+    // records, in its first appearance, whether the line and the baseline were already there.
+    func testE_NewInvoiceFromAddOpensFinished() {
+        // As an owner would: a moment on Koti, while the warm after Koti fetches what the form opens on
+        // (NextPrefetch.afterKoti: customers and catalog).
+        sleep(6)
+        app.tabBars.buttons["Lisää"].firstMatch.tap()
+        let new = app.buttons["Uusi myyntilasku"].firstMatch
+        guard new.waitForExistence(timeout: 10) else { capture("e0-no-add-sheet"); XCTFail("Lisää did not open"); return }
+        new.tap()
+        let opening = app.descendants(matching: .any).matching(identifier: "invoice-form-opening").firstMatch
+        guard opening.waitForExistence(timeout: 15) else {
+            capture("e1-no-form"); tree("e1-no-form"); XCTFail("Uusi myyntilasku did not open the form"); return
+        }
+        capture("e1-new-invoice")
+        XCTAssertEqual(opening.label, "valmis", "the form's first frame had no line: it came in a frame later (the flash)")
+        XCTAssertTrue(app.navigationBars["Uusi lasku"].exists, "the sheet is not the new invoice")
+        XCTAssertTrue(app.buttons["Luo lasku"].firstMatch.isEnabled, "Luo lasku is still waiting for the form's load")
+        app.buttons["Peruuta"].firstMatch.tap()
+    }
 }

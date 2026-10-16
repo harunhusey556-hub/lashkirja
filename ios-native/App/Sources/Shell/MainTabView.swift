@@ -95,7 +95,7 @@ struct MainTabView: View {
             }
         }
         .sheet(isPresented: $showNewInvoice) {
-            InvoiceFormView(existing: nil, onCreated: { id in
+            InvoiceFormView(existing: nil, preview: app.invoiceFormPreview(), onCreated: { id in
                 app.pendingRoute = PendingRoute(tab: .myynti, route: .invoice(id))
             })
         }
@@ -106,7 +106,7 @@ struct MainTabView: View {
 
     @ViewBuilder private func root(_ item: AppTab) -> some View {
         switch item {
-        case .koti: KotiView()
+        case .koti: KotiView(app: app)
         // Built again when the tab is chosen (`tab` changes), so it carries the list as painted by then.
         case .myynti: MyyntiView(preview: app.salesPreview())
         case .kirjanpito: KirjanpitoView()
