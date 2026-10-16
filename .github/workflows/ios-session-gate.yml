@@ -50,6 +50,8 @@ jobs:
             sleep 1
           done
           curl -s -o /dev/null -w "GET /login -> %{http_code}\n" "http://127.0.0.1:3999/login"
+          # Every route warm before either variant: a cold route's first answer is not the app's time.
+          bash ../scripts/sim/warm-api.sh | tail -3
       - name: Simulator
         run: |
           DEST=$(xcrun simctl list devices available -j | python3 -c 'import sys,json
