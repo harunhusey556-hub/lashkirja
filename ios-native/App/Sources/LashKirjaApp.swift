@@ -18,6 +18,9 @@ struct LashKirjaApp: App {
 
     init() {
         Perf.beginLaunch()
+        // The first date formatter of a run costs ~90 ms: built here, beside the scene setup, it is
+        // ready before `start()` asks for this month's key (w47, launch → Koti).
+        Task.detached(priority: .userInitiated) { APIDate.warmUp() }
         let app = AppModel()
         _app = State(initialValue: app)
         // Before launch finishes: a notification tap that launched the app must find its delegate.
