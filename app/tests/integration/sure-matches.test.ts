@@ -1,9 +1,11 @@
+import { randomUUID } from "crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { GET as listSure, POST as linkSure } from "@/app/api/matching/sure/route";
 import { POST as undoSure } from "@/app/api/matching/sure/undo/route";
 import { PATCH as patchProfile } from "@/app/api/profile/route";
 import { prisma } from "@/lib/db";
 import { runMatching } from "@/lib/matching";
+import { SURE_MATCH_BATCH_KIND, SURE_MATCH_CHUNK } from "@/lib/sure-matches";
 import { createReceipt, createStatementWithTransactions, createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildRequest, readJson, sessionCookie, type JsonValue } from "./helpers/http";
 
@@ -72,7 +74,11 @@ describe("Kohdista varmat", () => {
 
     const undone = await undo(batch.batchId);
     expect(undone.status).toBe(200);
-    expect(await readJson(undone)).toEqual({ restored: 1 });
+    expect(await readJson(undone)).toEqual({
+      restored: 1,
+      undone: [{ transactionId: row.id, receiptId: receipt.id }],
+      skipped: [],
+    });
     expect(await prisma.transaction.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
       receiptId: null,
       matchStatus: "suggested",
@@ -80,7 +86,7 @@ describe("Kohdista varmat", () => {
       matchReasons: suggested.matchReasons,
     });
     expect((await get()).count).toBe(1);
-    expect(await readJson(await undo(batch.batchId))).toEqual({ restored: 0 });
+    expect(await readJson(await undo(batch.batchId))).toEqual({ restored: 0, undone: [], skipped: [] });
   });
 
   it("replays the same answer for the same Idempotency-Key", async () => {
@@ -130,6 +136,155 @@ describe("Kohdista varmat", () => {
     expect(await prisma.transaction.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({
       receiptId: receipt.id,
       matchStatus: "confirmed",
+    });
+  });
+});
+
+/** A Finnish viite (base + check digit, weights 7-3-1 from the right). */
+function viite(base: number): string {
+  const digits = String(base).split("").reverse();
+  const sum = digits.reduce((total, digit, index) => total + Number(digit) * [7, 3, 1][index % 3], 0);
+  return `${base}${(10 - (sum % 10)) % 10}`;
+}
+
+/**
+ * `count` certain pairs (viite + exact amount) waiting as suggestions, written
+ * straight to the database so a long backlog is quick to set up.
+ */
+async function seedSurePairs(count: number, owner = user) {
+  const receipts = await prisma.receipt.createManyAndReturn({
+    data: Array.from({ length: count }, (_, i) => ({
+      userId: owner.id,
+      type: "meno",
+      date: new Date("2026-01-10T00:00:00.000Z"),
+      totalAmountCents: 10_000 + i,
+      category: "tarvikkeet",
+      vendor: `Tukku ${i} Oy`,
+      vatDetails: JSON.stringify([{ rate: 25.5, amount: 20 }]),
+      reviewStatus: "approved",
+      reference: viite(1000 + i),
+      filePath: `/tmp/${randomUUID()}.pdf`,
+      fileName: "kuitti.pdf",
+    })),
+    select: { id: true, totalAmountCents: true, reference: true, vendor: true },
+  });
+  const statement = await prisma.statement.create({
+    data: {
+      userId: owner.id,
+      fileName: `tiliote-${randomUUID()}.csv`,
+      fileType: "csv",
+      filePath: `/tmp/${randomUUID()}.csv`,
+      checksum: randomUUID(),
+      periodMonth: "2026-01",
+    },
+  });
+  await prisma.transaction.createMany({
+    data: receipts.map((receipt) => ({
+      statementId: statement.id,
+      date: new Date("2026-01-12T00:00:00.000Z"),
+      amountCents: -(receipt.totalAmountCents ?? 0),
+      counterparty: receipt.vendor,
+      reference: receipt.reference,
+      type: "meno",
+      matchStatus: "suggested",
+      suggestedReceiptId: receipt.id,
+      matchScore: 90,
+      matchReasons: JSON.stringify(["reference", "competing"]),
+    })),
+  });
+  const rows = await prisma.transaction.findMany({ where: { statementId: statement.id }, select: { id: true, suggestedReceiptId: true } });
+  return receipts.map((receipt) => ({
+    receiptId: receipt.id,
+    transactionId: rows.find((row) => row.suggestedReceiptId === receipt.id)!.id,
+  }));
+}
+
+describe("Kohdista varmat: a long backlog and a guarded Kumoa (review 2026-10-16, rows 28-29)", () => {
+  it("links 500 pairs in chunks under one batch, a re-run links nothing more, and one Kumoa takes all back", async () => {
+    const pairs = await seedSurePairs(500);
+    expect((await get()).count).toBe(500);
+
+    const batch = await readJson(await post());
+    expect(batch.linked).toHaveLength(500);
+    expect(batch.batchId).toEqual(expect.any(String));
+    expect(await prisma.transaction.count({ where: { matchStatus: "confirmed" } })).toBe(500);
+    // More than one chunk was needed, and still one batch holds every pair.
+    expect(500).toBeGreaterThan(SURE_MATCH_CHUNK);
+    const batches = await prisma.automationEvent.findMany({ where: { userId: user.id, kind: SURE_MATCH_BATCH_KIND } });
+    expect(batches).toHaveLength(1);
+    expect(JSON.parse(batches[0].previousValue ?? "[]")).toHaveLength(500);
+
+    expect(await readJson(await post())).toEqual({ batchId: null, linked: [] });
+
+    const undone = await readJson(await undo(batch.batchId));
+    expect(undone.restored).toBe(500);
+    expect(undone.skipped).toEqual([]);
+    expect(await prisma.transaction.count({ where: { matchStatus: "suggested", receiptId: null } })).toBe(500);
+    const back = await prisma.receipt.findUniqueOrThrow({ where: { id: pairs[499].receiptId } });
+    expect(back.totalAmountCents).toBe(10_499);
+  }, 120_000);
+
+  it("Kumoa leaves a receipt the owner edited after the batch and reports it as skipped", async () => {
+    const [edited, untouched] = await seedSurePairs(2);
+    const batch = await readJson(await post());
+    expect(batch.linked).toHaveLength(2);
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await prisma.receipt.update({ where: { id: edited.receiptId }, data: { totalAmountCents: 77_00, vendor: "Korjattu Oy" } });
+
+    const result = await readJson(await undo(batch.batchId));
+    expect(result).toEqual({
+      restored: 1,
+      undone: [untouched],
+      skipped: [{ ...edited, reason: "edited" }],
+    });
+    expect(await prisma.transaction.findUniqueOrThrow({ where: { id: edited.transactionId } })).toMatchObject({
+      receiptId: edited.receiptId,
+      matchStatus: "confirmed",
+    });
+    expect((await prisma.receipt.findUniqueOrThrow({ where: { id: edited.receiptId } })).totalAmountCents).toBe(77_00);
+    expect(await prisma.transaction.findUniqueOrThrow({ where: { id: untouched.transactionId } })).toMatchObject({
+      receiptId: null,
+      matchStatus: "suggested",
+    });
+  });
+
+  it("Kumoa leaves pairs in a closed period alone, and a later Kumoa does not reach them either", async () => {
+    const [pair] = await seedSurePairs(1);
+    const batch = await readJson(await post());
+    await prisma.user.update({ where: { id: user.id }, data: { booksLockedThrough: "2026-01" } });
+
+    expect(await readJson(await undo(batch.batchId))).toEqual({
+      restored: 0,
+      undone: [],
+      skipped: [{ ...pair, reason: "locked" }],
+    });
+    expect((await prisma.transaction.findUniqueOrThrow({ where: { id: pair.transactionId } })).receiptId).toBe(pair.receiptId);
+
+    await prisma.user.update({ where: { id: user.id }, data: { booksLockedThrough: null } });
+    expect(await readJson(await undo(batch.batchId))).toEqual({ restored: 0, undone: [], skipped: [] });
+  });
+
+  it("two Kumoa at the same moment restore the batch once", async () => {
+    await seedSurePairs(3);
+    const batch = await readJson(await post());
+    const [first, second] = await Promise.all([undo(batch.batchId), undo(batch.batchId)]);
+    expect([first.status, second.status]).toEqual([200, 200]);
+    const restored = [(await readJson(first)).restored, (await readJson(second)).restored].sort();
+    expect(restored).toEqual([0, 3]);
+    expect(
+      await prisma.automationEvent.count({ where: { userId: user.id, kind: "sure_match_undo", resourceId: batch.batchId } })
+    ).toBe(1);
+  });
+
+  it("a pair unlinked by hand after the batch is reported as changed, not restored", async () => {
+    const [pair] = await seedSurePairs(1);
+    const batch = await readJson(await post());
+    await prisma.transaction.update({ where: { id: pair.transactionId }, data: { receiptId: null, matchStatus: "unmatched" } });
+    expect(await readJson(await undo(batch.batchId))).toEqual({
+      restored: 0,
+      undone: [],
+      skipped: [{ ...pair, reason: "changed" }],
     });
   });
 });

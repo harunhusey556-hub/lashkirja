@@ -14,6 +14,7 @@ import { prisma } from "./db";
 import { NotFoundError } from "./api-errors";
 import { centsToEuros } from "./money";
 import { confirmMatch, scorePair, shouldAutoConfirm } from "./matching";
+import { getLockedThrough, isDateLocked } from "./period-lock";
 
 /** AutomationEvent kind of one "Kohdista varmat" batch; previousValue keeps what undo restores. */
 export const SURE_MATCH_BATCH_KIND = "sure_match_batch";
@@ -50,10 +51,15 @@ function storedCodes(raw: string | null): string[] {
   }
 }
 
-/** Suggested pairs of approved, unlinked receipts that are sure right now, re-scored. */
-export async function listSureMatches(userId: string, db: Db = prisma): Promise<SurePair[]> {
+/** Suggested pairs of approved, unlinked receipts that are sure right now, re-scored; optionally only these bank rows. */
+export async function listSureMatches(
+  userId: string,
+  db: Db = prisma,
+  onlyTransactionIds: string[] | null = null
+): Promise<SurePair[]> {
   const rows = await db.transaction.findMany({
     where: {
+      ...(onlyTransactionIds ? { id: { in: onlyTransactionIds } } : {}),
       statement: { userId },
       matchStatus: "suggested",
       receiptId: null,
@@ -119,6 +125,8 @@ interface BatchEntry {
   totalAmountCents: number | null;
   originalAmountCents: number | null;
   vatDetails: string | null;
+  /** The receipt's updatedAt right after the batch linked it; a later one is the owner's edit. Absent in older batches. */
+  linkedAt?: string;
 }
 
 export interface SureMatchBatch {
@@ -127,104 +135,176 @@ export interface SureMatchBatch {
   linked: SurePair[];
 }
 
+/** Pairs per database transaction: a long backlog must not outrun one interactive transaction. */
+export const SURE_MATCH_CHUNK = 50;
+const CHUNK_TIMEOUT_MS = 30_000;
+
 /**
- * Links every sure pair in one database transaction: all of them or none. What
- * each pair looked like before is kept with the batch, so "Kumoa" can put the
- * suggestions (and a foreign receipt's amounts) back exactly.
+ * Links every sure pair, SURE_MATCH_CHUNK pairs per database transaction: each
+ * chunk is all or nothing, and all chunks share one batch, so one "Kumoa" takes
+ * back everything the run linked. What each pair looked like before is kept
+ * with the batch, so "Kumoa" can put the suggestions (and a foreign receipt's
+ * amounts) back exactly. Each chunk scores its pairs again, so a pair linked or
+ * changed meanwhile (or by an interrupted earlier run) is not linked twice.
  */
-export async function linkSureMatches(userId: string, db: Prisma.TransactionClient | null = null): Promise<SureMatchBatch> {
-  const run = async (client: Prisma.TransactionClient): Promise<SureMatchBatch> => {
-    const pairs = await listSureMatches(userId, client);
-    if (pairs.length === 0) return { batchId: null, linked: [] };
-    const entries: BatchEntry[] = [];
-    for (const pair of pairs) {
-      const [row, receipt] = await Promise.all([
-        client.transaction.findUniqueOrThrow({
-          where: { id: pair.transactionId },
-          select: { matchScore: true, matchReasons: true },
-        }),
-        client.receipt.findUniqueOrThrow({
-          where: { id: pair.receiptId },
-          select: { totalAmountCents: true, originalAmountCents: true, vatDetails: true },
-        }),
-      ]);
-      entries.push({ ...pair, ...row, ...receipt });
-      await confirmMatch(userId, pair.transactionId, pair.receiptId, true, client);
-    }
-    const event = await client.automationEvent.create({
-      data: {
-        userId,
-        kind: SURE_MATCH_BATCH_KIND,
-        resourceType: "batch",
-        resourceId: pairs[0].transactionId,
-        previousValue: JSON.stringify(entries),
-        newValue: String(pairs.length),
-        reason: "Kohdista varmat",
+export async function linkSureMatches(userId: string): Promise<SureMatchBatch> {
+  const candidates = await listSureMatches(userId);
+  let batchId: string | null = null;
+  const linked: SurePair[] = [];
+  for (let start = 0; start < candidates.length; start += SURE_MATCH_CHUNK) {
+    const ids = candidates.slice(start, start + SURE_MATCH_CHUNK).map((pair) => pair.transactionId);
+    const chunk: { batchId: string | null; pairs: SurePair[] } = await prisma.$transaction(
+      async (client) => {
+        const pairs = await listSureMatches(userId, client, ids);
+        if (pairs.length === 0) return { batchId, pairs };
+        const entries: BatchEntry[] = [];
+        for (const pair of pairs) {
+          const [row, before] = await Promise.all([
+            client.transaction.findUniqueOrThrow({
+              where: { id: pair.transactionId },
+              select: { matchScore: true, matchReasons: true },
+            }),
+            client.receipt.findUniqueOrThrow({
+              where: { id: pair.receiptId },
+              select: { totalAmountCents: true, originalAmountCents: true, vatDetails: true },
+            }),
+          ]);
+          await confirmMatch(userId, pair.transactionId, pair.receiptId, true, client);
+          const after = await client.receipt.findUniqueOrThrow({
+            where: { id: pair.receiptId },
+            select: { updatedAt: true },
+          });
+          entries.push({ ...pair, ...row, ...before, linkedAt: after.updatedAt.toISOString() });
+        }
+        if (!batchId) {
+          const event = await client.automationEvent.create({
+            data: {
+              userId,
+              kind: SURE_MATCH_BATCH_KIND,
+              resourceType: "batch",
+              resourceId: pairs[0].transactionId,
+              previousValue: JSON.stringify(entries),
+              newValue: String(entries.length),
+              reason: "Kohdista varmat",
+            },
+            select: { id: true },
+          });
+          return { batchId: event.id, pairs };
+        }
+        const batch = await client.automationEvent.findUniqueOrThrow({
+          where: { id: batchId },
+          select: { previousValue: true },
+        });
+        const all = [...(JSON.parse(batch.previousValue ?? "[]") as BatchEntry[]), ...entries];
+        await client.automationEvent.update({
+          where: { id: batchId },
+          data: { previousValue: JSON.stringify(all), newValue: String(all.length) },
+        });
+        return { batchId, pairs };
       },
-      select: { id: true },
-    });
-    return { batchId: event.id, linked: pairs };
-  };
-  if (db) return run(db);
-  return prisma.$transaction(run);
+      { timeout: CHUNK_TIMEOUT_MS }
+    );
+    batchId = chunk.batchId;
+    linked.push(...chunk.pairs);
+  }
+  return { batchId, linked };
+}
+
+export type SureUndoSkipReason = "edited" | "locked" | "changed";
+
+export interface SureMatchUndo {
+  /** How many pairs went back to their suggestion (`undone.length`). */
+  restored: number;
+  undone: Array<{ transactionId: string; receiptId: string }>;
+  /** Left as they are: the link was changed, the receipt was edited after the batch, or its period is closed. */
+  skipped: Array<{ transactionId: string; receiptId: string; reason: SureUndoSkipReason }>;
 }
 
 /**
  * "Kumoa" for one batch: every pair still linked as the batch left it goes back
- * to its suggestion. A pair the owner changed since is left alone. Repeating the
- * undo restores nothing more.
+ * to its suggestion. A pair the owner changed since (the link, or the receipt
+ * edited after the batch) or one in a closed period is left alone and reported
+ * as skipped. The undo marker is checked and written in the same transaction,
+ * so a second "Kumoa" restores nothing more.
  */
-export async function undoSureMatchBatch(userId: string, batchId: string): Promise<{ restored: number }> {
-  return prisma.$transaction(async (db) => {
-    const batch = await db.automationEvent.findFirst({
-      where: { id: batchId, userId, kind: SURE_MATCH_BATCH_KIND },
-      select: { id: true, previousValue: true },
-    });
-    if (!batch) throw new NotFoundError("Kohdistuserää ei löytynyt.");
-    const undone = await db.automationEvent.findFirst({
-      where: { userId, kind: SURE_MATCH_UNDO_KIND, resourceId: batch.id },
-      select: { id: true },
-    });
-    if (undone) return { restored: 0 };
-
-    const entries = JSON.parse(batch.previousValue ?? "[]") as BatchEntry[];
-    let restored = 0;
-    for (const entry of entries) {
-      const row = await db.transaction.findFirst({
-        where: { id: entry.transactionId, statement: { userId }, receiptId: entry.receiptId, matchStatus: "confirmed" },
+export async function undoSureMatchBatch(userId: string, batchId: string): Promise<SureMatchUndo> {
+  return prisma.$transaction(
+    async (db) => {
+      const batch = await db.automationEvent.findFirst({
+        where: { id: batchId, userId, kind: SURE_MATCH_BATCH_KIND },
+        select: { id: true, previousValue: true, createdAt: true },
+      });
+      if (!batch) throw new NotFoundError("Kohdistuserää ei löytynyt.");
+      const result: SureMatchUndo = { restored: 0, undone: [], skipped: [] };
+      const marker = await db.automationEvent.findFirst({
+        where: { userId, kind: SURE_MATCH_UNDO_KIND, resourceId: batch.id },
         select: { id: true },
       });
-      if (!row) continue;
-      await db.transaction.update({
-        where: { id: row.id },
+      if (marker) return result;
+      // The marker is written before any pair is touched: in SQLite that write
+      // takes the database lock, so a second "Kumoa" at the same moment waits
+      // for this one to commit and then finds the marker.
+      const undoEvent = await db.automationEvent.create({
         data: {
-          receiptId: null,
-          matchStatus: "suggested",
-          suggestedReceiptId: entry.receiptId,
-          matchScore: entry.matchScore,
-          matchReasons: entry.matchReasons,
+          userId,
+          kind: SURE_MATCH_UNDO_KIND,
+          resourceType: "batch",
+          resourceId: batch.id,
+          newValue: "0",
+          reason: "Kumoa: Kohdista varmat",
         },
+        select: { id: true },
       });
-      await db.receipt.update({
-        where: { id: entry.receiptId },
-        data: {
-          totalAmountCents: entry.totalAmountCents,
-          originalAmountCents: entry.originalAmountCents,
-          vatDetails: entry.vatDetails,
-        },
+      const lockedThrough = await getLockedThrough(userId, db);
+
+      const entries = JSON.parse(batch.previousValue ?? "[]") as BatchEntry[];
+      for (const entry of entries) {
+        const pair = { transactionId: entry.transactionId, receiptId: entry.receiptId };
+        const row = await db.transaction.findFirst({
+          where: { id: entry.transactionId, statement: { userId }, receiptId: entry.receiptId, matchStatus: "confirmed" },
+          select: { id: true, date: true, receipt: { select: { date: true, updatedAt: true } } },
+        });
+        if (!row?.receipt) {
+          result.skipped.push({ ...pair, reason: "changed" });
+          continue;
+        }
+        const linkedAt = entry.linkedAt ? new Date(entry.linkedAt) : batch.createdAt;
+        if (row.receipt.updatedAt.getTime() > linkedAt.getTime()) {
+          result.skipped.push({ ...pair, reason: "edited" });
+          continue;
+        }
+        // Same boundary as unlinking by hand: a closed month's books stay as filed.
+        if (isDateLocked(lockedThrough, row.receipt.date) || isDateLocked(lockedThrough, row.date)) {
+          result.skipped.push({ ...pair, reason: "locked" });
+          continue;
+        }
+        await db.transaction.update({
+          where: { id: row.id },
+          data: {
+            receiptId: null,
+            matchStatus: "suggested",
+            suggestedReceiptId: entry.receiptId,
+            matchScore: entry.matchScore,
+            matchReasons: entry.matchReasons,
+          },
+        });
+        await db.receipt.update({
+          where: { id: entry.receiptId },
+          data: {
+            totalAmountCents: entry.totalAmountCents,
+            originalAmountCents: entry.originalAmountCents,
+            vatDetails: entry.vatDetails,
+          },
+        });
+        result.undone.push(pair);
+      }
+      result.restored = result.undone.length;
+      await db.automationEvent.update({
+        where: { id: undoEvent.id },
+        data: { newValue: String(result.restored), previousValue: JSON.stringify(result.skipped) },
       });
-      restored += 1;
-    }
-    await db.automationEvent.create({
-      data: {
-        userId,
-        kind: SURE_MATCH_UNDO_KIND,
-        resourceType: "batch",
-        resourceId: batch.id,
-        newValue: String(restored),
-        reason: "Kumoa: Kohdista varmat",
-      },
-    });
-    return { restored };
-  });
+      return result;
+    },
+    { timeout: CHUNK_TIMEOUT_MS }
+  );
 }
