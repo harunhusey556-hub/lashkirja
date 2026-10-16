@@ -20,11 +20,14 @@ final class OwnerScreensTests: WalkTestCase {
         }
         app = XCUIApplication()
         app.launchArguments.append("-LKUITest")
-        app.launch()
-        if app.secureTextFields.firstMatch.waitForExistence(timeout: 8) { signIn(app) }
+        // Not a fixed look for the password field: the first launch on a fresh simulator showed it
+        // after 8 s, so the sign-in was skipped and testA met an untouched form (run 38856286498).
+        let signingIn = launchSignedIn()
         // The passkey offer after a password sign-in.
         if app.buttons["Ei nyt"].waitForExistence(timeout: 5) { app.buttons["Ei nyt"].tap() }
         _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
+        // As WalkTestCase.setUp: the save offer can come seconds after the tab bar, over testA's taps.
+        if signingIn { probe { _ = savePasswordPrompt.waitForExistence(timeout: 10) } }
         sleep(1); dismissSystemPrompts()
         XCTAssertTrue(app.tabBars.firstMatch.exists, "not signed in: is the demo API up on the API_BASE_URL the app was built with?")
     }
@@ -218,8 +221,12 @@ final class OwnerScreensTests: WalkTestCase {
         guard back.exists else { XCTFail("the form has no Takaisin"); return }
         back.tap()
         sleep(1)
+        let discard = app.buttons["Hylkää muutokset"]
+        // A tap while the form is still settling (its picture grows in after c2) can be lost on a
+        // loaded host: run 38868746775 shot the form still up, nothing asked. Tapped again only then.
+        if !discard.exists && !waitGone(vendor, timeout: 4) && !discard.exists && back.exists { back.tap(); sleep(1) }
         // A reading the form changed asks first; nothing was typed, but the answer is the same.
-        if app.buttons["Hylkää muutokset"].exists { app.buttons["Hylkää muutokset"].tap(); sleep(1) }
+        if discard.exists { discard.tap(); sleep(1) }
         let queued = app.staticTexts["testikuitti.jpg"].firstMatch
         XCTAssertTrue(queued.waitForExistence(timeout: 5), "Takaisin lost the queue's row")
         let reopen = app.buttons["Käytä lomakkeessa"].firstMatch

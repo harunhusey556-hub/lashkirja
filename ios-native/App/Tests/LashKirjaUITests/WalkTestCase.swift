@@ -50,10 +50,26 @@ class WalkTestCase: XCTestCase {
         let settled = launchPhase(["signedOut", "signedIn"])
         // An app without the marker (or a restored session the server never answers): the
         // sign-in screen is still taken if it is up.
-        let signingIn = settled.waitForExistence(timeout: 60)
+        // A runner whose accessibility service stalls fails the look outright with a snapshot
+        // timeout while the app has long painted (CI 2026-10-16: OwnerScreens A on a just-booted
+        // simulator, 58 s to set up the automation session; P1 02 behind a 53 s terminate). Only
+        // that timeout is let through, and the look is taken again within the same minute.
+        let deadline = Date().addingTimeInterval(60)
+        var seen = false
+        repeat {
+            probe { seen = settled.waitForExistence(timeout: max(1, deadline.timeIntervalSinceNow)) }
+            if !seen { sleep(3) }
+        } while !seen && Date() < deadline
+        let signingIn = seen
             ? settled.value as? String == "signedOut"
             : app.secureTextFields.firstMatch.exists
         if signingIn { signIn(app) }
+        // On a just-booted simulator typeText can garble the password (CI 2026-10-16: P1 01, seven
+        // characters the server refused while the email was right). Typed again once, on the same screen.
+        if signingIn, !app.tabBars.firstMatch.waitForExistence(timeout: 30), launchPhase(["signedOut"]).exists {
+            type(app.secureTextFields.firstMatch, String(repeating: XCUIKeyboardKey.delete.rawValue, count: 12) + "demo123")
+            app.buttons["Kirjaudu sisään"].firstMatch.tap()
+        }
         _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         return signingIn
     }
