@@ -70,8 +70,11 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/before" HEAD
           git -C "$RUNNER_TEMP/before" checkout "$BASE" -- ios-native/App/Sources/AppModel.swift \
             ios-native/LashKirjaCore/Sources/LashKirjaCore/Net/APIClient.swift
-          for variant in after before; do
+          # A fresh simulator's first walk hangs on its first UI snapshots (WalkTestCase.probe): a
+          # throwaway warm-up pass first, so neither measured variant is the first on this simulator.
+          for variant in warmup before after; do
             if [ "$variant" = before ]; then src="$RUNNER_TEMP/before"; else src="$GITHUB_WORKSPACE"; fi
+            dd=$([ "$variant" = before ] && echo before || echo after)
             out="$GITHUB_WORKSPACE/build-session/$variant"
             mkdir -p "$out"
             # Every variant starts installed fresh and signed out.
@@ -80,7 +83,7 @@ jobs:
             (cd "$src/ios-native/App" && xcodegen generate)
             (cd "$src/ios-native/App" && set -o pipefail && TEST_RUNNER_LK_SHOT_DIR="$out" xcodebuild test \
               -project LashKirja.xcodeproj -scheme LashKirja-UITests -destination "id=$SIM_UDID" \
-              -derivedDataPath "$RUNNER_TEMP/dd-$variant" -only-testing:LashKirjaUITests/StabilityTests/test10_RevokedSessionReachesSignInFast \
+              -derivedDataPath "$RUNNER_TEMP/dd-$dd" -only-testing:LashKirjaUITests/StabilityTests/test10_RevokedSessionReachesSignInFast \
               -resultBundlePath "$out/result.xcresult" \
               CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
               API_BASE_URL=http://127.0.0.1:3999 | xcbeautify --renderer github-actions) \
@@ -96,6 +99,5 @@ jobs:
         with:
           name: revoked-session
           path: |
-            build-session/*/notes.txt
-            build-session/*/status
+            build-session
             app/api-server.log
