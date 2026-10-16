@@ -50,6 +50,12 @@ jobs:
             sleep 1
           done
           curl -s -o /dev/null -w "GET /login -> %{http_code}\n" "http://127.0.0.1:3999/login"
+          # A refused token on a fresh production build (`next start`, as after a deploy): the first
+          # answer shows what a cold server adds to the launch's verdict, before the warm-up below.
+          for i in 1 2 3; do
+            curl -s -o /dev/null -w "GET /api/auth/me (refused token) #$i -> %{http_code} %{time_total}s\n" \
+              -H "authorization: Bearer not-a-session" "http://127.0.0.1:3999/api/auth/me"
+          done
           # Every route warm before either variant: a cold route's first answer is not the app's time.
           bash ../scripts/sim/warm-api.sh | tail -3
       - name: Simulator
