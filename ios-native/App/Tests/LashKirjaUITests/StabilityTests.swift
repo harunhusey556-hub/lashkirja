@@ -163,6 +163,42 @@ final class StabilityTests: WalkTestCase {
         XCTAssertTrue(launchPhase(["signedIn"]).waitForExistence(timeout: 10), "the new session was not accepted")
     }
 
+    /// A revoked stored session reaches the sign-in screen within 1.5 s of launch (w49, row 27; it
+    /// took 7–9 s). Three launches, each from a painted Koti whose session was then revoked on the
+    /// demo API. Asserted on the app's own clock (process start → sign-in screen, the marker's
+    /// label); XCUITest's `launch()` → password field, which adds its own launch handshake, is noted.
+    func test10_RevokedSessionReachesSignInFast() {
+        var appTimes: [Int] = []
+        for round in 1...3 {
+            // Koti painted and kept on disk: the launch below paints from the cache, as on the phone.
+            XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 30), "round \(round): no tab bar before the revoke")
+            sleep(2)
+            app.terminate()
+            XCTAssertTrue(revokeAppSessions(), "round \(round): could not revoke the app's session on the demo API")
+            let started = Date()
+            app.launch()
+            XCTAssertTrue(app.secureTextFields.firstMatch.waitForExistence(timeout: 30), "round \(round): no sign-in screen")
+            let wall = Int(Date().timeIntervalSince(started) * 1000)
+            let marker = launchPhase(["signedOut"])
+            // "signed out <ms> ms after launch"
+            let words = marker.exists ? marker.label.split(separator: " ") : []
+            let ms = words.count > 2 ? Int(words[2]) : nil
+            if let ms { appTimes.append(ms) }
+            note("MARK revoked-session round \(round): app \(ms.map(String.init) ?? "?") ms, launch() → password field \(wall) ms")
+            // A calm way out: no load failure or offline notice on the way to the sign-in screen.
+            let failure = app.staticTexts.matching(NSPredicate(format: "label IN %@", ["Lataus epäonnistui", "Palvelimeen ei saada yhteyttä", "Istunto on päättynyt"])).firstMatch
+            XCTAssertFalse(failure.exists, "round \(round): an error showed on the way out: \(failure.label)")
+            signIn(app)
+            XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 30), "round \(round): no tab bar after signing in again")
+            probe { _ = savePasswordPrompt.waitForExistence(timeout: 10) }
+            sleep(1); dismissSystemPrompts()
+        }
+        let sorted = appTimes.sorted()
+        note("MARK revoked-session app ms \(appTimes) median \(sorted.isEmpty ? -1 : sorted[sorted.count / 2])")
+        XCTAssertEqual(appTimes.count, 3, "the launch marker did not say when the sign-in screen came")
+        if !sorted.isEmpty { XCTAssertLessThanOrEqual(sorted[sorted.count / 2], 1500, "revoked session → sign-in screen: \(appTimes) ms") }
+    }
+
     /// Revokes the demo user's app sessions on the demo API, so the token in the simulator's
     /// Keychain is refused at the next launch. Test values from app/scripts/demo-seed.ts; only ever
     /// against the throwaway local server (the runner shares the Mac's loopback).

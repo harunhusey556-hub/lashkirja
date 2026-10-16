@@ -149,6 +149,11 @@ final class AppModel {
             phase = .signedOut(notice: nil)
             return
         }
+        // The stored token goes to the server first and alone: every other request (Koti's own
+        // load, the prefetch, the version poll) waits for its answer, at most `SessionCheck.hold`.
+        // Behind the launch's burst of loads a revoked session reached the sign-in screen only
+        // 7–9 s later (CI, w45); offline or a slow server leaves the owner signed in.
+        let check = await api.checkSession("/api/auth/me", hold: SessionCheck.hold)
         // A lock set up before its owner was recorded belongs to this session's account.
         AppLock.shared.adoptOwnerIfUnknown(user.userId)
         AppLock.shared.keepOnly(for: user.userId)
@@ -162,8 +167,8 @@ final class AppModel {
         prefetch()
         // Only for the account it was asked for: a sign-out (and maybe another sign-in) can
         // happen while it loads.
-        if let me: MeResponse = try? await api.get("/api/auth/me"), session.isCurrent(started),
-           case .signedIn(let current) = phase, current.userId == me.user.userId {
+        if case .accepted(let body) = await check.value, let me = try? JSONDecoder().decode(MeResponse.self, from: body),
+           session.isCurrent(started), case .signedIn(let current) = phase, current.userId == me.user.userId {
             phase = .signedIn(me.user)
         }
     }
@@ -193,6 +198,7 @@ final class AppModel {
         // Receipt photos waiting for a connection belong to this owner: they leave with them.
         OfflineReceiptQueueModel.shared.clearForSignOut()
         endLocalSession()
+        await api.endSessionRequests()
         await auth.endSession()
         phase = .signedOut(notice: nil)
         let auth = self.auth
@@ -206,6 +212,9 @@ final class AppModel {
         guard await auth.handleUnauthorized(sentToken: sentToken) else { return }
         OfflineReceiptQueueModel.shared.detach()
         endLocalSession()
+        // A 401 seen outside `api` (the assistant's stream, a receipt upload): its loads still out
+        // end here too, quietly, instead of each answering 401 behind the sign-in screen.
+        await api.endSessionRequests()
         phase = .signedOut(notice: "Istunto vanheni. Kirjaudu uudelleen.")
     }
 

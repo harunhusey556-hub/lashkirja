@@ -24,9 +24,12 @@ struct RootView: View {
 
 /// UI tests only: the phase the launch is in, so a walk waits for what the app decided instead of
 /// a fixed window. A token stored by an earlier walk paints the tabs first and drops to the sign-in
-/// screen only once the server refuses it, 7–9 s later on a CI runner (motion gate, 2026-10-15).
+/// screen once the server refuses it (7–9 s later on a CI runner before w49's session check).
+/// The label carries how long after the process started the sign-in screen came, for the
+/// revoked-session walk (StabilityTests.test10).
 private struct LaunchPhaseMarker: View {
     let phase: AppModel.Phase
+    @State private var signedOutAfter: Int?
 
     var body: some View {
         Color.clear
@@ -34,8 +37,11 @@ private struct LaunchPhaseMarker: View {
             .allowsHitTesting(false)
             .accessibilityElement()
             .accessibilityIdentifier("lk.launch-phase")
-            .accessibilityLabel("launch phase")
+            .accessibilityLabel(signedOutAfter.map { "signed out \($0) ms after launch" } ?? "launch phase")
             .accessibilityValue(value)
+            .onChange(of: phase, initial: true) { _, phase in
+                if case .signedOut = phase, signedOutAfter == nil { signedOutAfter = UITestHooks.processAgeMs() }
+            }
     }
 
     private var value: String {
