@@ -23,6 +23,15 @@ public enum APIDate {
         return use(f)
     }
 
+    /// Builds every formatter before a screen asks for one. The first DateFormatter of a run loads
+    /// the calendar and zone data (about 90 ms in the simulator), and a launch paid that on the main
+    /// thread in `MonthKey.current()` before Koti could appear (w47). The app calls this off the
+    /// main thread as it starts.
+    public static func warmUp() {
+        for format in ["yyyy-MM-dd", "yyyy-MM", "d.M.yyyy", "d.M.yyyy 'klo' H.mm"] { with(format) { _ in () } }
+        _ = instant("2026-01-01T00:00:00.000Z")
+    }
+
     public static func day(_ s: String) -> Date? {
         with("yyyy-MM-dd") { f in
             guard let date = f.date(from: s), f.string(from: date) == s else { return nil }

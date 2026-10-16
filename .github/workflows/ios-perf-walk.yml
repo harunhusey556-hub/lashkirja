@@ -15,7 +15,7 @@ on:
         required: false
         default: "4d1f218"
       instrumentation:
-        description: "Signpost-only commits laid on the base (space-separated)"
+        description: "Signpost-only commits laid on the base (space-separated; 'none' for a base that has them)"
         required: false
         default: "c84046c"
 
@@ -77,7 +77,7 @@ jobs:
           set -u
           git worktree add --detach "$RUNNER_TEMP/before" "$BASE"
           # Signpost hooks added after the base: the same intervals in both variants, no fixes.
-          for c in $INSTRUMENTATION; do git -C "$RUNNER_TEMP/before" cherry-pick --no-commit "$c"; done
+          for c in $INSTRUMENTATION; do [ "$c" = none ] && continue; git -C "$RUNNER_TEMP/before" cherry-pick --no-commit "$c"; done
           # The base gets this branch's walk, so both variants are driven the same way.
           cp ios-native/App/Tests/LashKirjaUITests/PerfWalkTests.swift "$RUNNER_TEMP/before/ios-native/App/Tests/LashKirjaUITests/"
           for variant in before after; do
