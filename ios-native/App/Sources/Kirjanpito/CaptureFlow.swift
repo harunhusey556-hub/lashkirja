@@ -448,7 +448,7 @@ struct CaptureFlow: View {
                 if row.canSwitchKind, let kind = row.kind {
                     kindSwitch(row, kind: kind)
                 } else {
-                    Text(row.status.label).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
+                    statusLabel(row)
                 }
             }
             // One line under the name from the start, its words swapped by a fade: "Jonossa" gaining
@@ -479,6 +479,28 @@ struct CaptureFlow: View {
         // A row's own lines change as its file goes through: the row eases to its new height.
         .motion(.snappy, value: row)
     }
+
+    /// The steps a file goes through on its way share one slot, each word faded in over the others:
+    /// as one Text swapping its words, "Lähetetään" → "Käsitellään" moved the word's left edge 3–9 pt
+    /// after the screen had settled (motion audit bad-capture-upload, shift_probe, run 39067168826).
+    @ViewBuilder private func statusLabel(_ row: UploadQueueRow) -> some View {
+        if Self.onTheWay.contains(row.status) {
+            ZStack(alignment: .trailing) {
+                ForEach(Self.onTheWay, id: \.rawValue) { status in
+                    Text(status.label)
+                        .opacity(status == row.status ? 1 : 0)
+                        .accessibilityHidden(status != row.status)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(Theme.ink2)
+        } else {
+            Text(row.status.label).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
+        }
+    }
+
+    /// Short words only: the slot is as wide as the longest of them.
+    private static let onTheWay: [UploadQueueStatus] = [.pending, .uploading, .processing, .saving]
 
     /// "Kuitti ⇄ Ostolasku": the decided kind, and the tap that changes it. While the server works the
     /// switch only fades; nothing is swapped in or out of the row.
