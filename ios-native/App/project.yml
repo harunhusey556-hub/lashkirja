@@ -30,7 +30,7 @@ settings:
 packages:
   LashKirjaCore:
     path: ../LashKirjaCore
-  # Stripe Terminal (Tap to Pay on iPhone), App target only; Core stays plain Foundation.
+  # Stripe Terminal (Tap to Pay on iPhone), LashKirjaStripe only; Core stays plain Foundation.
   StripeTerminal:
     url: https://github.com/stripe/stripe-terminal-ios-spm
     from: 5.8.0
@@ -38,7 +38,7 @@ targets:
   LashKirja:
     type: application
     platform: iOS
-    sources: [Sources, Resources]
+    sources: [Sources, Resources, Shared]
     info:
       path: Config/Info.plist
       properties:
@@ -108,6 +108,25 @@ targets:
           LK_TAP_TO_PAY_ENTITLEMENT: "YES"
     dependencies:
       - package: LashKirjaCore
+      # Embedded, not linked: StripeTerminalLoader loads it (and the SDK) on the first card
+      # payment, so the SDK's ~3,300 Objective-C classes are not set up before `main` (w56).
+      - target: LashKirjaStripe
+        link: false
+        embed: true
+  # Stripe Terminal behind StripeTerminalDriving (Shared/), loaded at run time by the app.
+  LashKirjaStripe:
+    type: framework
+    platform: iOS
+    sources: [StripeDriver, Shared]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fi.tiyouba.lashkirja.stripe
+        GENERATE_INFOPLIST_FILE: "YES"
+        SKIP_INSTALL: "YES"
+      configs:
+        Release-UITest:
+          ONLY_ACTIVE_ARCH: "YES"
+    dependencies:
       - package: StripeTerminal
         product: StripeTerminal
   LashKirjaAppTests:
