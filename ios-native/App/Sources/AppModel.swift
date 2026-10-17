@@ -126,7 +126,7 @@ final class AppModel {
         launchCheck = Task.detached { [weak self] in
             // Before the check goes out: its 401 signs out like any other, and its answer reaches
             // the debugging trail, the offline banner and the failure report.
-            await Self.connect(api, auth: auth, observer: observer, to: self)
+            await AppModel.connect(api, auth: auth, observer: observer, to: self)
             guard let user = await auth.restore() else { return nil }
             // The stored token goes first and alone: every other request (Koti's own load, the
             // prefetch, the version poll) waits for its answer, at most `SessionCheck.hold`.
