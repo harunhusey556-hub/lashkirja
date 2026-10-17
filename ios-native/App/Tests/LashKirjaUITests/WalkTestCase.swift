@@ -159,6 +159,20 @@ class WalkTestCase: XCTestCase {
     func goOffline() { FileManager.default.createFile(atPath: "\(shotDir)/offline.flag", contents: nil) }
     func goOnline() { try? FileManager.default.removeItem(atPath: "\(shotDir)/offline.flag") }
     func tab(_ name: String) { app.tabBars.buttons[name].firstMatch.tap(); taps += 1; sleep(2) }
+    /// Taps a tab until it reports itself selected. The first tap after sign-in can land while the
+    /// passkey offer or a system prompt is still leaving, and is then lost (CI round 1: still on Koti).
+    func selectTab(_ name: String) -> Bool {
+        let button = app.tabBars.buttons[name].firstMatch
+        guard button.waitForExistence(timeout: 10) else { return false }
+        for _ in 0..<3 where !button.isSelected {
+            dismissSystemPrompts()
+            button.tap(); taps += 1
+            // A fresh expectation each round: XCTest allows one wait per expectation.
+            let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: button)
+            _ = XCTWaiter().wait(for: [selected], timeout: 5)
+        }
+        return button.isSelected
+    }
     /// One measured task from a fresh launch: records "TAPS <name>: n taps, m scrolls" and a screenshot.
     func measure(_ name: String, reached: Bool) {
         note("\(reached ? "TAPS" : "FAIL-NAV") \(name): \(taps) taps, \(scrolls) scrolls")

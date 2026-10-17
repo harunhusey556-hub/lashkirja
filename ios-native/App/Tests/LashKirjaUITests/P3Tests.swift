@@ -37,10 +37,15 @@ final class P3Tests: WalkTestCase {
         let message = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Kopio' OR label CONTAINS 'yhteys' OR label CONTAINS 'Yhteys'")).firstMatch
         check("P3 failed copy explains what happened (\(message.exists ? message.label : "no message"))", message.exists)
         goOnline(); sleep(10)
-        app.terminate(); app.launch(); _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
-        tab("Myynti")
+        app.terminate()
+        // The launch every other test takes: it waits for the phase the app settles on. A bare
+        // relaunch tapped Myynti 2.7 s after Koti painted; the tap was lost (no Myynti paint in the
+        // app log, Koti's rows still in the tree), so the chip was never read (run 38993875695).
+        launchSignedIn()
+        check("P3 Myynti selected after the relaunch", selectTab("Myynti"))
         let after = drafts.waitForExistence(timeout: 10) ? drafts.label : "?"
         note("INFO drafts before: \(before), after offline copy: \(after)")
+        check("P3 drafts chip read after the relaunch", after != "?")
         check("P3 offline copy created no draft", before == after)
     }
 }
