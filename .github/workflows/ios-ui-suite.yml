@@ -42,6 +42,9 @@ jobs:
           xcrun simctl bootstatus "$DEST" -b
       # A throwaway demo API on this runner's loopback, as docs/quality/SIMULATOR.md does by hand: a
       # fresh SQLite file, the demo seed, no cloud AI, no mail. Nothing here reaches a real server.
+      # OwnerScreensTests reads its uploads through scripts/sim/reader-stub.py on loopback instead
+      # (a dummy key): only a reading that says "lasku" files an ostolasku, and testC checks the
+      # toast that follows. The other classes keep the empty reading they were written against.
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -52,7 +55,9 @@ jobs:
         env:
           DATABASE_URL: "file:${{ github.workspace }}/app/ui-demo.db"
           SESSION_SECRET: "ci-only-secret-not-used-anywhere-real-32plus"
-          CLOUD_AI_ENABLED: "false"
+          CLOUD_AI_ENABLED: ${{ matrix.class == 'OwnerScreensTests' && 'true' || 'false' }}
+          LLM_API_KEY: ${{ matrix.class == 'OwnerScreensTests' && 'ci-reader-stub-not-a-key' || '' }}
+          LLM_BASE_URL: ${{ matrix.class == 'OwnerScreensTests' && 'http://127.0.0.1:3997/v1' || '' }}
           ENABLEBANKING_ENABLED: "false"
           MAIL_TRANSPORT: "json"
         run: |
@@ -100,6 +105,9 @@ jobs:
           done < "$RUNNER_TEMP/receipts.tsv" | sqlite3 "$DB"
           echo "Receipts with a picture: $(sqlite3 "$DB" "SELECT count(*) FROM Receipt WHERE filePath LIKE '%.jpg'")"
           npm run build
+          if [ -n "$LLM_BASE_URL" ]; then
+            nohup python3 ../scripts/sim/reader-stub.py 3997 > reader-stub.log 2>&1 &
+          fi
           nohup npx next start -H 127.0.0.1 -p 3999 > api-server.log 2>&1 &
           for i in $(seq 1 60); do
             if curl -s -o /dev/null "http://127.0.0.1:3999/login"; then break; fi
@@ -134,7 +142,7 @@ jobs:
           P=$!
           trap 'kill $W $P 2>/dev/null' EXIT
           # Ad-hoc signed: an unsigned simulator build cannot use the Keychain, so sign-in would fail.
-          TEST_RUNNER_LK_SHOT_DIR="$SH" xcodebuild test -project LashKirja.xcodeproj -scheme LashKirja-UITests \
+          TEST_RUNNER_LK_SHOT_DIR="$SH" TEST_RUNNER_LK_READER_STUB="${{ matrix.class == 'OwnerScreensTests' && '1' || '0' }}" xcodebuild test -project LashKirja.xcodeproj -scheme LashKirja-UITests \
             -destination "id=$SIM_UDID" -derivedDataPath build \
             -only-testing:LashKirjaUITests/${{ matrix.class }} -resultBundlePath UITestResults.xcresult \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
@@ -199,7 +207,7 @@ jobs:
               echo "::warning::xcresulttool export attachments failed; the .xcresult bundle is uploaded as is"
             fi
           fi
-          cp ../../app/api-server.log . 2>/dev/null || true
+          cp ../../app/api-server.log ../../app/reader-stub.log . 2>/dev/null || true
           # The bundle holds thousands of files, some with names upload-artifact refuses: one zip.
           if [ -d UITestResults.xcresult ]; then ditto -c -k --keepParent UITestResults.xcresult UITestResults.xcresult.zip; fi
           echo "Attachments: $(ls ui-attachments/named | wc -l | tr -d ' '), host shots: $(ls ui-shots 2>/dev/null | wc -l | tr -d ' ')"
@@ -219,6 +227,7 @@ jobs:
             ios-native/App/ui-shots
             ios-native/App/api-server.log
             ios-native/App/api-proxy.log
+            ios-native/App/reader-stub.log
           retention-days: 14
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4

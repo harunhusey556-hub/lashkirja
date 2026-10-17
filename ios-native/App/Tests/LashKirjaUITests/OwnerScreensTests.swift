@@ -187,7 +187,8 @@ final class OwnerScreensTests: WalkTestCase {
         fixture.tap()
         capture("c1-uploading")
 
-        // Uploaded, read by the server (no cloud AI in CI: an empty reading), then the form opens by itself.
+        // Uploaded, read by the server (an empty reading, or CI's reader stub: a bill with no date),
+        // then the form opens by itself.
         let preview = app.descendants(matching: .any).matching(identifier: "captured-file-preview").firstMatch
         if !preview.waitForExistence(timeout: 90) {
             let use = app.buttons["Käytä lomakkeessa"].firstMatch
@@ -255,10 +256,14 @@ final class OwnerScreensTests: WalkTestCase {
             let window = app.windows.firstMatch.frame
             XCTAssertTrue(toast.label.contains("lasku"), "toast: \(toast.label)")
             XCTAssertGreaterThan(toast.frame.minY, window.height * 0.6, "the toast is at \(toast.frame.minY): not at the bottom")
+        } else if ProcessInfo.processInfo.environment["LK_READER_STUB"] == "1" {
+            // The UI suite's OwnerScreensTests job reads uploads through scripts/sim/reader-stub.py,
+            // which calls every file a "lasku": this save had to file an ostolasku and say so.
+            XCTFail("the bill was saved but no ostolasku toast came (outcome: \(outcome))")
         } else if (testRun?.totalFailureCount ?? 0) == 0 {
             // The server files a bill as an ostolasku only when the reading says "lasku", and only the
-            // cloud AI reads the document type; CI never calls it, so this run saved a plain receipt.
-            throw XCTSkip("(e) ostolasku toast: the demo API cannot read a bill without cloud AI; (b) and (c) passed, the save closed the screen")
+            // cloud AI reads the document type; without it (or the CI stub) a plain receipt is saved.
+            throw XCTSkip("(e) ostolasku toast: this demo API has no reader for a bill (CI runs scripts/sim/reader-stub.py); (b) and (c) passed, the save closed the screen")
         }
     }
 
