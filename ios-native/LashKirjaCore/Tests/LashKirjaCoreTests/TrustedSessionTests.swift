@@ -143,6 +143,45 @@ private func make(_ responses: [HTTPResponse], signer: FakeSigner) async -> (Aut
     #expect(await signer.removed == 1)
 }
 
+private let skewedClock = #"{"error":"Laitteen kello on väärässä.","code":"DEVICE_CLOCK","serverTime":1790010800}"#
+
+@Test func aRefreshSignedOnASkewedClockIsSignedAgainOnTheServersTimeAndTheOffsetIsKept() async throws {
+    let signer = FakeSigner()
+    let (auth, store, transport) = await make([json(skewedClock, 409), json(tokenBody("T2")), json(tokenBody("T3"))], signer: signer)
+    _ = await signer.newPublicKey()
+    await store.save(StoredToken(token: "T1", expiresAt: now.addingTimeInterval(20 * day), issuedAt: now.addingTimeInterval(-8 * day), userId: "u1"))
+    await auth.refreshIfDue()
+    #expect(transport.requests.count == 2)
+    #expect(transport.requests[0].value(forHTTPHeaderField: "X-LK-Device-Time") == String(Int(now.timeIntervalSince1970)))
+    #expect(transport.requests[1].value(forHTTPHeaderField: "X-LK-Device-Time") == "1790010800")
+    #expect(transport.requests[1].value(forHTTPHeaderField: "X-LK-Device-Signature") == "SIG-T1")
+    #expect(await store.load()?.token == "T2")
+
+    // The next refresh is signed on the server's time straight away.
+    await store.save(StoredToken(token: "T2", expiresAt: now.addingTimeInterval(20 * day), issuedAt: now.addingTimeInterval(-8 * day), userId: "u1"))
+    await auth.refreshIfDue()
+    #expect(transport.requests.count == 3)
+    #expect(transport.requests[2].value(forHTTPHeaderField: "X-LK-Device-Time") == "1790010800")
+    #expect(await store.load()?.token == "T3")
+}
+
+@Test func aSkewedClockRefreshThatFailsAgainKeepsTheSession() async {
+    let signer = FakeSigner()
+    let (auth, store, transport) = await make([json(skewedClock, 409), json(skewedClock, 409)], signer: signer)
+    _ = await signer.newPublicKey()
+    await store.save(StoredToken(token: "T1", expiresAt: now.addingTimeInterval(20 * day), issuedAt: now.addingTimeInterval(-8 * day), userId: "u1"))
+    await auth.refreshIfDue()
+    #expect(transport.requests.count == 2)
+    #expect(await store.load()?.token == "T1")
+    #expect(await auth.currentToken() == "T1")
+}
+
+@Test func onlyADeviceClockRefusalCarriesAServerTime() {
+    #expect(APIErrorDecoder.decode(status: 409, data: Data(skewedClock.utf8)).serverTime == Date(timeIntervalSince1970: 1_790_010_800))
+    let other = #"{"error":"Sama kuitti","code":"DUPLICATE_DOCUMENT","serverTime":1790010800}"#
+    #expect(APIErrorDecoder.decode(status: 409, data: Data(other.utf8)).serverTime == nil)
+}
+
 @Test func aRefusedSignedRefreshSignsOut() async {
     let signer = FakeSigner()
     let (auth, store, _) = await make([json(#"{"error":{"code":"UNAUTHORIZED","message":"Kirjautuminen vaaditaan","reason":"device"}}"#, 401)], signer: signer)

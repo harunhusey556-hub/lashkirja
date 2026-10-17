@@ -337,16 +337,16 @@ final class AppModel {
     }
 
     /// The time since `last` as a usage-gap bucket in the debugging trail (anonymous on the server),
-    /// then the clock moves on: the app is in use now.
+    /// then the clock moves on: the app is in use now, unless it opened locked.
     private func noteUsageGap(since last: Date?, trigger: String) {
         let now = Date()
         if let last, now > last { EventLog.shared.log(UsageGap.event(now.timeIntervalSince(last), trigger: trigger)) }
-        UsageClock.touch(now)
+        UsageClock.touchUnlessLocked(now)
     }
 
     func background() {
         backgroundedAt = Date()
-        UsageClock.touch()
+        UsageClock.touchUnlessLocked()
         // Nothing to keep fresh while the app is not on screen; `foreground()` asks at once.
         stopVersionPolling()
         EventLog.shared.log(.lifecycle("background"))
@@ -834,4 +834,11 @@ enum UsageClock {
     private static let key = "usage.lastActiveAt"
     static var lastActive: Date? { UserDefaults.standard.object(forKey: key) as? Date }
     static func touch(_ now: Date = Date()) { UserDefaults.standard.set(now, forKey: key) }
+    /// A locked app is not in use: a relaunch over the idle lock (force-quit, or iOS ending the
+    /// backgrounded app) must still find the time it was last open, or it opens unlocked. The
+    /// clock moves on again when the lock lifts (`AppLock`).
+    @MainActor static func touchUnlessLocked(_ now: Date = Date()) {
+        guard !AppLock.shared.isLocked else { return }
+        touch(now)
+    }
 }

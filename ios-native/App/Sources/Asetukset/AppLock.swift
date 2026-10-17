@@ -61,14 +61,21 @@ final class AppLock {
     }
 
     /// A sign-in proved the owner already: an idle lock (not the PIN's) is lifted.
-    func endIdleLock() { if !isEnabled { isLocked = false } }
+    func endIdleLock() { if !isEnabled { lift() } }
 
     /// The idle lock's way in: Face ID, falling back to the device passcode (no PIN of the app's).
     func unlockWithDeviceOwner() async {
         let context = LAContext()
         if (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Avaa LashKirja")) == true {
-            isLocked = false
+            lift()
         }
+    }
+
+    /// The owner proved it is them: the app is in use from now, so the idle time counts from here
+    /// (`UsageClock` stands still while the lock is up).
+    private func lift() {
+        isLocked = false
+        UsageClock.touch()
     }
 
     /// The account the lock was set up for (a user id, not a secret).
@@ -131,7 +138,7 @@ final class AppLock {
             return false
         }
         resetBackoff()
-        isLocked = false
+        lift()
         return true
     }
 
@@ -140,7 +147,7 @@ final class AppLock {
         let context = LAContext()
         if (try? await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: "Avaa LashKirja")) == true {
             resetBackoff()
-            isLocked = false
+            lift()
         }
     }
 

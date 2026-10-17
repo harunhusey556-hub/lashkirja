@@ -17,6 +17,9 @@ public actor AuthService: TokenProvider {
     private var epoch = LoadGeneration()
     /// The refresh on the wire: a second caller waits for it instead of sending another.
     private var refreshing: Task<Void, Never>?
+    /// The server's clock minus this phone's, learnt from a refresh the server refused as signed on
+    /// a skewed clock (a time set by hand): later refreshes are signed on the server's time.
+    private var serverClockOffset: TimeInterval = 0
 
     public init(store: TokenStore, signer: DeviceKeySigner? = nil, now: @escaping @Sendable () -> Date = { Date() }) {
         self.store = store
@@ -130,12 +133,13 @@ public actor AuthService: TokenProvider {
         guard let client, let stored = await store.load(), epoch.isCurrent(session) else { return }
         guard now().timeIntervalSince(stored.issuedAt) > Self.refreshAfter else { return }
         do {
-            // Signed for the token it goes out with: a session bound to this device's key is
-            // renewed only with it (a legacy session's server takes the headers' absence).
-            let signer = self.signer, clock = self.now
-            let response: TokenResponse = try await client.send("POST", "/api/auth/token/refresh") { token in
-                guard let signer, let token else { return [:] }
-                return await signer.refreshHeaders(token: token, now: clock())
+            let response: TokenResponse
+            do {
+                response = try await signedRefresh(client)
+            } catch let error as LKError where error.serverTime != nil {
+                // Signed right but on a clock more than 5 minutes off: once more on the server's time.
+                serverClockOffset = error.serverTime!.timeIntervalSince(now())
+                response = try await signedRefresh(client)
             }
             // Signed out (or in as someone else) meanwhile: this token belongs to a session that
             // has ended. The server issues it for the same session row, so the sign-out's revoke
@@ -150,6 +154,16 @@ public actor AuthService: TokenProvider {
             await store.clear()
         } catch {
             // Offline or a gateway error: keep the token, try again later.
+        }
+    }
+
+    /// Signed for the token it goes out with: a session bound to this device's key is renewed only
+    /// with it (a legacy session's server takes the headers' absence).
+    private func signedRefresh(_ client: APIClient) async throws -> TokenResponse {
+        let signer = self.signer, clock = self.now, offset = serverClockOffset
+        return try await client.send("POST", "/api/auth/token/refresh") { token in
+            guard let signer, let token else { return [:] }
+            return await signer.refreshHeaders(token: token, now: clock().addingTimeInterval(offset))
         }
     }
 
