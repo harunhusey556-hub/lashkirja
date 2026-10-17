@@ -111,7 +111,7 @@ struct MainTabView: View {
         // Built again when the tab is chosen (`tab` changes), so it carries the list as painted by then.
         case .myynti: MyyntiView(preview: app.salesPreview())
         case .kirjanpito: KirjanpitoView()
-        case .raportit: RaportitView()
+        case .raportit: RaportitView(preview: app.raportitPreview())
         default: PlaceholderScreen(title: item.title)
         }
     }
