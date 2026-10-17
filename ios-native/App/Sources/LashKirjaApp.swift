@@ -22,6 +22,8 @@ struct LashKirjaApp: App {
         Perf.beginLaunch()
         let app = AppModel()
         _app = State(initialValue: app)
+        // Before UIKit builds the first frame: a revoked session's 401 comes back meanwhile.
+        app.checkStoredSession()
         // Before launch finishes: a notification tap that launched the app must find its delegate.
         AppNotifications.shared.activate(app: app)
         // MetricKit hands over the previous run's crash and hang reports shortly after launch.

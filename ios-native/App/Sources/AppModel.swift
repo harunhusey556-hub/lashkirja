@@ -107,6 +107,28 @@ final class AppModel {
     /// Now, for a problem report or a trip to the background; otherwise every 30 s.
     func flushEvents() async { await eventUploader.flush() }
 
+    /// The launch's session check (`checkStoredSession`): the restored user and the server's verdict.
+    @ObservationIgnored private var launchCheck: Task<(AuthUser, Task<SessionCheck, Never>)?, Never>?
+
+    /// From the App's init: the stored token goes to the server off the main thread while UIKit
+    /// still builds the first frame, so a refusal can be known by the time `start()` runs (on CI
+    /// the first frame comes 0.5–0.9 s after init, w52).
+    func checkStoredSession() {
+        let auth = self.auth
+        let api = self.api
+        launchCheck = Task.detached { [weak self] in
+            await auth.bind(api)
+            // Before the check goes out: its 401 signs out like any other.
+            await api.setOnUnauthorized { [weak self] sentToken in await self?.sessionExpired(sentToken: sentToken) }
+            guard let user = await auth.restore() else { return nil }
+            // The stored token goes first and alone: every other request (Koti's own load, the
+            // prefetch, the version poll) waits for its answer, at most `SessionCheck.hold`.
+            // Behind the launch's burst of loads a revoked session reached the sign-in screen only
+            // 7–9 s later (CI, w45); offline or a slow server leaves the owner signed in.
+            return (user, await api.checkSession("/api/auth/me", hold: SessionCheck.hold))
+        }
+    }
+
     func start() async {
         await auth.bind(api)
         // Every write the server accepts marks what the screens show as out of date, so a list
@@ -144,16 +166,14 @@ final class AppModel {
         let auth = self.auth
         // The revoke of an earlier sign-out is a network call: it must not hold up opening the app.
         Task { await auth.revokePending() }
-        guard let user = await auth.restore() else {
+        if launchCheck == nil { checkStoredSession() }
+        let launch = await launchCheck?.value
+        launchCheck = nil
+        guard case let (user, check)? = launch else {
             Perf.dropLaunch()
             phase = .signedOut(notice: nil)
             return
         }
-        // The stored token goes to the server first and alone: every other request (Koti's own
-        // load, the prefetch, the version poll) waits for its answer, at most `SessionCheck.hold`.
-        // Behind the launch's burst of loads a revoked session reached the sign-in screen only
-        // 7–9 s later (CI, w45); offline or a slow server leaves the owner signed in.
-        let check = await api.checkSession("/api/auth/me", hold: SessionCheck.hold)
         // The calm launch look stays until the verdict, at most the hold (owner, 2026-10-16): a
         // refused token goes straight to the sign-in screen and the tabs are never built. Building
         // them first kept the main thread busy and the 401 waited behind it (~1–6 s on CI, w52).
@@ -228,10 +248,12 @@ final class AppModel {
         UITestHooks.mark("cleared")
         OfflineReceiptQueueModel.shared.detach()
         endLocalSession()
+        UITestHooks.mark("ended")
+        // Before the hop below: the sign-in screen does not wait on the client actor.
+        phase = .signedOut(notice: "Istunto vanheni. Kirjaudu uudelleen.")
         // A 401 seen outside `api` (the assistant's stream, a receipt upload): its loads still out
         // end here too, quietly, instead of each answering 401 behind the sign-in screen.
         await api.endSessionRequests()
-        phase = .signedOut(notice: "Istunto vanheni. Kirjaudu uudelleen.")
     }
 
     /// A 401 to a request made outside `api` (the assistant's stream and receipt upload): it ends

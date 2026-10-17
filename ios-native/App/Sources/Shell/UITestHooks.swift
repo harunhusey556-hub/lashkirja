@@ -36,6 +36,8 @@ enum UITestHooks {
     @MainActor static func mark(_ moment: String) {
         guard launchPhase, !timeline.contains(where: { $0.hasPrefix(moment + "=") }) else { return }
         timeline.append("\(moment)=\(processAgeMs() ?? -1)")
+        // For a launch outside XCTest (`simctl launch --console-pty`, ios-session-gate.yml).
+        print("LKMARK \(timeline.last ?? "")")
     }
 
     static let fixtureName = "testikuitti.jpg"

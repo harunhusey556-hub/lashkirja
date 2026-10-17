@@ -76,6 +76,8 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/before" HEAD
           git -C "$RUNNER_TEMP/before" checkout "$BASE" -- ios-native/App/Sources/AppModel.swift \
             ios-native/LashKirjaCore/Sources/LashKirjaCore/Net/APIClient.swift
+          # The App's init starts the fix's early session check; the launch timeline marks stay.
+          sed -i '' '/app.checkStoredSession()/d' "$RUNNER_TEMP/before/ios-native/App/Sources/LashKirjaApp.swift"
           # A fresh simulator's first walk hangs on its first UI snapshots (WalkTestCase.probe): a
           # throwaway warm-up pass first, so neither measured variant is the first on this simulator.
           for variant in warmup before after; do
@@ -96,6 +98,24 @@ jobs:
               && echo "PASS" > "$out/status" || echo "FAIL" > "$out/status"
             echo "== $variant: $(cat "$out/status")"
             grep MARK "$out/notes.txt" || true
+          done
+          # The fixed build again, launched by `simctl launch` instead of XCTest: how much of the time
+          # before `main` is the test harness's. Launch 1 has a revoked session, 2–3 none (signed out).
+          B=http://127.0.0.1:3999
+          tok=$(curl -s -X POST "$B/api/auth/token" -H 'content-type: application/json' \
+            -d '{"email":"demo@lashkirja.fi","password":"demo123"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+          for id in $(curl -s -H "authorization: Bearer $tok" "$B/api/auth/sessions" | python3 -c 'import json,sys
+          for s in json.load(sys.stdin)["sessions"]:
+              if s.get("label") == "iPhone · LashKirja-sovellus" and not s.get("current"): print(s["id"])'); do
+            curl -s -o /dev/null -X POST -H "authorization: Bearer $tok" -H 'content-type: application/json' \
+              -d "{\"id\":\"$id\"}" "$B/api/auth/sessions"
+          done
+          for i in 1 2 3; do
+            xcrun simctl terminate "$SIM_UDID" fi.tiyouba.lashkirja || true
+            sleep 2
+            xcrun simctl launch --console-pty "$SIM_UDID" fi.tiyouba.lashkirja -LKLaunchPhase > "build-session/plain-$i.txt" 2>&1 &
+            pid=$!; sleep 8; kill $pid 2>/dev/null || true
+            echo "MARK plain launch $i: $(grep -o 'LKMARK [a-zA-Z]*=[0-9-]*' "build-session/plain-$i.txt" | cut -d' ' -f2 | tr '\n' ' ')" | tee -a build-session/plain.txt
           done
           { for v in before after; do echo "## $v ($(cat build-session/$v/status))"; echo '```'; grep MARK "build-session/$v/notes.txt" || true; echo '```'; done; } >> "$GITHUB_STEP_SUMMARY"
           # The job's verdict is the fixed variant's.
