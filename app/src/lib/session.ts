@@ -47,7 +47,7 @@ export type AuthenticatedSession = IronSession<SessionData> & {
 };
 
 /** Why a request is not signed in; the app tells "sign in again" from "retry" by it. */
-export type AuthFailureReason = "invalid" | "revoked" | "idle" | "absolute" | "rotated";
+export type AuthFailureReason = "invalid" | "revoked" | "idle" | "absolute" | "reuse";
 
 export type AuthResult =
   | { session: AuthenticatedSession; reason?: undefined }
@@ -56,9 +56,6 @@ export type AuthResult =
       reason: AuthFailureReason;
       sessionId?: string;
       userId?: string;
-      /** Bearer only: the presented and the committed generation, for the reuse log. */
-      credentialGeneration?: number;
-      tokenGeneration?: number;
     };
 
 type SessionRow = {
@@ -80,11 +77,20 @@ const ROW_SELECT = {
 } as const;
 
 /** Revokes a row the server itself ended; a concurrent sign-out keeps its own (null) reason. */
-async function endSession(id: string, reason: "idle" | "absolute") {
+async function endSession(id: string, reason: "idle" | "absolute" | "reuse") {
   await prisma.authSession.updateMany({
     where: { id, revokedAt: null },
     data: { revokedAt: new Date(), revokedReason: reason },
   });
+}
+
+/** A token generation that was already replaced is back in play: someone holds a copy. Kill the whole family. */
+export async function revokeForReuse(sessionId: string, userId: string, presented: number, committed: number) {
+  await endSession(sessionId, "reuse");
+  // Ids and generations only, never the token.
+  console.warn(
+    `[auth] refresh token reuse: session=${sessionId} user=${userId} presentedGen=${presented} currentGen=${committed}`
+  );
 }
 
 type GenerationVerdict = "ok" | "commit" | "rotated" | "invalid";
@@ -158,7 +164,8 @@ async function expiredReason(row: SessionRow): Promise<"idle" | "absolute" | nul
  * row-backed session (bearer, and a cookie that names a session row) the row
  * decides: revoked or missing, idle for SESSION_IDLE_MS, older than
  * SESSION_ABSOLUTE_MS. A bearer token must also carry a usable generation
- * (settleGeneration).
+ * (settleGeneration). One the row has moved past revokes the session on any
+ * route, not only on a refresh: whoever refreshed first may be the copy.
  */
 export async function authenticate(req?: NextRequest): Promise<AuthResult> {
   const requestHeaders = req ? req.headers : await headers();
@@ -188,16 +195,11 @@ export async function authenticate(req?: NextRequest): Promise<AuthResult> {
 
     const gen = credential.data.gen ?? 0;
     const settled = await settleGeneration(row, gen);
-    if (settled.verdict !== "ok") {
-      return {
-        session: null,
-        reason: settled.verdict,
-        sessionId,
-        userId,
-        credentialGeneration: gen,
-        tokenGeneration: settled.tokenGeneration,
-      };
+    if (settled.verdict === "rotated") {
+      await revokeForReuse(sessionId, userId, gen, settled.tokenGeneration);
+      return { session: null, reason: "reuse", sessionId, userId };
     }
+    if (settled.verdict !== "ok") return { session: null, reason: settled.verdict, sessionId, userId };
     await touch(row);
     return {
       session: {

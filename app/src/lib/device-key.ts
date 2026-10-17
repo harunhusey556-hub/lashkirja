@@ -36,20 +36,24 @@ export function refreshMessage(time: string, bearerToken: string): string {
   return `lk-refresh-v1\n${time}\n${createHash("sha256").update(bearerToken).digest("hex")}`;
 }
 
-/** True when `signature` (base64 DER ECDSA P-256/SHA-256) covers this refresh and `time` is fresh. */
-export function verifyRefreshSignature(
+/**
+ * "ok" when `signature` (base64 DER ECDSA P-256/SHA-256) covers this refresh and `time` is fresh.
+ * "skew" when the device did sign it but its clock is off: the app can retry on the server's time,
+ * so a phone set by hand is not signed out. "bad" for anything else.
+ */
+export function checkRefreshSignature(
   deviceKey: string,
   bearerToken: string,
   time: string | null,
   signature: string | null,
   nowMs = Date.now()
-): boolean {
-  if (!time || !signature || !/^\d{1,12}$/.test(time)) return false;
-  if (Math.abs(Math.floor(nowMs / 1000) - Number(time)) > DEVICE_SIGNATURE_SKEW_S) return false;
+): "ok" | "skew" | "bad" {
+  if (!time || !signature || !/^\d{1,12}$/.test(time)) return "bad";
   const key = publicKeyFrom(deviceKey);
-  if (!key) return false;
+  if (!key) return "bad";
+  let signed: boolean;
   try {
-    return verify(
+    signed = verify(
       "sha256",
       Buffer.from(refreshMessage(time, bearerToken), "utf8"),
       { key, dsaEncoding: "der" },
@@ -57,6 +61,19 @@ export function verifyRefreshSignature(
     );
   } catch {
     // A malformed signature is a failed one.
-    return false;
+    return "bad";
   }
+  if (!signed) return "bad";
+  return Math.abs(Math.floor(nowMs / 1000) - Number(time)) > DEVICE_SIGNATURE_SKEW_S ? "skew" : "ok";
+}
+
+/** True when `signature` covers this refresh and `time` is fresh (checkRefreshSignature is "ok"). */
+export function verifyRefreshSignature(
+  deviceKey: string,
+  bearerToken: string,
+  time: string | null,
+  signature: string | null,
+  nowMs = Date.now()
+): boolean {
+  return checkRefreshSignature(deviceKey, bearerToken, time, signature, nowMs) === "ok";
 }

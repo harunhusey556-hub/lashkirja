@@ -297,13 +297,26 @@ export async function expireSession(): Promise<void> {
   appNavigate(hadSession ? "/login?error=expired" : "/login", { replace: true });
 }
 
+let refreshInFlight: Promise<void> | null = null;
+
 /**
  * Proactively refreshes a token older than TOKEN_REFRESH_AFTER_SECONDS.
  * The server does not enforce this timing -- an unexpired token still works
  * on its own -- so a network error here just keeps the old token; only a
  * definitive 401 (the session row itself is gone) ends it.
+ *
+ * Callers at the same time share one request: the resume triggers fire
+ * together, and a sibling refresh that lands after the first one's new token
+ * is already in use carries a generation the server has moved past.
  */
-export async function refreshTokenIfDue(now: number = Date.now()): Promise<void> {
+export function refreshTokenIfDue(now: number = Date.now()): Promise<void> {
+  refreshInFlight ??= refreshOnce(now).finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+async function refreshOnce(now: number): Promise<void> {
   if (!memoryAuth) return;
   const issuedAt = new Date(memoryAuth.issuedAt).getTime();
   if (!Number.isFinite(issuedAt) || now - issuedAt <= TOKEN_REFRESH_AFTER_SECONDS * 1000) return;

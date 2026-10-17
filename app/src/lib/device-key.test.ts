@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { acceptDeviceKey, refreshMessage, verifyRefreshSignature } from "./device-key";
+import { acceptDeviceKey, checkRefreshSignature, refreshMessage, verifyRefreshSignature } from "./device-key";
 
 function newDevice() {
   const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
@@ -61,6 +61,17 @@ describe("verifyRefreshSignature", () => {
     expect(verifyRefreshSignature(key, "tok2", nowSeconds, signFor("tok", nowSeconds), NOW)).toBe(false);
     expect(verifyRefreshSignature(key, "tok", nowSeconds, newDevice().signFor("tok", nowSeconds), NOW)).toBe(false);
     expect(verifyRefreshSignature(key, "tok", nowSeconds, "%%%", NOW)).toBe(false);
+  });
+
+  it("says skew only for the device's own signature on a clock more than 300 s off", () => {
+    const { key, signFor } = newDevice();
+    for (const time of [String(NOW / 1000 - 301), String(NOW / 1000 + 3 * 3600)]) {
+      expect(checkRefreshSignature(key, "tok", time, signFor("tok", time), NOW)).toBe("skew");
+      expect(checkRefreshSignature(key, "tok", time, newDevice().signFor("tok", time), NOW)).toBe("bad");
+      expect(checkRefreshSignature(key, "tok2", time, signFor("tok", time), NOW)).toBe("bad");
+    }
+    expect(checkRefreshSignature(key, "tok", nowSeconds, signFor("tok", nowSeconds), NOW)).toBe("ok");
+    expect(checkRefreshSignature(key, "tok", "1e9", signFor("tok", "1e9"), NOW)).toBe("bad");
   });
 
   it("refuses a time 301 seconds away or not a plain number", () => {

@@ -216,14 +216,34 @@ describe("token rotation", () => {
     expect((await callMe(first)).status).toBe(200);
   });
 
-  it("refuses the previous generation after the grace, as rotated", async () => {
+  it("revokes the session when a plain request carries the previous generation after the grace (reuse)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const first = await signIn();
     const second = await refreshOk(first);
     await callMe(second);
     await prisma.authSession.updateMany({ data: { rotatedAt: ago(ROTATION_GRACE_MS + 5_000) } });
-    expect(await reasonOf(await callMe(first))).toBe("rotated");
-    // Plain requests only refuse; revoking is the refresh route's job.
-    expect((await theRow()).revokedAt).toBeNull();
+    expect(await reasonOf(await callMe(first))).toBe("reuse");
+    const row = await theRow();
+    expect(row.revokedAt).not.toBeNull();
+    expect(row.revokedReason).toBe("reuse");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("[auth] refresh token reuse"));
+    expect(warn.mock.calls.flat().join(" ")).not.toContain(first);
+    expect(await reasonOf(await callMe(second))).toBe("revoked");
+  });
+
+  it("does not let a copy that refreshed first keep an unbound session once the owner's token comes back", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const owners = await signIn();
+    expect((await theRow()).deviceKey).toBeNull();
+    // The copy refreshes before the owner does and starts using its token.
+    const copys = await refreshOk(owners);
+    expect((await callMe(copys)).status).toBe(200);
+    await prisma.authSession.updateMany({ data: { rotatedAt: ago(ROTATION_GRACE_MS + 5_000) } });
+
+    // The owner's next load (not a refresh) ends the family, the copy's token with it.
+    expect(await reasonOf(await callMe(owners))).toBe("reuse");
+    expect(await reasonOf(await callMe(copys))).toBe("revoked");
+    expect(await reasonOf(await callRefresh(copys))).toBe("revoked");
   });
 
   it("refuses a generation more than one ahead as invalid", async () => {
@@ -266,11 +286,32 @@ describe("token rotation", () => {
     expect(await reasonOf(await callMe(second))).toBe("revoked");
   });
 
-  it("treats a refresh from the previous generation inside the grace as reuse too", async () => {
+  it("answers a sibling refresh of the previous generation inside the grace with the committed token", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const first = await signIn();
+    // Two refreshes with the same token; the first answer is used before the second lands.
+    const second = await refreshOk(first);
+    await callMe(second);
+    const late = await refreshOk(first);
+
+    const row = await theRow();
+    expect(row.revokedAt).toBeNull();
+    expect(row.tokenGeneration).toBe(1);
+    expect((await callMe(late)).status).toBe(200);
+    expect((await callMe(second)).status).toBe(200);
+    expect((await theRow()).tokenGeneration).toBe(1);
+    expect(warn).not.toHaveBeenCalled();
+    // Both answers are the same generation: the next refresh chains on from either.
+    expect((await callMe(await refreshOk(late))).status).toBe(200);
+    expect((await theRow()).tokenGeneration).toBe(2);
+  });
+
+  it("still revokes a sibling refresh of the previous generation that lands after the grace", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const first = await signIn();
     const second = await refreshOk(first);
     await callMe(second);
+    await prisma.authSession.updateMany({ data: { rotatedAt: ago(ROTATION_GRACE_MS + 5_000) } });
     expect(await reasonOf(await callRefresh(first))).toBe("reuse");
     expect((await theRow()).revokedReason).toBe("reuse");
   });
@@ -319,13 +360,38 @@ describe("device signature", () => {
     expect(await reasonOf(await callRefresh(token, headers))).toBe("device");
   });
 
-  it("refuses a time more than 300 seconds off, in either direction", async () => {
+  it("issues nothing for a time more than 300 seconds off, in either direction", async () => {
     const device = newDevice();
     const token = await signIn({ deviceKey: device.publicKey });
     const now = Math.floor(Date.now() / 1000);
-    expect(await reasonOf(await callRefresh(token, signRefresh(device, token, now - 301)))).toBe("device");
-    expect(await reasonOf(await callRefresh(token, signRefresh(device, token, now + 301)))).toBe("device");
+    for (const time of [now - 301, now + 301]) {
+      const response = await callRefresh(token, signRefresh(device, token, time));
+      expect(response.status).toBe(409);
+      expect(JSON.stringify(await readJson(response))).not.toContain('"token"');
+    }
     await refreshOk(token, signRefresh(device, token, now - 290));
+  });
+
+  it("answers the bound device's skewed clock with the server's time, keeps the session, and takes a refresh signed on it", async () => {
+    const device = newDevice();
+    const token = await signIn({ deviceKey: device.publicKey });
+    const phone = Math.floor(Date.now() / 1000) - 3 * 3600;
+
+    const response = await callRefresh(token, signRefresh(device, token, phone));
+    expect(response.status).toBe(409);
+    const body = await readJson<{ code: string; serverTime: number }>(response);
+    expect(body.code).toBe("DEVICE_CLOCK");
+    expect(Math.abs(body.serverTime - Math.floor(Date.now() / 1000))).toBeLessThanOrEqual(2);
+    expect((await theRow()).revokedAt).toBeNull();
+    expect((await callMe(token)).status).toBe(200);
+
+    await refreshOk(token, signRefresh(device, token, body.serverTime));
+  });
+
+  it("does not tell a skewed signature from another key anything but device", async () => {
+    const token = await signIn({ deviceKey: newDevice().publicKey });
+    const skewed = Math.floor(Date.now() / 1000) - 3 * 3600;
+    expect(await reasonOf(await callRefresh(token, signRefresh(newDevice(), token, skewed)))).toBe("device");
   });
 
   it("checks reuse before the signature: a replayed old token is revoked even unsigned", async () => {
@@ -418,5 +484,21 @@ describe("session list", () => {
     expect(body.sessions.map((s) => s.trusted).sort()).toEqual([false, true, true]);
     expect(JSON.stringify(body)).not.toContain(device.publicKey);
     expect(JSON.stringify(body)).not.toContain("deviceKey");
+  });
+
+  it("does not list a session past the idle or the absolute limit as a signed-in device", async () => {
+    await prisma.authSession.create({ data: { userId: user.id, label: "idle", lastSeenAt: ago(SESSION_IDLE_MS + 60_000) } });
+    await prisma.authSession.create({
+      data: { userId: user.id, label: "old", createdAt: ago(SESSION_ABSOLUTE_MS + 60_000), lastSeenAt: ago(60_000) },
+    });
+    await prisma.authSession.create({ data: { userId: user.id, label: "edge", lastSeenAt: ago(SESSION_IDLE_MS - 60_000) } });
+    const login = await signIn();
+
+    const response = await sessionsGet(
+      buildRequest("GET", "/api/auth/sessions", undefined, { headers: { authorization: `Bearer ${login}` } })
+    );
+    const body = await readJson<{ sessions: Array<{ label: string; current: boolean }> }>(response);
+    expect(body.sessions.filter((s) => !s.current).map((s) => s.label)).toEqual(["edge"]);
+    expect(body.sessions.filter((s) => s.current)).toHaveLength(1);
   });
 });

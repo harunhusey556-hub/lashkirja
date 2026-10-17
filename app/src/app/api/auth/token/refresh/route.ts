@@ -1,28 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticate, type AuthFailureReason } from "@/lib/session";
 import { bearerTokenFrom, sealBearerToken } from "@/lib/auth-credential";
-import { verifyRefreshSignature } from "@/lib/device-key";
+import { checkRefreshSignature } from "@/lib/device-key";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { rejectCrossSite } from "@/lib/http-security";
-import { prisma } from "@/lib/db";
 
 /** The app reads `reason` to tell "sign in again" ("device", "reuse", ...) from a plain retry. */
-function unauthorized(reason: AuthFailureReason | "device" | "reuse") {
+function unauthorized(reason: AuthFailureReason | "device") {
   return NextResponse.json(
     { error: { code: "UNAUTHORIZED", message: "Kirjautuminen vaaditaan", reason } },
     { status: 401 }
-  );
-}
-
-/** A token generation that was already replaced is back in play: someone holds a copy. Kill the whole family. */
-async function revokeForReuse(sessionId: string, userId: string, presented: number, committed: number) {
-  await prisma.authSession.updateMany({
-    where: { id: sessionId, userId, revokedAt: null },
-    data: { revokedAt: new Date(), revokedReason: "reuse" },
-  });
-  // Ids and generations only, never the token.
-  console.warn(
-    `[auth] refresh token reuse: session=${sessionId} user=${userId} presentedGen=${presented} currentGen=${committed}`
   );
 }
 
@@ -37,10 +24,15 @@ async function revokeForReuse(sessionId: string, userId: string, presented: numb
  * way never leaves the device holding a token the server has moved past.
  * Presenting a generation the row has already moved past (beyond the short
  * grace for requests in flight) means a copy of the token exists elsewhere:
- * the session is revoked ("reuse").
+ * authenticate revokes the session ("reuse"). Inside the grace, the previous
+ * generation is a sibling refresh that raced the one whose token is already
+ * in use (the web client sends one per resume event): it gets that same next
+ * token again.
  *
  * A session bound to a device key additionally needs that device's
- * signature over the token, so a stolen token alone cannot be refreshed.
+ * signature over the token, so a stolen token alone cannot be refreshed. A
+ * right signature made on a clock more than the allowed skew off gets a 409
+ * with the server's time to sign again on, not a sign-out.
  *
  * Final review I1: this must accept a bearer credential ONLY, never the web
  * cookie. The web cookie is HttpOnly precisely so injected script cannot
@@ -55,35 +47,32 @@ export async function POST(req: NextRequest) {
   if (crossSite) return crossSite;
 
   const auth = await authenticate(req);
-  if (!auth.session) {
-    if (auth.reason === "rotated" && auth.sessionId && auth.userId) {
-      await revokeForReuse(auth.sessionId, auth.userId, auth.credentialGeneration ?? 0, auth.tokenGeneration ?? 0);
-      return unauthorized("reuse");
-    }
-    return unauthorized(auth.reason);
-  }
+  if (!auth.session) return unauthorized(auth.reason);
   const session = auth.session;
   if (session.kind !== "bearer" || !session.sessionId) return unauthorized("invalid");
 
+  // One behind the row passes authenticate only inside the grace; presented + 1 is then the
+  // generation already committed, the token the sibling refresh got.
   const presented = session.credentialGeneration ?? 0;
-  const committed = session.tokenGeneration ?? 0;
-  if (presented < committed) {
-    // authenticate let it through only for the grace; refreshing from it is still a replay.
-    await revokeForReuse(session.sessionId, session.userId, presented, committed);
-    return unauthorized("reuse");
-  }
 
   if (session.deviceKey) {
     const token = bearerTokenFrom(req.headers.get("authorization"));
-    const valid =
-      token !== null &&
-      verifyRefreshSignature(
-        session.deviceKey,
-        token,
-        req.headers.get("x-lk-device-time"),
-        req.headers.get("x-lk-device-signature")
+    const signature =
+      token === null
+        ? "bad"
+        : checkRefreshSignature(
+            session.deviceKey,
+            token,
+            req.headers.get("x-lk-device-time"),
+            req.headers.get("x-lk-device-signature")
+          );
+    if (signature === "skew") {
+      return NextResponse.json(
+        { error: "Laitteen kello on väärässä.", code: "DEVICE_CLOCK", serverTime: Math.floor(Date.now() / 1000) },
+        { status: 409 }
       );
-    if (!valid) return unauthorized("device");
+    }
+    if (signature !== "ok") return unauthorized("device");
   }
 
   const limit = consumeRateLimit(`token-refresh:${session.sessionId}`, 30, 60 * 60_000);

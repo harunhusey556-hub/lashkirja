@@ -6,6 +6,7 @@ import { clearCodeGuard, reserveCodeAttempt } from "@/lib/account-code-guard";
 import { findSenderAccount, platformMailConfig, sendMail, sendPlatformMail } from "@/lib/mailer";
 import { passwordProblem, deviceLabel } from "@/lib/session-policy";
 import { contactSupportPhrase } from "@/lib/account-copy";
+import { SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from "@/lib/session-limits";
 
 const RESET_TTL_MS = 30 * 60 * 1000;
 const EMAIL_TTL_MS = 24 * 60 * 60 * 1000;
@@ -114,8 +115,16 @@ async function revokeSessionsWithin(
 }
 
 export async function listAuthSessions(userId: string, currentId?: string) {
+  // A row past the idle or absolute limit is revoked only once it is presented again; until then
+  // it is just as dead, so it is not listed as a signed-in device.
+  const now = Date.now();
   const rows = await prisma.authSession.findMany({
-    where: { userId, revokedAt: null },
+    where: {
+      userId,
+      revokedAt: null,
+      lastSeenAt: { gte: new Date(now - SESSION_IDLE_MS) },
+      createdAt: { gte: new Date(now - SESSION_ABSOLUTE_MS) },
+    },
     orderBy: [{ lastSeenAt: "desc" }, { id: "desc" }],
     select: { id: true, label: true, createdAt: true, lastSeenAt: true, deviceKey: true },
   });
