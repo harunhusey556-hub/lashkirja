@@ -83,7 +83,11 @@ struct ReceiptsView: View {
     private let remembers: Bool
 
     /// With a month or a tab the screen opens on exactly that; otherwise on the filters of the last visit.
-    init(month: String = "", tab: ReceiptTab = .all, category: String = "", missingVat: Bool = false, drilled: Bool = false) {
+    /// `preview` (the app's `receiptsPreview` for the same filters) is on screen in the first frame:
+    /// painted from `load` instead, after the awaits on the cache, a drill from Raportit pushed grey
+    /// rows and its rows replaced them ~0.7 s after the push had settled (motion audit raportit-drill-open).
+    init(month: String = "", tab: ReceiptTab = .all, category: String = "", missingVat: Bool = false, drilled: Bool = false,
+         preview: ReceiptsPreview? = nil) {
         var initial: ReceiptListQuery
         remembers = !drilled
         if drilled || !month.isEmpty || tab != .all || !category.isEmpty {
@@ -93,6 +97,20 @@ struct ReceiptsView: View {
             initial = ReceiptListQuery(remembered: UserDefaults.standard.string(forKey: Self.filterKey) ?? "")
         }
         _query = State(initialValue: initial)
+        guard let preview else { return }
+        var shown = ScreenLoad<[Receipt]>()
+        shown.succeed(preview.list.receipts)
+        _receipts = State(initialValue: shown)
+        var firstPage = ReceiptListPaging()
+        firstPage.firstPage(preview.list)
+        _paging = State(initialValue: firstPage)
+        _counts = State(initialValue: preview.counts?.counts)
+        _total = State(initialValue: ReceiptListPaging.total(preview.list, tab: initial.tab, counts: preview.counts?.counts))
+        _pending = State(initialValue: preview.pending.receipts)
+        _pendingTruncated = State(initialValue: preview.pending.truncated ?? false)
+        _rejected = State(initialValue: preview.rejected.receipts)
+        _rejectedTotal = State(initialValue: preview.rejected.count ?? preview.rejected.receipts.count)
+        _rejectedTruncated = State(initialValue: preview.rejected.truncated ?? false)
     }
 
     private struct ReloadKey: Hashable {
@@ -957,6 +975,60 @@ struct PagedShowMoreButton: View {
                 .motion(listMotion.animation(.snappy), value: loading)
             }
             .disabled(loading)
+        }
+    }
+}
+
+/// What a Kuitit list last painted for one set of filters: its first page, chip counts and both
+/// review queues.
+struct ReceiptsPreview {
+    let list: ReceiptList
+    let counts: ReceiptCounts?
+    let pending: ReceiptList
+    let rejected: ReceiptList
+}
+
+extension AppModel {
+    /// The first page, counts and review queues last painted for `query`; nil without the page or a
+    /// queue (a queue arriving after the rows would push every one of them down, as `load` says).
+    func receiptsPreview(_ query: ReceiptListQuery) -> ReceiptsPreview? {
+        guard let list: ReceiptList = lastPainted("/api/receipts", query: ReceiptListPaging.firstQuery(query)),
+              let pending: ReceiptList = lastPainted("/api/receipts", query: ReceiptListQuery.pendingQueue()),
+              let rejected: ReceiptList = lastPainted("/api/receipts", query: ReceiptListQuery.rejectedQueue()) else { return nil }
+        return ReceiptsPreview(list: list, counts: lastPainted("/api/receipts/counts", query: query.countsQuery()),
+                               pending: pending, rejected: rejected)
+    }
+
+    /// One of Raportit's drill warms (`ReportDrillWarm`), from the cache or, with `fetch`, asked
+    /// through it. The answer also goes into `lastPainted`, with the review queues the cache holds,
+    /// so the drilled Kuitit takes it in its first frame (`receiptsPreview`). False when there is none.
+    func warmReceiptsDrill(_ request: ReportDrillWarm.Request, fetch: Bool) async -> Bool {
+        switch request.kind {
+        case .list:
+            let list: ReceiptList?
+            if fetch {
+                list = try? await cachedGet(request.path, query: request.query)
+            } else {
+                list = await cachedValue(request.path, query: request.query)
+            }
+            guard let list else { return false }
+            rememberPainted(list, request.path, query: request.query)
+            for queue in [ReceiptListQuery.pendingQueue(), ReceiptListQuery.rejectedQueue()] {
+                let shown: ReceiptList? = lastPainted("/api/receipts", query: queue)
+                guard shown == nil, let cached: ReceiptList = await cachedValue("/api/receipts", query: queue) else { continue }
+                rememberPainted(cached, "/api/receipts", query: queue)
+            }
+            return true
+        case .counts:
+            let counts: ReceiptCounts?
+            if fetch {
+                counts = try? await cachedGet(request.path, query: request.query)
+            } else {
+                counts = await cachedValue(request.path, query: request.query)
+            }
+            guard let counts else { return false }
+            rememberPainted(counts, request.path, query: request.query)
+            return true
         }
     }
 }

@@ -324,29 +324,15 @@ struct RaportitView: View {
         return ReportDrillWarm.requests(drills)
     }
 
-    /// Fills the cache only, for the lists it holds no answer for; a failure is the list's to show
-    /// when it is opened. Decoded as the list decodes them, so its first paint reuses the value.
-    /// Not kept on disk: the drills would push the main lists out of the launch snapshot.
+    /// Fills the cache, for the lists it holds no answer for, and the drilled list's first frame
+    /// (`AppModel.warmReceiptsDrill`); a failure is the list's to show when it is opened. Decoded as
+    /// the list decodes them. Not kept on disk: the drills would push the main lists out of the launch snapshot.
     private func warmDrills(_ requests: [ReportDrillWarm.Request]) async {
         let app = app
         await drillWarmer.warm(requests, isCached: { request in
-            switch request.kind {
-            case .list:
-                let list: ReceiptList? = await app.cachedValue(request.path, query: request.query)
-                return list != nil
-            case .counts:
-                let counts: ReceiptCounts? = await app.cachedValue(request.path, query: request.query)
-                return counts != nil
-            }
+            await app.warmReceiptsDrill(request, fetch: false)
         }, fetch: { request in
-            switch request.kind {
-            case .list:
-                let list: ReceiptList? = try? await app.cachedGet(request.path, query: request.query)
-                return list != nil
-            case .counts:
-                let counts: ReceiptCounts? = try? await app.cachedGet(request.path, query: request.query)
-                return counts != nil
-            }
+            await app.warmReceiptsDrill(request, fetch: true)
         })
     }
 
