@@ -80,6 +80,8 @@ jobs:
             ios-native/LashKirjaCore/Sources/LashKirjaCore/Net/APIClient.swift
           # The App's init starts the fix's early session check; the launch timeline marks stay.
           sed -i '' '/app.checkStoredSession()/d' "$RUNNER_TEMP/before/ios-native/App/Sources/LashKirjaApp.swift"
+          # RootView keeps its timeline marker but shows the base's phase (no early refusal).
+          sed -i '' 's/app\.shownPhase/app.phase/g' "$RUNNER_TEMP/before/ios-native/App/Sources/Shell/RootView.swift"
           # A fresh simulator's first walk hangs on its first UI snapshots (WalkTestCase.probe): a
           # throwaway warm-up pass first, so neither measured variant is the first on this simulator.
           for variant in warmup before after; do

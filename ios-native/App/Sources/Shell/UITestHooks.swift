@@ -33,13 +33,21 @@ enum UITestHooks {
     }
 
     /// "<moment>=<ms after launch>" for the first time each launch moment came (RootView's marker).
-    @MainActor private static var timeline: [String] = []
-    @MainActor static var launchTimeline: String { timeline.isEmpty ? "launch phase" : timeline.joined(separator: " ") }
-    @MainActor static func mark(_ moment: String) {
-        guard launchPhase, !timeline.contains(where: { $0.hasPrefix(moment + "=") }) else { return }
-        timeline.append("\(moment)=\(processAgeMs() ?? -1)")
+    /// From any thread: the launch's 401 is marked where it arrives, off the main thread.
+    private static let timelineLock = NSLock()
+    private static var timeline: [String] = []
+    static var launchTimeline: String {
+        timelineLock.withLock { timeline.isEmpty ? "launch phase" : timeline.joined(separator: " ") }
+    }
+    static func mark(_ moment: String) {
+        guard launchPhase else { return }
+        let line: String? = timelineLock.withLock {
+            guard !timeline.contains(where: { $0.hasPrefix(moment + "=") }) else { return nil }
+            timeline.append("\(moment)=\(processAgeMs() ?? -1)")
+            return timeline.last
+        }
         // For a launch outside XCTest (`simctl launch --console-pty`, ios-session-gate.yml).
-        print("LKMARK \(timeline.last ?? "")")
+        if let line { print("LKMARK \(line)") }
     }
     #else
     /// The launch timeline is the UI tests' only: a Release build marks nothing.

@@ -114,6 +114,17 @@ final class AppModel {
     @ObservationIgnored private var launchCheckStarted: ContinuousClock.Instant?
     /// What the sign-in screen says when the server refused the session.
     static let expiredNotice = "Istunto vanheni. Kirjaudu uudelleen."
+    /// Set off the main thread as soon as a 401 has cleared the session's token. The main thread
+    /// is busy building the first frame when the launch's 401 comes back (CI, w56): that frame
+    /// shows the sign-in screen at once instead of the launch look and one more frame later.
+    nonisolated let refusal = Refusal()
+
+    /// What RootView shows: the phase, or the sign-in screen for a refusal the main actor has not
+    /// yet handled (`sessionCleared` then sets the same phase, so nothing is rebuilt).
+    var shownPhase: Phase {
+        if case .launching = phase, refusal.isSet { return .signedOut(notice: Self.expiredNotice) }
+        return phase
+    }
 
     /// From the App's init: the stored token goes to the server off the main thread while UIKit
     /// still builds the first frame, so a refusal can be known by the time `start()` runs (on CI
@@ -151,7 +162,14 @@ final class AppModel {
                 model?.settleVersionSoon()
             }
         }
-        await api.setOnUnauthorized { [weak model] sentToken in await model?.sessionExpired(sentToken: sentToken) }
+        await api.setOnUnauthorized { [weak model] sentToken in
+            // Here, off the main actor: the token is cleared and the refusal known while the main
+            // thread still builds the first frame.
+            UITestHooks.mark("refused")
+            guard await auth.handleUnauthorized(sentToken: sentToken) else { return }
+            model?.refusal.set()
+            await model?.sessionCleared()
+        }
         await api.setOnUnexpectedFailure { method, path, status, decodeError in
             await observer.reportAPIFailure(method: method, path: path, status: status, decodeError: decodeError)
         }
@@ -260,6 +278,12 @@ final class AppModel {
     func sessionExpired(sentToken: String) async {
         UITestHooks.mark("refused")
         guard await auth.handleUnauthorized(sentToken: sentToken) else { return }
+        await sessionCleared()
+    }
+
+    /// The refused session's token is already gone (`AuthService.handleUnauthorized` said so):
+    /// the rest of the session ends here.
+    func sessionCleared() async {
         UITestHooks.mark("cleared")
         OfflineReceiptQueueModel.shared.detach()
         endLocalSession()
@@ -702,4 +726,12 @@ struct PendingCapture: Identifiable, Equatable {
 struct InvoicePreview {
     let detail: InvoiceDetailResponse
     let reminder: ReminderPreview?
+}
+
+/// A one-way flag any thread may set and read (`AppModel.refusal`).
+final class Refusal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
 }

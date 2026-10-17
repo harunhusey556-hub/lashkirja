@@ -5,7 +5,7 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            switch app.phase {
+            switch app.shownPhase {
             case .launching:
                 Theme.canvas.ignoresSafeArea()
             case .signedOut(let notice):
@@ -15,10 +15,10 @@ struct RootView: View {
                     .background(LockWindowHost(locked: AppLock.shared.isLocked, app: app))
             }
         }
-        .motion(.default, value: app.phase)
+        .motion(.default, value: app.shownPhase)
         .overlay(alignment: .topLeading) {
             #if DEBUG || LK_UITEST_HOOKS
-            if UITestHooks.launchPhase { LaunchPhaseMarker(phase: app.phase) }
+            if UITestHooks.launchPhase { LaunchPhaseMarker(phase: app.shownPhase) }
             #endif
         }
     }
