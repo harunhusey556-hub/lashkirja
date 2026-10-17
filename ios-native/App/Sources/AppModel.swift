@@ -549,7 +549,11 @@ final class AppModel {
         guard case .signedIn = phase else { return }
         nextPrefetchTask?.cancel()
         nextPrefetchTask = Task { [weak self] in
-            guard let self else { return }
+            // After the chosen tab's first frame. Offline these requests fail at once, and the
+            // cache reads and `lastPainted` writes behind them landed in the middle of a first
+            // visit's build, holding its content back (w60 motion gate, offline-tab-myynti).
+            await RunLoopIdle.afterFrame()
+            guard let self, !Task.isCancelled else { return }
             switch tab {
             case .kirjanpito:
                 let kind = VatKind(profile: await self.cachedProfile()?.vatPeriod)

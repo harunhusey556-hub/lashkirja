@@ -13,7 +13,7 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: Binding(get: { tab }, set: select)) {
-            ForEach([AppTab.koti, .myynti, .kirjanpito, .raportit], id: \.self) { item in
+            ForEach(Self.places, id: \.self) { item in
                 Tab(item.title, systemImage: item.symbol, value: item) {
                     NavigationStack(path: path(item)) {
                         root(item)
@@ -40,6 +40,14 @@ struct MainTabView: View {
         // the smallest comfortable touch target.
         .listSectionSpacing(.compact)
         .background(AddTabGuard { select(.add) })
+        .background(TabPrebuild(
+            ready: Self.places.map { item -> @MainActor () -> Bool in { hasFirstFrame(item) } } + [{ @MainActor () -> Bool in true }],
+            // Without `motionProbe`: the copy is not on screen, so its layers are not the audit's.
+            // "+" last: the Lisää sheet's first opening built its list, symbols and pickers between
+            // the tap and the sheet rising, which then rose late (w65 motion gate, koti-add-sheet).
+            roots: Self.places.map { item -> @MainActor () -> AnyView in
+                { AnyView(NavigationStack { root(item) }.listSectionSpacing(.compact).environment(app)) }
+            } + [{ @MainActor () -> AnyView in AnyView(AddSheet().environment(app)) }]))
         .sheet(isPresented: $showAdd) { AddSheet().motionProbe("add-sheet") }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]).motionProbe("settings-sheet") }
         .sheet(isPresented: $showAssistant) { AssistantView().motionProbe("assistant") }
@@ -105,15 +113,40 @@ struct MainTabView: View {
         .task { OfflineReceiptQueueModel.shared.start(app: app) }
     }
 
+    /// The tabs that are places, in the tab bar's order ("+" comes after them).
+    private static let places: [AppTab] = [.koti, .myynti, .kirjanpito, .raportit]
+
+    /// Whether the tab's root, built now, would open on its data (`root` reads these previews once).
+    private func hasFirstFrame(_ item: AppTab) -> Bool {
+        switch item {
+        case .myynti: app.salesPreview() != nil
+        case .raportit: app.raportitPreview() != nil
+        default: true
+        }
+    }
+
     @ViewBuilder private func root(_ item: AppTab) -> some View {
         switch item {
         case .koti: KotiView(app: app)
-        // Built again when the tab is chosen (`tab` changes), so it carries the list as painted by then.
-        case .myynti: MyyntiView(preview: app.salesPreview())
+        case .myynti: MyyntiRoot()
         case .kirjanpito: KirjanpitoView()
-        case .raportit: RaportitView(preview: app.raportitPreview())
+        case .raportit: RaportitRoot()
         default: PlaceholderScreen(title: item.title)
         }
+    }
+
+    // The previews are read in these bodies, not in `MainTabView`'s: `lastPainted` changes with
+    // every load, and read here each change ran the whole tab container again (its toolbars too),
+    // also while a tab was building its first frame (w60 motion gate, offline-tab-myynti). Built
+    // when the tab is first shown, so the root carries the data as painted by then.
+    private struct MyyntiRoot: View {
+        @Environment(AppModel.self) private var app
+        var body: some View { MyyntiView(preview: app.salesPreview()) }
+    }
+
+    private struct RaportitRoot: View {
+        @Environment(AppModel.self) private var app
+        var body: some View { RaportitView(preview: app.raportitPreview()) }
     }
 
     private func path(_ item: AppTab) -> Binding<[Route]> {
@@ -127,6 +160,7 @@ struct MainTabView: View {
     /// "Lisää" is an action, not a place: it opens the add sheet and stays on the current tab.
     private func select(_ next: AppTab) {
         if next == .add {
+            MotionProbe.shared.mark("add-tap")
             EventLog.shared.log(.screen("add-sheet"))
             Haptics.impact()
             showAdd = true
