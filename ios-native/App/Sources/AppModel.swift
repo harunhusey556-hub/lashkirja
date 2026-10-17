@@ -201,7 +201,11 @@ final class AppModel {
         }
         await api.setOnRequestFinished { trace in await EventLog.shared.record(.request(trace)) }
         // The offline banner also covers a server that does not answer while the phone has a network.
-        await api.setOnReachability { reached in await MainActor.run { Connectivity.shared.requestFinished(reached: reached) } }
+        // Not awaited: the client calls this before it handles a 401, and a launch's main thread is
+        // busy building the tabs. Waiting on it held a revoked session's sign-out ~1.3 s (CI, w67).
+        await api.setOnReachability { reached in
+            Task { @MainActor in Connectivity.shared.requestFinished(reached: reached) }
+        }
     }
 
     func start() async {
