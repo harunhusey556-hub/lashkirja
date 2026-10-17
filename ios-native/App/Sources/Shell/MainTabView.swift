@@ -39,6 +39,7 @@ struct MainTabView: View {
         // Less gap between sections, so more fits on a phone. Rows keep the system's 44 pt minimum,
         // the smallest comfortable touch target.
         .listSectionSpacing(.compact)
+        .background(AddTabGuard { select(.add) })
         .sheet(isPresented: $showAdd) { AddSheet().motionProbe("add-sheet") }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]).motionProbe("settings-sheet") }
         .sheet(isPresented: $showAssistant) { AssistantView().motionProbe("assistant") }
@@ -95,7 +96,7 @@ struct MainTabView: View {
             }
         }
         .sheet(isPresented: $showNewInvoice) {
-            InvoiceFormView(existing: nil, onCreated: { id in
+            InvoiceFormView(existing: nil, preview: app.invoiceFormPreview(), onCreated: { id in
                 app.pendingRoute = PendingRoute(tab: .myynti, route: .invoice(id))
             })
         }
@@ -106,11 +107,11 @@ struct MainTabView: View {
 
     @ViewBuilder private func root(_ item: AppTab) -> some View {
         switch item {
-        case .koti: KotiView()
+        case .koti: KotiView(app: app)
         // Built again when the tab is chosen (`tab` changes), so it carries the list as painted by then.
         case .myynti: MyyntiView(preview: app.salesPreview())
         case .kirjanpito: KirjanpitoView()
-        case .raportit: RaportitView()
+        case .raportit: RaportitView(preview: app.raportitPreview())
         default: PlaceholderScreen(title: item.title)
         }
     }

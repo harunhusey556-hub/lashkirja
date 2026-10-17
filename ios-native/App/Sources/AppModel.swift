@@ -30,7 +30,7 @@ final class AppModel {
     /// Every screen's GET answers: a screen paints the cached answer at once and asks the server
     /// only when it is stale (`dataVersion` moved or older than 60 s). The main lists are kept on
     /// disk per account, so a cold launch paints the last known Koti, Kuitit and Pankki.
-    let resources = ResourceCache(store: .standard())
+    let resources: ResourceCache
     /// The Kuitit rows last listed, by id: a receipt opens showing its row at once while the
     /// detail loads. Not observed: no screen redraws when it changes.
     @ObservationIgnored private var receiptRows: [String: Receipt] = [:]
@@ -88,7 +88,9 @@ final class AppModel {
     /// A server without `/api/sync/version` (404) is not asked again this session.
     private var versionRouteMissing = false
 
-    init(baseURL: URL = AppConfig.apiBaseURL, store: TokenStore = KeychainTokenStore()) {
+    init(baseURL: URL = AppConfig.apiBaseURL, store: TokenStore = KeychainTokenStore(),
+         resources: ResourceCache = ResourceCache(store: .standard())) {
+        self.resources = resources
         let auth = AuthService(store: store)
         self.auth = auth
         let api = APIClient(baseURL: baseURL, transport: URLSessionTransport(), tokens: auth)
@@ -220,6 +222,7 @@ final class AppModel {
         // A lock set up before its owner was recorded belongs to this session's account.
         AppLock.shared.adoptOwnerIfUnknown(user.userId)
         AppLock.shared.keepOnly(for: user.userId)
+        await primeKoti(user: user.userId)
         phase = .signedIn(user)
         let started = session.current
         await auth.refreshIfDue()
@@ -378,6 +381,26 @@ final class AppModel {
         lastPainted[ResourceKey(user: user.userId, path: path, query: query).id] = value
     }
 
+    /// Koti's month as last painted, for its first frame (`KotiView`); nil when there is none.
+    func kotiPreview() -> Dashboard? {
+        lastPainted("/api/dashboard", query: ["month": MonthKey.current()])
+    }
+
+    /// Raportit's year as last painted, for its first frame (`RaportitView`); nil when there is none.
+    func raportitPreview() -> ProfitLoss? {
+        lastPainted("/api/reports/profit-loss", query: RaportitView.query(year: RaportitView.currentYear))
+    }
+
+    /// Koti's last dashboard of the month from the previous run's disk cache, read and decoded on the
+    /// cache's actor before the tabs appear: Koti's first frame after a launch is the figures, not a
+    /// spinner that two more hops later the same figures replaced (w44, launch → Koti).
+    private func primeKoti(user: String) async {
+        let query = ["month": MonthKey.current()]
+        let key = ResourceKey(user: user, path: "/api/dashboard", query: query)
+        guard let hit = await resources.cached(key, version: dataVersion, as: Dashboard.self) else { return }
+        lastPainted[key.id] = hit.value
+    }
+
     /// Myynti's first screen (list and chip counts), Toistuvat laskut, the new-invoice form's
     /// customers and catalog, and Kuitit's first screen (list, counts and both review queues, for
     /// the filters the owner left), from the cache into `lastPainted`. At launch (`replacing` false) a screen that already painted something keeps it;
@@ -408,6 +431,11 @@ final class AppModel {
         }
         if let value: ReceiptCounts = await cachedValue("/api/receipts/counts", query: kuitit.countsQuery()) {
             primePainted(value, "/api/receipts/counts", query: kuitit.countsQuery(), replacing: replacing)
+        }
+        // Raportit's year (warmed after Koti), so its tab opens on the figures, not a spinner.
+        let report = RaportitView.query(year: RaportitView.currentYear)
+        if let value: ProfitLoss = await cachedValue("/api/reports/profit-loss", query: report) {
+            primePainted(value, "/api/reports/profit-loss", query: report, replacing: replacing)
         }
     }
 

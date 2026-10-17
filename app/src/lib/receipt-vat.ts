@@ -232,12 +232,37 @@ export function sameVatLines(
   );
 }
 
+export const NEGATIVE_ONLY_CREDIT_MESSAGE = "Negatiivinen summa kirjataan vain hyvityslaskulle.";
+
+/**
+ * Negative amounts belong to a credit note only. The one rule of the save
+ * route, the receipt edit and the assistant's receipt_update, so a change to it
+ * reaches every write path (ultrareview PR #31). The caller says what makes
+ * this receipt a credit note.
+ */
+export function negativeAmountProblem(
+  amounts: {
+    totalAmount?: number | null;
+    originalAmount?: number | null;
+    vatDetails?: Array<{ rate: number; amount: number }> | null;
+  },
+  isCreditNote: boolean
+): string | null {
+  if (isCreditNote) return null;
+  const negative = [amounts.totalAmount, amounts.originalAmount, ...(amounts.vatDetails ?? []).map((line) => line.amount)]
+    .some((amount) => amount != null && amount < 0);
+  return negative ? NEGATIVE_ONLY_CREDIT_MESSAGE : null;
+}
+
 export const VAT_TOO_LARGE_MESSAGE = "ALV-summa ei voi olla suurempi kuin kuitin summa.";
+export const VAT_SIGN_MESSAGE =
+  "ALV-rivien etumerkki ei täsmää summaan: hyvityksen (negatiivinen summa) ALV on negatiivinen tai nolla, muun kuitin positiivinen tai nolla.";
 
 /**
  * What is wrong with the VAT lines of a receipt, or null. Shared by
- * POST /api/receipts/save and PATCH /api/receipts/[id] so an API client is held
- * to the same rule as the form: a known rate, and no more VAT than the total.
+ * POST /api/receipts/save, PATCH /api/receipts/[id] and the assistant's
+ * receipt_update so an API client is held to the same rule as the form: a
+ * known rate, VAT lines of the total's sign, and no more VAT than the total.
  */
 export function vatLinesProblem(
   lines: Array<{ rate: number; amount: number }>,
@@ -250,8 +275,16 @@ export function vatLinesProblem(
       return `ALV-kanta ${String(line.rate).replace(".", ",")} % ei ole tuettu. Valitse 25,5, 13,5, 10 tai 0 %.`;
     }
   }
-  if (totalAmount == null) return null;
-  const vatCents = lines.reduce((sum, line) => sum + eurosToCents(line.amount), 0);
+  const lineCents = lines.map((line) => eurosToCents(line.amount));
+  // A size check alone let a negative total keep positive VAT (or the reverse): the
+  // return and the books then moved the VAT the wrong way (review 2026-10-16).
+  if (totalAmount == null) {
+    // No total to follow, but one receipt's lines never point both ways.
+    return lineCents.some((cents) => cents < 0) && lineCents.some((cents) => cents > 0) ? VAT_SIGN_MESSAGE : null;
+  }
+  const negative = eurosToCents(totalAmount) < 0;
+  if (lineCents.some((cents) => (negative ? cents > 0 : cents < 0))) return VAT_SIGN_MESSAGE;
+  const vatCents = lineCents.reduce((sum, cents) => sum + cents, 0);
   // A credit note's total and VAT are both negative: its VAT is held to the total's size.
   if (Math.abs(vatCents) > Math.abs(eurosToCents(totalAmount))) return VAT_TOO_LARGE_MESSAGE;
   return null;

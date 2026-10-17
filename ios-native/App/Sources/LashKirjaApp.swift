@@ -20,6 +20,9 @@ struct LashKirjaApp: App {
         // The revoked-session walk's timeline: what comes before `main` (dyld) and what `init` costs.
         UITestHooks.mark("main")
         Perf.beginLaunch()
+        // The first date formatter of a run costs ~90 ms: built here, beside the scene setup, it is
+        // ready before `start()` asks for this month's key (w47, launch → Koti).
+        Task.detached(priority: .userInitiated) { APIDate.warmUp() }
         let app = AppModel()
         _app = State(initialValue: app)
         // Before UIKit builds the first frame: a revoked session's 401 comes back meanwhile.

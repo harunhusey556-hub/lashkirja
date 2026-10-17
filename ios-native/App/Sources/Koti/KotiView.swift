@@ -4,33 +4,31 @@ import LashKirjaCore
 
 struct KotiView: View {
     @Environment(AppModel.self) private var app
-    @State private var model: KotiModel?
+    @State private var model: KotiModel
     /// Coming back to the tab does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
 
+    /// Made with the last dashboard of the month the launch read from disk: Koti's first frame is
+    /// the figures. Made in `.task` it was a spinner first, and the cache's answer came after two
+    /// more hops (w44, launch → Koti).
+    init(app: AppModel) {
+        _model = State(initialValue: KotiModel(api: app.api, profile: { await app.cachedProfile() }, app: app,
+                                               opening: app.kotiPreview()))
+    }
+
     var body: some View {
-        Group {
-            if let model {
-                KotiContent(model: model, refresh: {
-                    // Pull-to-refresh asks every screen again (Pankki, Raportit…); Koti's own load
-                    // stands for the bump here, so the gate does not load it twice.
-                    gate.mark(version: app.refreshEverything())
-                    await model.load()
-                })
-            } else {
-                ProgressView()
-            }
-        }
-        .perfReady("koti", model?.state.value != nil)
+        KotiContent(model: model, refresh: {
+            // Pull-to-refresh asks every screen again (Pankki, Raportit…); Koti's own load
+            // stands for the bump here, so the gate does not load it twice.
+            gate.mark(version: app.refreshEverything())
+            await model.load()
+        })
+        .perfReady("koti", model.state.value != nil)
         .task(id: app.dataVersion) {
-            if model == nil {
-                let app = self.app
-                model = KotiModel(api: app.api, profile: { await app.cachedProfile() }, app: app)
-            }
-            guard model?.state.value == nil || gate.isDue(version: app.dataVersion) else { return }
+            guard model.state.value == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion
-            await model?.load()
+            await model.load()
             if !Task.isCancelled { gate.mark(version: version) }
         }
     }

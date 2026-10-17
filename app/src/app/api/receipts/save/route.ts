@@ -14,7 +14,7 @@ import {
 import { withErrorHandler, UnauthorizedError, AppError, ValidationError } from "@/lib/api-errors";
 import { sanitizeText } from "@/lib/sanitizer";
 import { assertPeriodOpen } from "@/lib/period-lock";
-import { vatLinesProblem } from "@/lib/receipt-vat";
+import { negativeAmountProblem, vatLinesProblem } from "@/lib/receipt-vat";
 import { PURCHASE_VAT_TREATMENTS } from "@/lib/alv";
 import { currencySchema, foreignColumns } from "@/lib/foreign-purchase-input";
 import {
@@ -73,9 +73,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     select: { extractedJson: true },
   });
   const creditNote = storedDocumentKind(staged?.extractedJson ?? null).isCreditNote;
-  const negative = [parsed.totalAmount, parsed.originalAmount, ...(parsed.vatDetails ?? []).map((line) => line.amount)]
-    .some((amount) => amount != null && amount < 0);
-  if (negative && !creditNote) throw new ValidationError("Negatiivinen summa kirjataan vain hyvityslaskulle.");
+  const signProblem = negativeAmountProblem(parsed, creditNote);
+  if (signProblem) throw new ValidationError(signProblem);
   const body = creditNote ? amountSizes(parsed) : parsed;
 
   // The form refuses a VAT larger than the total or an unknown rate; an API client is held to the same rule.

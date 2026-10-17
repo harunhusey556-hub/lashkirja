@@ -4,7 +4,7 @@ import LashKirjaCore
 
 struct RaportitView: View {
     @Environment(AppModel.self) private var app
-    @State private var year = Int(MonthKey.current().prefix(4)) ?? 2026
+    @State private var year = RaportitView.currentYear
     @State private var state = ScreenLoad<ProfitLoss>()
     @State private var export: ExportKind?
     /// The accountant package's period: "YYYY-MM", "YYYY-Qn" or "YYYY" (SALES-21).
@@ -19,6 +19,21 @@ struct RaportitView: View {
     @State private var gate = ReloadGate()
     /// Asks each receipts drill's list once while the screen lives, not again on every reload (row 23).
     @State private var drillWarmer = ReportDrillWarmer()
+
+    /// `preview` (the app's last painted report of this year) is on screen in the first frame:
+    /// painted from `load` instead, after an await on the cache, the tab showed a spinner and then
+    /// the figures (motion audit raportit-tab, every CI walk of 2026-10-17).
+    init(preview: ProfitLoss? = nil) {
+        guard let preview else { return }
+        var shown = ScreenLoad<ProfitLoss>()
+        shown.succeed(preview)
+        _state = State(initialValue: shown)
+    }
+
+    static var currentYear: Int { Int(MonthKey.current().prefix(4)) ?? 2026 }
+
+    /// The query of a year's report, as `load` and the launch prefetch ask it.
+    static func query(year: Int) -> [String: String] { ["from": "\(year)-01", "to": "\(year)-12"] }
 
     struct ExportKind: Identifiable { let type: String; let title: String; var id: String { type } }
     private let exports = [
@@ -340,7 +355,7 @@ struct RaportitView: View {
         // A pull-to-refresh is not cancelled by a year change: its answer is for the year it asked.
         let asked = year
         let timing = ScreenTiming("Raportit")
-        let query = ["from": "\(asked)-01", "to": "\(asked)-12"]
+        let query = Self.query(year: asked)
         if state.value == nil, let cached: ProfitLoss = await app.cachedValue("/api/reports/profit-loss", query: query), asked == year {
             state.succeed(cached)
             timing.painted(fromCache: true)

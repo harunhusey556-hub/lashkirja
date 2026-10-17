@@ -20,6 +20,16 @@ private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
         let none = try decode(SureMatchBatch.self, #"{"batchId":null,"linked":[]}"#)
         #expect(none.batchId == nil)
         #expect(try decode(SureMatchUndone.self, #"{"restored":1}"#).restored == 1)
+        #expect(batch.stoppedEarly == false)
+    }
+
+    // Ultrareview PR #31: a run that stops early (time up or a failed chunk) still answers with its batch.
+    @Test func aRunThatStoppedEarlyKeepsItsBatchAndSaysSo() throws {
+        let batch = try decode(SureMatchBatch.self, #"{"batchId":"b1","linked":[{"transactionId":"t1","receiptId":"r1"}],"partial":true,"remaining":70,"failed":true,"error":"SURE_MATCH_CHUNK_FAILED"}"#)
+        #expect(batch.batchId == "b1")
+        #expect(batch.stoppedEarly)
+        #expect(batch.remaining == 70)
+        #expect(SureMatchText.linkedPartly(50) == "50 kohdistettu, loput seuraavalla kerralla.")
     }
 
     @Test func aListWithoutACountCountsItsPairs() throws {

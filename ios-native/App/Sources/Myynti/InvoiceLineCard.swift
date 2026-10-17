@@ -22,7 +22,9 @@ struct InvoiceLineCard: View {
 
     enum Action { case copy, moveUp, moveDown, delete, saveProduct, pick(CatalogItem) }
 
-    @State private var quantityText = ""
+    /// The quantity as typed; until then the field shows the line's own. Filled in `onAppear` it came
+    /// a frame late, after the field's "Määrä" placeholder (the "Uusi lasku" flash, w44).
+    @State private var quantityText: String?
     @State private var askUnit = false
     @State private var customUnit = ""
 
@@ -58,10 +60,9 @@ struct InvoiceLineCard: View {
             if showsVat { vatRow }
         }
         .padding(.vertical, 4)
-        .onAppear { if quantityText.isEmpty { quantityText = InvoiceForm.quantityText(line.quantity) } }
         // The stepper and a catalog product change the quantity from outside the text field.
         .onChange(of: line.quantity) { _, value in
-            if (Money.parse(quantityText) ?? 0) != value { quantityText = InvoiceForm.quantityText(value) }
+            if let typed = quantityText, (Money.parse(typed) ?? 0) != value { quantityText = InvoiceForm.quantityText(value) }
         }
         .alert("Yksikkö", isPresented: $askUnit) {
             TextField("esim. paketti", text: $customUnit)
@@ -110,13 +111,14 @@ struct InvoiceLineCard: View {
             Button { step(-1) } label: { Image(systemName: "minus.circle").font(.title3).tapTarget() }
                 .disabled(line.quantity <= 1)
                 .accessibilityLabel("Vähennä määrää")
-            TextField("Määrä", text: $quantityText)
+            TextField("Määrä", text: Binding(get: { quantityText ?? InvoiceForm.quantityText(line.quantity) },
+                                             set: { quantityText = $0 }))
                 .moneyInput()
                 .multilineTextAlignment(.center)
                 .monospacedDigit()
                 .frame(width: 48)
                 .focused(focus, equals: InvoiceFormField.quantity(line.id))
-                .onChange(of: quantityText) { _, text in line.quantity = Money.parse(text) ?? 0 }
+                .onChange(of: quantityText) { _, text in if let text { line.quantity = Money.parse(text) ?? 0 } }
                 .accessibilityLabel("Rivin \(number) määrä")
             Button { step(1) } label: { Image(systemName: "plus.circle").font(.title3).tapTarget() }
                 .accessibilityLabel("Lisää määrää")

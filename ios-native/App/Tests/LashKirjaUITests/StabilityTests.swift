@@ -104,9 +104,27 @@ final class StabilityTests: WalkTestCase {
         // timeout in a Debug build, while the app itself stays idle (sampled 2026-10-08,
         // test07). The swipe waits for the app to be idle, so a real freeze still fails here.
         XCTAssertEqual(app.state, .runningForeground, "alv: app is not running")
-        edgeSwipeBack(); sleep(2)
+        edgeSwipeBack()
         check("alv", app.state == .runningForeground)
-        tap("Pankki"); sleep(3)
+        // The swipe is not taken on trust: in 3 of 9 suite runs it left ALV up (runs 38779539454,
+        // 38895961757, 38993875695), "Pankki" was then looked for on ALV and the step passed
+        // without the hub ever opening. The hub's row shows once the pop has finished.
+        let hubRow = app.staticTexts["Pankki"].firstMatch
+        let popped = hubRow.waitForExistence(timeout: 10)
+        if !popped {
+            shot("stability-alv-swipe-back-stayed")
+            if let back = app.navigationBars["ALV-ilmoitus"].buttons.allElementsBoundByIndex.first(where: { $0.isHittable }) { back.tap() }
+        }
+        check("alv: edge swipe back returned to Kirjanpito", popped)
+        // The pop returns to the offset tapLabel scrolled to for ALV: the Pankki row then sits under
+        // the navigation bar (y 59–80 under a bar ending at 116, run 39012905317), passes tapLabel's
+        // 30 pt margin, and the tap lands on the bar. Back to the top first, so the row is clear of it.
+        let bar = app.navigationBars["Kirjanpito"].firstMatch
+        for _ in 0..<4 where hubRow.exists && bar.exists && hubRow.frame.minY < bar.frame.maxY {
+            app.windows.firstMatch.swipeDown(velocity: .slow)
+        }
+        tap("Pankki")
+        XCTAssertTrue(app.navigationBars["Pankki"].waitForExistence(timeout: 10), "Pankki did not open")
         assertResponsive("pankki")
         shot("stability-pankki")
     }

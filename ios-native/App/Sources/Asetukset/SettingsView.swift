@@ -91,6 +91,12 @@ struct SettingsView: View {
             if profile == nil { profile = app.profile }
             await loadProfile()
         }
+        .task {
+            // Maksut's status, asked while the owner reads this screen, so Maksut opens on it.
+            let pos = POSCoordinator.shared
+            pos.bind(app)
+            if pos.status == nil { await pos.refreshStatus() }
+        }
         .confirmSheet(isPresented: $confirmLogout, title: "Kirjaudutaanko ulos?", confirmTitle: "Kirjaudu ulos") {
             Task { await app.logout() }
         }

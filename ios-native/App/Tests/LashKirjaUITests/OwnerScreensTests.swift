@@ -20,11 +20,14 @@ final class OwnerScreensTests: WalkTestCase {
         }
         app = XCUIApplication()
         app.launchArguments.append("-LKUITest")
-        app.launch()
-        if app.secureTextFields.firstMatch.waitForExistence(timeout: 8) { signIn(app) }
+        // Not a fixed look for the password field: the first launch on a fresh simulator showed it
+        // after 8 s, so the sign-in was skipped and testA met an untouched form (run 38856286498).
+        let signingIn = launchSignedIn()
         // The passkey offer after a password sign-in.
         if app.buttons["Ei nyt"].waitForExistence(timeout: 5) { app.buttons["Ei nyt"].tap() }
         _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
+        // As WalkTestCase.setUp: the save offer can come seconds after the tab bar, over testA's taps.
+        if signingIn { probe { _ = savePasswordPrompt.waitForExistence(timeout: 10) } }
         sleep(1); dismissSystemPrompts()
         XCTAssertTrue(app.tabBars.firstMatch.exists, "not signed in: is the demo API up on the API_BASE_URL the app was built with?")
     }
@@ -72,21 +75,6 @@ final class OwnerScreensTests: WalkTestCase {
             _ = app.navigationBars["Kuitit"].waitForExistence(timeout: 10)
         }
         return app.navigationBars["Kuitit"].exists
-    }
-
-    /// Taps a tab until it reports itself selected. The first tap after sign-in can land while the
-    /// passkey offer or a system prompt is still leaving, and is then lost (CI round 1: still on Koti).
-    func selectTab(_ name: String) -> Bool {
-        let button = app.tabBars.buttons[name].firstMatch
-        guard button.waitForExistence(timeout: 10) else { return false }
-        for _ in 0..<3 where !button.isSelected {
-            dismissSystemPrompts()
-            button.tap(); taps += 1
-            // A fresh expectation each round: XCTest allows one wait per expectation.
-            let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: button)
-            _ = XCTWaiter().wait(for: [selected], timeout: 5)
-        }
-        return button.isSelected
     }
 
     /// The count in a chip's label ("Ei kohdistettu, 27"); -1 while the counts have not arrived.
@@ -199,7 +187,8 @@ final class OwnerScreensTests: WalkTestCase {
         fixture.tap()
         capture("c1-uploading")
 
-        // Uploaded, read by the server (no cloud AI in CI: an empty reading), then the form opens by itself.
+        // Uploaded, read by the server (an empty reading, or CI's reader stub: a bill with no date),
+        // then the form opens by itself.
         let preview = app.descendants(matching: .any).matching(identifier: "captured-file-preview").firstMatch
         if !preview.waitForExistence(timeout: 90) {
             let use = app.buttons["Käytä lomakkeessa"].firstMatch
@@ -218,8 +207,12 @@ final class OwnerScreensTests: WalkTestCase {
         guard back.exists else { XCTFail("the form has no Takaisin"); return }
         back.tap()
         sleep(1)
+        let discard = app.buttons["Hylkää muutokset"]
+        // A tap while the form is still settling (its picture grows in after c2) can be lost on a
+        // loaded host: run 38868746775 shot the form still up, nothing asked. Tapped again only then.
+        if !discard.exists && !waitGone(vendor, timeout: 4) && !discard.exists && back.exists { back.tap(); sleep(1) }
         // A reading the form changed asks first; nothing was typed, but the answer is the same.
-        if app.buttons["Hylkää muutokset"].exists { app.buttons["Hylkää muutokset"].tap(); sleep(1) }
+        if discard.exists { discard.tap(); sleep(1) }
         let queued = app.staticTexts["testikuitti.jpg"].firstMatch
         XCTAssertTrue(queued.waitForExistence(timeout: 5), "Takaisin lost the queue's row")
         let reopen = app.buttons["Käytä lomakkeessa"].firstMatch
@@ -263,10 +256,14 @@ final class OwnerScreensTests: WalkTestCase {
             let window = app.windows.firstMatch.frame
             XCTAssertTrue(toast.label.contains("lasku"), "toast: \(toast.label)")
             XCTAssertGreaterThan(toast.frame.minY, window.height * 0.6, "the toast is at \(toast.frame.minY): not at the bottom")
+        } else if ProcessInfo.processInfo.environment["LK_READER_STUB"] == "1" {
+            // The UI suite's OwnerScreensTests job reads uploads through scripts/sim/reader-stub.py,
+            // which calls every file a "lasku": this save had to file an ostolasku and say so.
+            XCTFail("the bill was saved but no ostolasku toast came (outcome: \(outcome))")
         } else if (testRun?.totalFailureCount ?? 0) == 0 {
             // The server files a bill as an ostolasku only when the reading says "lasku", and only the
-            // cloud AI reads the document type; CI never calls it, so this run saved a plain receipt.
-            throw XCTSkip("(e) ostolasku toast: the demo API cannot read a bill without cloud AI; (b) and (c) passed, the save closed the screen")
+            // cloud AI reads the document type; without it (or the CI stub) a plain receipt is saved.
+            throw XCTSkip("(e) ostolasku toast: this demo API has no reader for a bill (CI runs scripts/sim/reader-stub.py); (b) and (c) passed, the save closed the screen")
         }
     }
 
@@ -296,5 +293,27 @@ final class OwnerScreensTests: WalkTestCase {
         if !app.windows.firstMatch.frame.contains(status.frame) { app.swipeUp(); sleep(1) }
         XCTAssertTrue(!status.frame.isEmpty && app.windows.firstMatch.frame.contains(status.frame),
                       "the block is not on screen: \(status.frame)")
+    }
+
+    // Row 6 (w34's note): "+" → "Uusi myyntilasku" flashed. The form appeared without its line and its
+    // bottom bar, and they came in one frame later from its load. It must open finished: the app
+    // records, in its first appearance, whether the line and the baseline were already there.
+    func testE_NewInvoiceFromAddOpensFinished() {
+        // As an owner would: a moment on Koti, while the warm after Koti fetches what the form opens on
+        // (NextPrefetch.afterKoti: customers and catalog).
+        sleep(6)
+        app.tabBars.buttons["Lisää"].firstMatch.tap()
+        let new = app.buttons["Uusi myyntilasku"].firstMatch
+        guard new.waitForExistence(timeout: 10) else { capture("e0-no-add-sheet"); XCTFail("Lisää did not open"); return }
+        new.tap()
+        let opening = app.descendants(matching: .any).matching(identifier: "invoice-form-opening").firstMatch
+        guard opening.waitForExistence(timeout: 15) else {
+            capture("e1-no-form"); tree("e1-no-form"); XCTFail("Uusi myyntilasku did not open the form"); return
+        }
+        capture("e1-new-invoice")
+        XCTAssertEqual(opening.label, "valmis", "the form's first frame had no line: it came in a frame later (the flash)")
+        XCTAssertTrue(app.navigationBars["Uusi lasku"].exists, "the sheet is not the new invoice")
+        XCTAssertTrue(app.buttons["Luo lasku"].firstMatch.isEnabled, "Luo lasku is still waiting for the form's load")
+        app.buttons["Peruuta"].firstMatch.tap()
     }
 }
