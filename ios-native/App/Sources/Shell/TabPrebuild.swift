@@ -39,10 +39,12 @@ struct TabPrebuild: UIViewRepresentable {
         private func prebuild(_ controller: UITabBarController) async {
             // Koti's launch first: its figures are what the owner waits for.
             try? await Task.sleep(for: .seconds(1))
-            let tabs = controller.tabs
-            Self.logger.log("prebuild tabs=\(tabs.count, privacy: .public) controllers=\(controller.viewControllers?.count ?? -1, privacy: .public)")
+            // SwiftUI's TabView fills `viewControllers`, not the UITab list (`tabs` is empty: w58 perf walk).
+            let children = controller.viewControllers ?? []
+            Self.logger.log("prebuild tabs=\(controller.tabs.count, privacy: .public) controllers=\(children.count, privacy: .public)")
             // "+" is the last tab (MainTabView) and has nothing to build.
-            for (index, tab) in tabs.dropLast().enumerated() {
+            for (index, child) in children.dropLast().enumerated() {
+                let name = child.tabBarItem.title ?? "\(index)"
                 // The launch prefetch paints the lists within a few seconds; offline it may never.
                 var waited = 0
                 while index < ready.count, !ready[index](), waited < 30 {
@@ -50,11 +52,11 @@ struct TabPrebuild: UIViewRepresentable {
                     waited += 1
                 }
                 await RunLoopIdle.next()
-                guard tab !== controller.selectedTab, index >= ready.count || ready[index](), let child = tab.viewController else {
-                    Self.logger.log("prebuild \(tab.identifier, privacy: .public) skipped vc=\(tab.viewController != nil, privacy: .public)")
+                guard child !== controller.selectedViewController, index >= ready.count || ready[index]() else {
+                    Self.logger.log("prebuild \(name, privacy: .public) skipped selected=\(child === controller.selectedViewController, privacy: .public)")
                     continue
                 }
-                build(child, in: controller, name: tab.identifier)
+                build(child, in: controller, name: "\(name) \(String(describing: type(of: child)).prefix(40))")
             }
         }
 
