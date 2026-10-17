@@ -35,15 +35,21 @@ struct CapturedFilePreview: View {
                         .font(.footnote)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 120, maxHeight: 260)
-            if image != nil {
-                Button { fullScreen = url } label: {
-                    Label("Avaa koko näytölle", systemImage: "arrow.up.left.and.arrow.down.right")
-                }
-                .font(.caption.bold())
-                .buttonStyle(.borderless)
-                .foregroundStyle(Theme.accent)
+            // The picture's height and its button's row are there before the picture is: the
+            // form opens while the file is still being decoded, and a box that grew from the
+            // spinner's 120 pt to the picture pushed every field down 160 pt (row 7, motion gate
+            // 2026-10-17: "the upload screen jumps down after processing").
+            .frame(maxWidth: .infinity)
+            .frame(height: 260)
+            Button { fullScreen = url } label: {
+                Label("Avaa koko näytölle", systemImage: "arrow.up.left.and.arrow.down.right")
             }
+            .font(.caption.bold())
+            .buttonStyle(.borderless)
+            .foregroundStyle(Theme.accent)
+            .opacity(image == nil ? 0 : 1)
+            .disabled(image == nil)
+            .accessibilityHidden(image == nil)
         }
         .padding(.vertical, 8)
         .quickLookPreview($fullScreen)
