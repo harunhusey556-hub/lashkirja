@@ -3,6 +3,7 @@ import { rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-securi
 import { checkCredentials } from "@/lib/auth-login";
 import { openAuthSession } from "@/lib/account-security";
 import { sealBearerToken } from "@/lib/auth-credential";
+import { acceptDeviceKey } from "@/lib/device-key";
 
 /**
  * Password login for the bundled app: exchanges email + password for a
@@ -32,12 +33,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const row = await openAuthSession(result.user.id, req.headers.get("user-agent"), device);
+    const deviceKey = acceptDeviceKey(body?.deviceKey, "POST /api/auth/token");
+    const row = await openAuthSession(result.user.id, req.headers.get("user-agent"), device, deviceKey);
     const sealed = await sealBearerToken({
       userId: result.user.id,
       email: result.user.email,
       firstName: result.user.firstName,
       sessionId: row.id,
+      gen: 0,
+      sessionStartedAt: row.createdAt.getTime(),
     });
 
     return NextResponse.json({

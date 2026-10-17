@@ -21,6 +21,10 @@ export interface SessionData {
   sessionId?: string;
   /** "bearer" only inside a token. A cookie never carries it; a token always does. */
   kind?: "bearer";
+  /** Bearer only: which refresh of its session this token is (absent = 0). */
+  gen?: number;
+  /** Bearer only: epoch ms the session row was created. */
+  sessionStartedAt?: number;
 }
 
 export const sessionOptions: SessionOptions = {

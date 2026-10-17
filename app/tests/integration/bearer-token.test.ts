@@ -1,13 +1,14 @@
 import bcrypt from "bcryptjs";
 import { beforeEach, describe, expect, it } from "vitest";
 import { POST as issueToken } from "@/app/api/auth/token/route";
-import { POST as refreshToken, MAX_AUTH_SESSION_AGE_MS } from "@/app/api/auth/token/refresh/route";
+import { POST as refreshToken } from "@/app/api/auth/token/refresh/route";
 import { POST as logout } from "@/app/api/auth/logout/route";
 import { GET as me } from "@/app/api/auth/me/route";
 import { GET as sessionsGet, POST as sessionsPost } from "@/app/api/auth/sessions/route";
 import { proxy } from "@/proxy";
 import { prisma } from "@/lib/db";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
+import { SESSION_ABSOLUTE_MS } from "@/lib/session-limits";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildRequest, readJson, sessionCookie } from "./helpers/http";
 
@@ -190,7 +191,7 @@ describe("POST /api/auth/token/refresh", () => {
     );
     expect(response.status).toBe(401);
     expect(await readJson(response)).toEqual({
-      error: { code: "UNAUTHORIZED", message: "Kirjautuminen vaaditaan" },
+      error: { code: "UNAUTHORIZED", message: "Kirjautuminen vaaditaan", reason: "revoked" },
     });
   });
 
@@ -231,7 +232,7 @@ describe("POST /api/auth/token/refresh", () => {
     const { token } = await readJson<{ token: string }>(await issue());
     await prisma.authSession.updateMany({
       where: { userId: user.id },
-      data: { createdAt: new Date(Date.now() - (MAX_AUTH_SESSION_AGE_MS + 24 * 60 * 60 * 1000)) },
+      data: { createdAt: new Date(Date.now() - (SESSION_ABSOLUTE_MS + 24 * 60 * 60 * 1000)) },
     });
 
     const response = await refreshToken(
@@ -242,26 +243,21 @@ describe("POST /api/auth/token/refresh", () => {
     expect(response.status).toBe(401);
   });
 
-  it("a token that was never refreshed keeps authenticating even past the absolute age cap - only refresh is bounded by it (final review I3)", async () => {
+  it("an unrefreshed token past the absolute cap stops authenticating too, and the row is revoked (absolute)", async () => {
     const { token } = await readJson<{ token: string }>(await issue());
     await prisma.authSession.updateMany({
       where: { userId: user.id },
-      data: { createdAt: new Date(Date.now() - (MAX_AUTH_SESSION_AGE_MS + 24 * 60 * 60 * 1000)) },
+      data: { createdAt: new Date(Date.now() - (SESSION_ABSOLUTE_MS + 24 * 60 * 60 * 1000)) },
     });
 
-    // The original token's own iron-sealed TTL (30 days) is untouched by the
-    // row's age - only POST /api/auth/token/refresh enforces the cap.
     const meResponse = await me(
       buildRequest("GET", "/api/auth/me", undefined, { headers: { authorization: `Bearer ${token}` } })
     );
-    expect(meResponse.status).toBe(200);
-
-    const refreshResponse = await refreshToken(
-      buildRequest("POST", "/api/auth/token/refresh", undefined, {
-        headers: { authorization: `Bearer ${token}` },
-      })
-    );
-    expect(refreshResponse.status).toBe(401);
+    expect(meResponse.status).toBe(401);
+    expect((await readJson(meResponse)).error.reason).toBe("absolute");
+    const row = await prisma.authSession.findFirstOrThrow({ where: { userId: user.id } });
+    expect(row.revokedReason).toBe("absolute");
+    expect(row.revokedAt).not.toBeNull();
   });
 
   it("returns 429 after 31 refreshes in an hour", async () => {

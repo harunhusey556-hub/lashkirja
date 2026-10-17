@@ -3,6 +3,7 @@ import { getIronSession } from "iron-session";
 import { sessionOptions, type SessionData } from "@/lib/session";
 import { openAuthSession } from "@/lib/account-security";
 import { sealBearerToken } from "@/lib/auth-credential";
+import { acceptDeviceKey } from "@/lib/device-key";
 import { PasskeyError } from "@/lib/passkey";
 
 type SignedInUser = { id: string; email: string; firstName: string };
@@ -18,15 +19,23 @@ export async function issuePasskeySession(
   req: NextRequest,
   user: SignedInUser,
   transport: "bearer" | "cookie",
-  device?: "ios-app"
+  device?: "ios-app",
+  deviceKey?: unknown
 ): Promise<NextResponse> {
   if (transport === "bearer") {
-    const row = await openAuthSession(user.id, req.headers.get("user-agent"), device);
+    const row = await openAuthSession(
+      user.id,
+      req.headers.get("user-agent"),
+      device,
+      acceptDeviceKey(deviceKey, "POST /api/auth/passkey/authenticate/verify")
+    );
     const sealed = await sealBearerToken({
       userId: user.id,
       email: user.email,
       firstName: user.firstName,
       sessionId: row.id,
+      gen: 0,
+      sessionStartedAt: row.createdAt.getTime(),
     });
     return noStore(
       NextResponse.json({

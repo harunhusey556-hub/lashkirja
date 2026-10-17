@@ -77,10 +77,11 @@ export function hashesEqual(left: string, right: string): boolean {
 export async function openAuthSession(
   userId: string,
   userAgent: string | null,
-  device?: "ios-app"
+  device?: "ios-app",
+  deviceKey?: string | null
 ) {
   return prisma.authSession.create({
-    data: { userId, label: deviceLabel(userAgent, device) },
+    data: { userId, label: deviceLabel(userAgent, device), deviceKey: deviceKey ?? null },
   });
 }
 
@@ -116,9 +117,10 @@ export async function listAuthSessions(userId: string, currentId?: string) {
   const rows = await prisma.authSession.findMany({
     where: { userId, revokedAt: null },
     orderBy: [{ lastSeenAt: "desc" }, { id: "desc" }],
-    select: { id: true, label: true, createdAt: true, lastSeenAt: true },
+    select: { id: true, label: true, createdAt: true, lastSeenAt: true, deviceKey: true },
   });
-  return rows.map((row) => ({ ...row, current: row.id === currentId }));
+  // The key itself never leaves the server; the list only says whether the device is bound.
+  return rows.map(({ deviceKey, ...row }) => ({ ...row, current: row.id === currentId, trusted: deviceKey !== null }));
 }
 
 /** Re-authentication for sensitive actions: throws 401 "Nykyinen salasana on väärä." */

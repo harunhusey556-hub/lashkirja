@@ -91,14 +91,25 @@ model User {
 
 /// A browser or device that logged in. The iron-session cookie stores this id.
 /// A row with revokedAt is dead even if the cookie is still presented.
+/// The row IS the token family: one row per device sign-in, and the bearer
+/// token generations (tokenGeneration) live inside it - no separate family id.
 model AuthSession {
-  id         String    @id @default(uuid())
-  userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  label      String
-  createdAt  DateTime  @default(now())
-  lastSeenAt DateTime  @default(now())
-  revokedAt  DateTime?
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label           String
+  createdAt       DateTime  @default(now())
+  lastSeenAt      DateTime  @default(now())
+  revokedAt       DateTime?
+  /// Base64 of the device's P-256 public key (65-byte X9.63 point). Null = legacy/unbound:
+  /// refresh needs no device signature.
+  deviceKey       String?
+  /// Newest token generation the device has used; a refresh commits it on first use.
+  tokenGeneration Int       @default(0)
+  /// When tokenGeneration last advanced (the previous generation is accepted for a short grace).
+  rotatedAt       DateTime?
+  /// Why revokedAt was set by the server: "idle", "absolute" or "reuse". Null for user sign-outs.
+  revokedReason   String?
 
   @@index([userId, revokedAt])
 }
