@@ -77,21 +77,6 @@ final class OwnerScreensTests: WalkTestCase {
         return app.navigationBars["Kuitit"].exists
     }
 
-    /// Taps a tab until it reports itself selected. The first tap after sign-in can land while the
-    /// passkey offer or a system prompt is still leaving, and is then lost (CI round 1: still on Koti).
-    func selectTab(_ name: String) -> Bool {
-        let button = app.tabBars.buttons[name].firstMatch
-        guard button.waitForExistence(timeout: 10) else { return false }
-        for _ in 0..<3 where !button.isSelected {
-            dismissSystemPrompts()
-            button.tap(); taps += 1
-            // A fresh expectation each round: XCTest allows one wait per expectation.
-            let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: button)
-            _ = XCTWaiter().wait(for: [selected], timeout: 5)
-        }
-        return button.isSelected
-    }
-
     /// The count in a chip's label ("Ei kohdistettu, 27"); -1 while the counts have not arrived.
     static func lastNumber(_ label: String) -> Int {
         guard let digits = label.split(whereSeparator: { !$0.isNumber }).last else { return -1 }
