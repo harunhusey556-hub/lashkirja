@@ -14,7 +14,7 @@ import { computeInvoiceTotals, dueDateFor, InvoiceValidationError, MAX_PAYMENT_T
 import { customerSearchFields } from "./search";
 import { categoryLabel, normalizeExtractedCategory, RECEIPT_CATEGORY_IDS } from "./receipt-categories";
 import { parseVatDetails } from "./alv";
-import { sameVatLines, vatLinesProblem } from "./receipt-vat";
+import { negativeAmountProblem, sameVatLines, vatLinesProblem } from "./receipt-vat";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 import { AppError } from "./api-errors";
 import { applyReceiptPatch, type ReceiptPatch } from "./receipt-update";
@@ -261,9 +261,10 @@ const receiptUpdateArgs = z
     category: z.string().trim().max(100).optional(),
     vendor: z.string().trim().min(1).max(300).optional(),
     date: z.string().trim().optional(),
-    totalAmount: z.number().finite().nonnegative().refine(isCentAmount, "at most two decimals").optional(),
+    // Signed, as in PATCH /api/receipts/[id]: a stored credit note is corrected as it reads (negative).
+    totalAmount: z.number().finite().refine(isCentAmount, "at most two decimals").optional(),
     vatLines: z
-      .array(z.object({ rate: z.number().finite().min(0).max(100), amount: z.number().finite().nonnegative().refine(isCentAmount, "at most two decimals") }).strict())
+      .array(z.object({ rate: z.number().finite().min(0).max(100), amount: z.number().finite().refine(isCentAmount, "at most two decimals") }).strict())
       .max(5)
       .optional(),
   })
@@ -296,10 +297,10 @@ const proposeReceiptUpdate: ChatTool = {
           category: { type: "string", description: `One of: ${RECEIPT_CATEGORY_IDS.join(", ")}` },
           vendor: { type: "string" },
           date: { type: "string", description: "YYYY-MM-DD" },
-          totalAmount: { type: "number", description: "Total including VAT, euros." },
+          totalAmount: { type: "number", description: "Total including VAT, euros. Negative only for a credit note (a receipt whose total is already negative)." },
           vatLines: {
             type: "array",
-            description: "The whole VAT breakdown: one line per rate, amount = VAT in euros.",
+            description: "The whole VAT breakdown: one line per rate, amount = VAT in euros, with the total's sign (negative on a credit note).",
             items: { type: "object", required: ["rate", "amount"], properties: { rate: { type: "number" }, amount: { type: "number" } } },
           },
         },
@@ -315,6 +316,10 @@ const proposeReceiptUpdate: ChatTool = {
     const args = parsed.data;
     const receipt = await prisma.receipt.findFirst({ where: { id: args.receiptId, userId: ctx.userId } });
     if (!receipt) return { ok: false, error: "No such receipt. Use an id from search_receipts." };
+    // The edit's own rule (applyReceiptPatch checks it again on Hyväksy); the model gets it in English.
+    if (negativeAmountProblem({ totalAmount: args.totalAmount, vatDetails: args.vatLines }, (receipt.totalAmountCents ?? 0) < 0)) {
+      return { ok: false, error: "Negative amounts are only for a credit note: this receipt's total is not negative." };
+    }
 
     const patch: ReceiptPatch = {};
     const changes: ReceiptFieldChange[] = [];

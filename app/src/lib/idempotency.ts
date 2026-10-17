@@ -40,7 +40,7 @@ export function failNextIdempotencyResponseForTests(times = 1): void {
   failResponseSaves = times;
 }
 
-function isUniqueConflict(error: unknown): boolean {
+export function isUniqueConflict(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
@@ -166,28 +166,34 @@ async function claimKey<T>(
  * render and SMTP take longer than an interactive transaction may. The key is
  * claimed first, the work runs on its own, and the answer is stored after. A
  * retry with the same key gets that answer instead of doing the work again; if
- * the work failed the key is released, so the retry runs it.
+ * the work failed the key is released, so the retry runs it. Work that
+ * stopped early and can be continued answers with `release`: the key is
+ * released too, and the retry continues it.
  */
 export async function withIdempotentSideEffect<T>(
   userId: string,
   scope: string,
   key: string | null,
-  run: () => Promise<{ status: number; body: T }>,
+  run: () => Promise<{ status: number; body: T; release?: boolean }>,
   requestHash: string | null = null
 ): Promise<IdempotentResult<T>> {
   if (!key) {
     const fresh = await run();
-    return { ...fresh, replayed: false };
+    return { status: fresh.status, body: fresh.body, replayed: false };
   }
   const answered = await claimKey<T>(userId, scope, key, requestHash);
   if (answered) return answered;
 
-  let produced: { status: number; body: T };
+  let produced: { status: number; body: T; release?: boolean };
   try {
     produced = await run();
   } catch (error) {
     await prisma.idempotencyRecord.deleteMany({ where: { userId, scope, key, statusCode: 0 } });
     throw error;
+  }
+  if (produced.release) {
+    await prisma.idempotencyRecord.deleteMany({ where: { userId, scope, key, statusCode: 0 } });
+    return { status: produced.status, body: produced.body, replayed: false };
   }
   // The work is done and cannot be undone: a failure to store the answer must
   // not turn into a failure of the request.
@@ -202,7 +208,7 @@ export async function withIdempotentSideEffect<T>(
       if (attempt === 2) console.error("Idempotent send answer was not stored", error);
     }
   }
-  return { ...produced, replayed: false };
+  return { status: produced.status, body: produced.body, replayed: false };
 }
 
 function replay<T>(row: IdempotencyRow, requestHash: string | null): IdempotentResult<T> {

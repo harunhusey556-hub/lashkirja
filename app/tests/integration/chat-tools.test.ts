@@ -464,6 +464,20 @@ describe("propose_receipt_update", () => {
     expect(JSON.parse(stored.proposalData!).type).toBe("receipt_update");
   });
 
+  it("holds VAT lines to the total's sign, and negative amounts to a credit note (review 2026-10-16)", async () => {
+    const credit = await createReceipt(owner.id, { date: "2026-09-03", totalAmountCents: -12_550, vatDetails: JSON.stringify([{ rate: 25.5, amount: -25.5 }]) });
+    const positiveVat = await call(owner.id, "propose_receipt_update", { receiptId: credit.id, vatLines: [{ rate: 25.5, amount: 25.5 }] });
+    expect(positiveVat.result).toMatchObject({ ok: false, error: expect.stringMatching(/etumerkki/) });
+    const positiveTotal = await call(owner.id, "propose_receipt_update", { receiptId: credit.id, totalAmount: 125.5 });
+    expect(positiveTotal.result).toMatchObject({ ok: false, error: expect.stringMatching(/etumerkki/) });
+    const fixed = await call(owner.id, "propose_receipt_update", { receiptId: credit.id, totalAmount: -113.5, vatLines: [{ rate: 13.5, amount: -13.5 }] });
+    expect(fixed.result).toMatchObject({ ok: true });
+
+    const ordinary = await createReceipt(owner.id, { date: "2026-09-03", totalAmountCents: 100_00 });
+    const negative = await call(owner.id, "propose_receipt_update", { receiptId: ordinary.id, totalAmount: -100, vatLines: [{ rate: 25.5, amount: -20.32 }] });
+    expect(negative.result).toMatchObject({ ok: false, error: expect.stringMatching(/credit note/) });
+  });
+
   it("never proposes a change to another owner's receipt or into a closed period", async () => {
     const theirs = await createReceipt(stranger.id, { vendor: "Vieras" });
     const { result } = await call(owner.id, "propose_receipt_update", { receiptId: theirs.id, category: "muut" });

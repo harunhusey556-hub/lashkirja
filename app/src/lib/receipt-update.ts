@@ -13,7 +13,7 @@ import { NotFoundError, ValidationError } from "./api-errors";
 import { sanitizeText } from "./sanitizer";
 import { assertPeriodOpen } from "./period-lock";
 import { parseVatDetails } from "./alv";
-import { sameVatLines, vatLinesProblem } from "./receipt-vat";
+import { negativeAmountProblem, sameVatLines, vatLinesProblem } from "./receipt-vat";
 import { versionConflict } from "./edit-conflict";
 import type { PurchaseVatTreatment } from "./alv";
 import { VENDOR_CORRECTION_KIND } from "./vendor-intelligence";
@@ -59,6 +59,8 @@ type Db = Prisma.TransactionClient;
 async function applyIn(tx: Db, userId: string, id: string, body: ReceiptPatch, expected: Date | null) {
   const owned = await tx.receipt.findFirst({ where: { id, userId } });
   if (!owned) throw new NotFoundError("Kuittia ei löytynyt");
+  const signProblem = negativeAmountProblem(body, (owned.totalAmountCents ?? 0) < 0);
+  if (signProblem) throw new ValidationError(signProblem);
 
   // The VAT that would be stored (the sent one, or the stored one when only the
   // total changes) must fit the total that would be stored: same rule as save.
