@@ -113,6 +113,12 @@ targets:
       - target: LashKirjaStripe
         link: false
         embed: true
+      # The SDK LashKirjaStripe links: in the app's Frameworks (a framework does not embed its
+      # own), still not linked by the app.
+      - package: StripeTerminal
+        product: StripeTerminal
+        link: false
+        embed: true
   # Stripe Terminal behind StripeTerminalDriving (Shared/), loaded at run time by the app.
   LashKirjaStripe:
     type: framework
