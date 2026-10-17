@@ -118,6 +118,11 @@ final class AppModel {
     /// The stored session this device opened at launch without asking the server (`TrustedSession`);
     /// nil when the launch went to the sign-in screen or the store cannot be read before the first frame.
     @ObservationIgnored private var launchUser: AuthUser?
+    /// The opened session's `/api/auth/me`, sent from `init` off the main thread: nothing waits on
+    /// it, but its 401 is known while the first frame is still being built. Sent from `start()`
+    /// (after that frame and the tabs) it went out only once the main thread was free, and a
+    /// revoked session reached the sign-in screen 1.7–4.5 s after the first frame (CI, w67).
+    @ObservationIgnored private var launchMe: Task<MeResponse?, Never>?
     /// A stored session found past its idle or absolute limit at launch: `start()` ends it, and has
     /// the server revoke it, behind the sign-in screen.
     @ObservationIgnored private var launchExpired = false
@@ -156,6 +161,11 @@ final class AppModel {
             let user = AuthUser(userId: stored.userId, email: "", firstName: nil)
             primeKotiFromDisk(user: user.userId)
             launchUser = user
+            let connected = clientConnected
+            launchMe = Task.detached { [api] in
+                await connected?.value
+                return try? await api.get("/api/auth/me") as MeResponse
+            }
             phase = .signedIn(user)
         case .signIn(let expired):
             launchExpired = expired
@@ -237,9 +247,9 @@ final class AppModel {
         AppLock.shared.adoptOwnerIfUnknown(user.userId)
         AppLock.shared.keepOnly(for: user.userId)
         let started = session.current
-        // Out first and light: of the launch's requests its answer usually comes back first, so a
-        // revoked session reaches the sign-in screen soonest. Nothing waits on it.
-        let me = Task { [api] in try? await api.get("/api/auth/me") as MeResponse }
+        // Already out since `init` for a session opened there; nothing waits on it.
+        let me = launchMe ?? Task { [api] in try? await api.get("/api/auth/me") as MeResponse }
+        launchMe = nil
         await auth.refreshIfDue()
         // A refused refresh already signed out (with the notice): stop here.
         guard await auth.currentToken() != nil else {
