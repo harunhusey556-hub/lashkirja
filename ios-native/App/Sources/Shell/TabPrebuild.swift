@@ -7,9 +7,9 @@ import os
 /// thread 0.4–1.3 s more than a revisit on CI (w53 perf walk), and the motion audit read the screen
 /// that came after that still pause as a late change. SwiftUI fills a tab's own controller only
 /// when the tab is selected (w58 perf walk: `TabHostingController` views=1 offscreen), so the copy
-/// is a throwaway hosting controller laid out offscreen at the tab's size: the view types, list and
-/// search machinery and text are made once before the owner's tap. It is not in a window, so no
-/// `onAppear`/`.task` runs and nothing is asked of the server before the owner opens the tab.
+/// is a throwaway hosting controller laid out at the tab's size in a window the owner never sees:
+/// the view types, list and search machinery and text are made once before the owner's tap. Its
+/// `.task`s may start the tab's own cached reads early; they end with the copy.
 struct TabPrebuild: UIViewRepresentable {
     /// Per tab, in TabView order: whether its first frame's data is in memory yet. The copy is built
     /// from the same previews as the tab's first frame, so it waits for them (or is not built).
@@ -60,19 +60,39 @@ struct TabPrebuild: UIViewRepresentable {
                 }
                 let tabs = controller.viewControllers ?? []
                 let name = index < tabs.count ? tabs[index].tabBarItem.title ?? "\(index)" : "\(index)"
-                build(roots[index](), size: controller.selectedViewController?.view.bounds.size ?? controller.view.bounds.size, name: name)
+                build(roots[index](), size: controller.selectedViewController?.view.bounds.size ?? controller.view.bounds.size, name: name, in: controller.view.window?.windowScene)
             }
         }
 
-        private func build(_ root: AnyView, size: CGSize, name: String) {
+        private func build(_ root: AnyView, size: CGSize, name: String, in scene: UIWindowScene?) {
+            guard let scene else { return }
             let start = ContinuousClock.now
+            // SwiftUI renders a hosting view only in a window (w58 perf walk: windowless, the copy
+            // was one empty view). Its own window, never key and closed again in this turn; hidden
+            // first, and if SwiftUI builds nothing there, shown under the app's window and off its
+            // edge, out of reach of touches and VoiceOver.
+            let window = UIWindow(windowScene: scene)
+            window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.normal.rawValue - 1)
+            window.frame = CGRect(origin: CGPoint(x: scene.screen.bounds.width, y: 0), size: size)
+            window.isUserInteractionEnabled = false
+            window.accessibilityElementsHidden = true
             let host = UIHostingController(rootView: root)
+            window.rootViewController = host
             host.view.frame = CGRect(origin: .zero, size: size)
-            host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
+            var mode = "hidden"
+            if Self.count(host.view) < 10 {
+                mode = "shown"
+                window.isHidden = false
+                host.view.setNeedsLayout()
+                host.view.layoutIfNeeded()
+            }
+            let views = Self.count(host.view), lists = Self.lists(host.view)
+            window.isHidden = true
+            window.rootViewController = nil
             let elapsed = ContinuousClock.now - start
             let ms = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
-            Self.logger.log("prebuild \(name, privacy: .public) \(ms, privacy: .public) ms views=\(Self.count(host.view), privacy: .public) lists=\(Self.lists(host.view), privacy: .public)")
+            Self.logger.log("prebuild \(name, privacy: .public) \(ms, privacy: .public) ms \(mode, privacy: .public) views=\(views, privacy: .public) lists=\(lists, privacy: .public)")
         }
 
         private static func count(_ view: UIView) -> Int { 1 + view.subviews.reduce(0) { $0 + count($1) } }
