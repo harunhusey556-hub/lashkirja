@@ -99,6 +99,8 @@ public struct DeviceSession: Decodable, Sendable, Identifiable, Hashable {
     public let createdAt: String
     public let lastSeenAt: String?
     public let current: Bool
+    /// Bound to that device's key (w67): its token cannot be renewed anywhere else. Nil from an older server.
+    public var trusted: Bool?
 }
 
 public struct DeviceSessions: Decodable, Sendable { public let sessions: [DeviceSession] }

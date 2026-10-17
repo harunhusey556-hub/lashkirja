@@ -1,4 +1,5 @@
 import UIKit
+import Observation
 
 /// What the simulator UI tests (LashKirjaUITests/OwnerScreensTests) need from the app, switched on
 /// by the launch argument `-LKUITest`. Debug and Release-UITest builds only (LK_UITEST_HOOKS): a
@@ -47,7 +48,11 @@ enum UITestHooks {
             return timeline.last
         }
         // For a launch outside XCTest (`simctl launch --console-pty`, ios-session-gate.yml).
-        if let line { print("LKMARK \(line)") }
+        if let line {
+            print("LKMARK \(line)")
+            // A moment after the last phase change (Koti's figures) still reaches the marker's label.
+            Task { @MainActor in LaunchTimelineVersion.shared.value += 1 }
+        }
     }
     #else
     /// The launch timeline is the UI tests' only: a Release build marks nothing.
@@ -79,3 +84,13 @@ enum UITestHooks {
         }
     }
 }
+
+#if DEBUG || LK_UITEST_HOOKS
+/// Bumped by every new launch moment, so RootView's marker rebuilds its label with it.
+@MainActor
+@Observable
+final class LaunchTimelineVersion {
+    static let shared = LaunchTimelineVersion()
+    var value = 0
+}
+#endif

@@ -181,12 +181,14 @@ final class StabilityTests: WalkTestCase {
         XCTAssertTrue(launchPhase(["signedIn"]).waitForExistence(timeout: 10), "the new session was not accepted")
     }
 
-    /// A revoked stored session reaches the sign-in screen within 1.5 s of launch (w49, row 27; it
-    /// took 7–9 s). Three launches, each from a painted Koti whose session was then revoked on the
-    /// demo API. Asserted on the app's own clock (process start → sign-in screen first built, the
-    /// marker's label); XCUITest's `launch()` → password field, which adds its own launch handshake, is noted.
+    /// A revoked stored session reaches the sign-in screen within 1 s of the app's FIRST FRAME (w67,
+    /// row 27, as the owner accepted: the trusted session paints the cached Koti at once and the
+    /// screens' own loads verify it). Three launches, each from a painted Koti whose session was then
+    /// revoked on the demo API. Asserted on the app's own clock (the marker's label: when each phase
+    /// was first built, ms after the process started); process start → sign-in screen (w49's figure)
+    /// and XCUITest's `launch()` → password field are noted, not asserted.
     func test10_RevokedSessionReachesSignInFast() {
-        var appTimes: [Int] = []
+        var fromFrame: [Int] = []
         for round in 1...3 {
             // Koti painted and kept on disk: the launch below paints from the cache, as on the phone.
             XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 30), "round \(round): no tab bar before the revoke")
@@ -198,17 +200,12 @@ final class StabilityTests: WalkTestCase {
             let launched = Int(Date().timeIntervalSince(started) * 1000)
             XCTAssertTrue(app.secureTextFields.firstMatch.waitForExistence(timeout: 30), "round \(round): no sign-in screen")
             let wall = Int(Date().timeIntervalSince(started) * 1000)
-            let marker = launchPhase(["signedOut"])
-            // "tabs=<ms> signedOut=<ms>": when each was first built, in ms after the process started.
-            let timeline = marker.waitForExistence(timeout: 5) ? marker.label : ""
-            var moments: [String: Int] = [:]
-            for entry in timeline.split(separator: " ") {
-                let pair = entry.split(separator: "=")
-                if pair.count == 2, let ms = Int(pair[1]) { moments[String(pair[0])] = ms }
-            }
-            let ms = moments["signedOut"].flatMap { $0 >= 0 ? $0 : nil }
-            if let ms { appTimes.append(ms) }
-            note("MARK revoked-session round \(round): app \(ms.map(String.init) ?? "?") ms (\(timeline)), launch() returned \(launched) ms, → password field \(wall) ms")
+            let moments = launchMoments(["signedOut"])
+            let frame = Self.firstFrame(moments)
+            let signedOut = moments["signedOut"].flatMap { $0 >= 0 ? $0 : nil }
+            let ms = signedOut.flatMap { out in frame.map { out - $0 } }
+            if let ms { fromFrame.append(ms) }
+            note("MARK revoked-session round \(round): first frame → sign-in \(ms.map(String.init) ?? "?") ms; process start → sign-in \(signedOut.map(String.init) ?? "?") ms (\(Self.timeline(moments))), launch() returned \(launched) ms, → password field \(wall) ms")
             // A calm way out: no load failure or offline notice on the way to the sign-in screen.
             let failure = app.staticTexts.matching(NSPredicate(format: "label IN %@", ["Lataus epäonnistui", "Palvelimeen ei saada yhteyttä", "Istunto on päättynyt"])).firstMatch
             XCTAssertFalse(failure.exists, "round \(round): an error showed on the way out: \(failure.label)")
@@ -217,10 +214,61 @@ final class StabilityTests: WalkTestCase {
             probe { _ = savePasswordPrompt.waitForExistence(timeout: 10) }
             sleep(1); dismissSystemPrompts()
         }
-        let sorted = appTimes.sorted()
-        note("MARK revoked-session app ms \(appTimes) median \(sorted.isEmpty ? -1 : sorted[sorted.count / 2])")
-        XCTAssertEqual(appTimes.count, 3, "the launch marker did not say when the sign-in screen came")
-        if !sorted.isEmpty { XCTAssertLessThanOrEqual(sorted[sorted.count / 2], 1500, "revoked session → sign-in screen: \(appTimes) ms") }
+        let sorted = fromFrame.sorted()
+        note("MARK revoked-session first frame → sign-in ms \(fromFrame) median \(sorted.isEmpty ? -1 : sorted[sorted.count / 2])")
+        XCTAssertEqual(fromFrame.count, 3, "the launch marker did not say when the first frame and the sign-in screen came")
+        if !sorted.isEmpty { XCTAssertLessThanOrEqual(sorted[sorted.count / 2], 1000, "revoked session: first frame → sign-in screen \(fromFrame) ms") }
+    }
+
+    /// A valid stored session: launch → Koti's figures (Perf's `launch koti`, on the marker's clock)
+    /// and what the first frame was. Three launches from a painted Koti; noted for the before/after
+    /// table (ios-session-gate.yml), not asserted.
+    func test11_ValidSessionOpensOnKoti() {
+        var toKoti: [Int] = []
+        for round in 1...3 {
+            XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 30), "round \(round): no tab bar before the relaunch")
+            sleep(2)
+            app.terminate()
+            app.launch()
+            let moments = launchMoments(["restored", "signedIn"], waitingFor: "koti")
+            let koti = moments["koti"].flatMap { $0 >= 0 ? $0 : nil }
+            if let koti { toKoti.append(koti) }
+            let firstPhase = moments.filter { ["launching", "tabs", "signedOut"].contains($0.key) }.min { $0.value < $1.value }?.key ?? "?"
+            note("MARK valid-session round \(round): launch → Koti \(koti.map(String.init) ?? "?") ms, first frame \(Self.firstFrame(moments).map(String.init) ?? "?") ms (\(firstPhase)) (\(Self.timeline(moments)))")
+            XCTAssertFalse(app.secureTextFields.firstMatch.exists, "round \(round): a valid session went to the sign-in screen")
+        }
+        let sorted = toKoti.sorted()
+        note("MARK valid-session launch → Koti ms \(toKoti) median \(sorted.isEmpty ? -1 : sorted[sorted.count / 2])")
+    }
+
+    /// The marker's moments ("tabs=<ms> signedOut=<ms> …", ms after the process started) once it
+    /// shows one of `phases` (and, with `waitingFor`, once that moment is in the label too).
+    private func launchMoments(_ phases: [String], waitingFor moment: String? = nil) -> [String: Int] {
+        let marker = launchPhase(phases)
+        guard marker.waitForExistence(timeout: 30) else { return [:] }
+        var label = marker.label
+        if let moment {
+            let deadline = Date().addingTimeInterval(30)
+            while !label.contains(moment + "="), Date() < deadline {
+                usleep(200_000)
+                label = marker.label
+            }
+        }
+        var moments: [String: Int] = [:]
+        for entry in label.split(separator: " ") {
+            let pair = entry.split(separator: "=")
+            if pair.count == 2, let ms = Int(pair[1]) { moments[String(pair[0])] = ms }
+        }
+        return moments
+    }
+
+    /// The first frame: whichever phase the marker was first built in.
+    private static func firstFrame(_ moments: [String: Int]) -> Int? {
+        moments.filter { ["launching", "tabs", "signedOut"].contains($0.key) && $0.value >= 0 }.values.min()
+    }
+
+    private static func timeline(_ moments: [String: Int]) -> String {
+        moments.sorted { $0.value < $1.value }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
     }
 
     /// Revokes the demo user's app sessions on the demo API, so the token in the simulator's

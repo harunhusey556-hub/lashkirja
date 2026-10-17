@@ -3,7 +3,7 @@ import Security
 import LashKirjaCore
 
 /// The bearer token in the Keychain, readable after first unlock, this device only.
-actor KeychainTokenStore: TokenStore {
+actor KeychainTokenStore: TokenStore, LaunchTokenReading {
     private let service = "fi.tiyouba.lashkirja"
     private let account: String
     private let revokeAccount: String
@@ -13,7 +13,10 @@ actor KeychainTokenStore: TokenStore {
         self.revokeAccount = account + ".pending-revoke"
     }
 
-    func load() -> StoredToken? {
+    func load() -> StoredToken? { loadAtLaunch() }
+
+    /// The same read, from the App's init (SecItem calls are thread-safe; nothing here is mutable).
+    nonisolated func loadAtLaunch() -> StoredToken? {
         guard let data = read(account) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970
@@ -38,11 +41,11 @@ actor KeychainTokenStore: TokenStore {
         if let token { try? write(revokeAccount, Data(token.utf8)) } else { delete(revokeAccount) }
     }
 
-    private func base(_ account: String) -> [String: Any] {
+    private nonisolated func base(_ account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
     }
 
-    private func read(_ account: String) -> Data? {
+    private nonisolated func read(_ account: String) -> Data? {
         var query = base(account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne

@@ -39,10 +39,6 @@ public actor APIClient {
     /// already sent is left to finish: the server may have stored it (a receipt save), and only its
     /// answer tells the owner whether it did. The generation check keeps an unsent write in.
     private var sessionRequests: [UUID: Task<HTTPResponse, Error>] = [:]
-    /// While the launch's session check is out (`checkSession`), every other request waits on this,
-    /// at most `hold`: the stored token's verdict comes back alone instead of behind the burst of
-    /// launch loads (7–9 s on a CI runner, w49).
-    private var launchHold: Task<Void, Never>?
 
     public init(baseURL: URL, transport: HTTPTransport, tokens: TokenProvider,
                 sleep: @escaping @Sendable (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }) {
@@ -56,43 +52,12 @@ public actor APIClient {
     public func setOnWrite(_ handler: (@Sendable (String) async -> Void)?) { onWrite = handler }
     public func setOnReachability(_ handler: (@Sendable (Bool) async -> Void)?) { onReachability = handler }
 
-    /// Asks `path` with the stored token, first and alone: the other requests wait until it is
-    /// answered or `hold` seconds have passed, whichever comes first. Past the hold the check still
-    /// runs, and its 401 (like any request's) ends the session when it comes. Only a refusing 401
-    /// is `.refused`; offline, a timeout or a server failure says nothing about the session.
-    public func checkSession(_ path: String, hold: TimeInterval) -> Task<SessionCheck, Never> {
-        let sleep = self.sleep
-        let gate = Task { await sleep(UInt64(hold * 1_000_000_000)) }
-        launchHold = gate
-        return Task {
-            let outcome: SessionCheck
-            do {
-                let response = try await self.perform("GET", path, query: [:], body: nil, contentType: nil,
-                                                      idempotencyKey: nil, held: false)
-                outcome = .accepted(response.body)
-            } catch let error as LKError where error.endsSession {
-                outcome = .refused
-            } catch {
-                outcome = .unanswered
-            }
-            self.openHold(gate)
-            return outcome
-        }
-    }
-
-    private func openHold(_ gate: Task<Void, Never>) {
-        gate.cancel()
-        if launchHold == gate { launchHold = nil }
-    }
-
     /// The session ended on this device (sign-out, or a 401 seen outside this client): its
     /// reads still on the wire are cancelled and any request still waiting never goes out.
     public func endSessionRequests() {
         sessionGeneration += 1
         for request in sessionRequests.values { request.cancel() }
         sessionRequests = [:]
-        launchHold?.cancel()
-        launchHold = nil
     }
 
     public func setOnUnexpectedFailure(_ handler: (@Sendable (String, String, Int, Bool) async -> Void)?) { onUnexpectedFailure = handler }
@@ -126,6 +91,13 @@ public actor APIClient {
     public func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, query: [String: String] = [:], body: B?, idempotencyKey: String? = nil) async throws -> T {
         let data = try body.map { try JSONEncoder().encode($0) }
         let response = try await perform(method, path, query: query, body: data, contentType: data == nil ? nil : "application/json", idempotencyKey: idempotencyKey)
+        return try decode(response, method: method, path: path)
+    }
+
+    /// A write whose extra headers are made from the token it goes out with (the trusted device's
+    /// signature on a token refresh), so they always match the Authorization header.
+    public func send<T: Decodable>(_ method: String, _ path: String, signedHeaders: @escaping @Sendable (String?) async -> [String: String]) async throws -> T {
+        let response = try await perform(method, path, query: [:], body: nil, contentType: nil, idempotencyKey: nil, signedHeaders: signedHeaders)
         return try decode(response, method: method, path: path)
     }
 
@@ -182,15 +154,15 @@ public actor APIClient {
     }
 
     private func perform(_ method: String, _ path: String, query: [String: String], body: Data?, contentType: String?, idempotencyKey: String?,
-                         held: Bool = true) async throws -> HTTPResponse {
+                         signedHeaders: (@Sendable (String?) async -> [String: String])? = nil) async throws -> HTTPResponse {
         // Sent as X-Request-Id: the server logs its errors under the same id.
         let requestId = String(UUID().uuidString.prefix(8)).lowercased()
         let started = Date()
         let generation = sessionGeneration
-        if held, let launchHold { await launchHold.value }
         do {
             let response = try await attempt(method, path, query: query, body: body, contentType: contentType,
-                                             idempotencyKey: idempotencyKey, requestId: requestId, generation: generation)
+                                             idempotencyKey: idempotencyKey, requestId: requestId, generation: generation,
+                                             signedHeaders: signedHeaders)
             noteFinished(method, path, status: response.status, started: started, requestId: requestId, error: nil)
             return response
         } catch {
@@ -199,7 +171,8 @@ public actor APIClient {
         }
     }
 
-    private func attempt(_ method: String, _ path: String, query: [String: String], body: Data?, contentType: String?, idempotencyKey: String?, requestId: String, generation: Int) async throws -> HTTPResponse {
+    private func attempt(_ method: String, _ path: String, query: [String: String], body: Data?, contentType: String?, idempotencyKey: String?, requestId: String, generation: Int,
+                         signedHeaders: (@Sendable (String?) async -> [String: String])?) async throws -> HTTPResponse {
         var request = URLRequest(url: url(path, query: query))
         request.httpMethod = method
         request.setValue(requestId, forHTTPHeaderField: "X-Request-Id")
@@ -208,13 +181,15 @@ public actor APIClient {
         if let idempotencyKey { request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key") }
         let sentToken = await tokens.currentToken()
         if let sentToken { request.setValue("Bearer \(sentToken)", forHTTPHeaderField: "Authorization") }
+        if let signedHeaders {
+            for (name, value) in await signedHeaders(sentToken) { request.setValue(value, forHTTPHeaderField: name) }
+        }
         request.httpBody = body
 
         let attempts = RetryPolicy.attempts(method: method)
         var last: HTTPResponse?
         for attempt in 0..<attempts {
-            // The session it was asked for ended while it waited (the launch hold, a retry's
-            // backoff): it does not go out, with no token or with the next owner's.
+            // The session it was asked for ended while it waited (a retry's backoff): it does not go out, with no token or with the next owner's.
             guard generation == sessionGeneration else { throw CancellationError() }
             let response: HTTPResponse
             do { response = try await send(request, cancelledWithSession: sentToken != nil && method == "GET") }
@@ -273,36 +248,6 @@ public actor APIClient {
         sessionRequests[id] = task
         defer { sessionRequests[id] = nil }
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
-    }
-}
-
-/// What the launch's session check learned about the stored token.
-public enum SessionCheck: Sendable, Equatable {
-    /// The server accepted it; the answer's body.
-    case accepted(Data)
-    /// A 401 that ends the session (the client's handler has already been told).
-    case refused
-    /// No verdict: offline, a timeout, or a failure that is not the session's. The owner stays signed in.
-    case unanswered
-
-    /// How long the launch waits for the verdict (on its calm launch look, with every other request
-    /// held) before the cached screens and the loads go ahead anyway. Owner, 2026-10-16: at most 1 s.
-    public static let hold: TimeInterval = 1.0
-
-    /// `check`'s verdict if it comes within `seconds`, nil once they have passed first. The check
-    /// itself keeps running: its later 401 still ends the session.
-    public static func verdict(of check: Task<SessionCheck, Never>, within seconds: TimeInterval) async -> SessionCheck? {
-        let (first, sink) = AsyncStream.makeStream(of: SessionCheck?.self)
-        let answer = Task { sink.yield(await check.value) }
-        let timer = Task {
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            sink.yield(nil)
-        }
-        var next = first.makeAsyncIterator()
-        let verdict = await next.next() ?? nil
-        timer.cancel()
-        answer.cancel()
-        return verdict
     }
 }
 

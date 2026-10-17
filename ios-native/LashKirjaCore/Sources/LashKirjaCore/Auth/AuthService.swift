@@ -1,12 +1,14 @@
 import Foundation
 
-/// Sign-in, the 30-day bearer token, its refresh after 7 days, and sign-out.
+/// Sign-in, the 30-day bearer token, its refresh after 7 days (signed by the trusted device's key
+/// where the device has one), and sign-out.
 public actor AuthService: TokenProvider {
     public static let refreshAfter: TimeInterval = 7 * 86_400
     /// The Keychain refused the token: the sign-in did not stick, so it is not shown as done.
     public static let notSavedMessage = "Kirjautumista ei voitu tallentaa laitteelle."
 
     private let store: TokenStore
+    private let signer: DeviceKeySigner?
     private let now: @Sendable () -> Date
     private var client: APIClient?
     private var cached: StoredToken?
@@ -16,8 +18,9 @@ public actor AuthService: TokenProvider {
     /// The refresh on the wire: a second caller waits for it instead of sending another.
     private var refreshing: Task<Void, Never>?
 
-    public init(store: TokenStore, now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(store: TokenStore, signer: DeviceKeySigner? = nil, now: @escaping @Sendable () -> Date = { Date() }) {
         self.store = store
+        self.signer = signer
         self.now = now
     }
 
@@ -38,11 +41,13 @@ public actor AuthService: TokenProvider {
         let email: String
         let password: String
         let device = "ios-app"
+        let deviceKey: String?
     }
 
     public func login(email: String, password: String) async throws -> AuthUser {
         guard let client else { throw LKError(status: 0, message: LKError.unreachable) }
-        let body = LoginBody(email: email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), password: password)
+        let body = LoginBody(email: email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), password: password,
+                             deviceKey: await signer?.newPublicKey())
         let response: TokenResponse = try await client.send("POST", "/api/auth/token", body: body)
         try await start(response)
         return response.user
@@ -57,6 +62,8 @@ public actor AuthService: TokenProvider {
     /// The server checks the assertion and issues the same bearer session a password sign-in gets.
     public func passkeySignIn(_ verify: PasskeySignInVerify) async throws -> AuthUser {
         guard let client else { throw LKError(status: 0, message: LKError.unreachable) }
+        var verify = verify
+        verify.deviceKey = await signer?.newPublicKey()
         let response: TokenResponse = try await client.send("POST", "/api/auth/passkey/authenticate/verify", body: verify)
         try await start(response)
         return response.user
@@ -78,7 +85,8 @@ public actor AuthService: TokenProvider {
     /// The right code creates the account and answers like `/api/auth/token`: signed in at once.
     public func signupVerify(email: String, code: String, password: String) async throws -> AuthUser {
         guard let client else { throw LKError(status: 0, message: LKError.unreachable) }
-        let body = SignUpVerifyBody(email: email, code: code, password: password)
+        var body = SignUpVerifyBody(email: email, code: code, password: password)
+        body.deviceKey = await signer?.newPublicKey()
         let response: TokenResponse = try await client.send("POST", "/api/auth/signup/verify", body: body)
         try await start(response)
         return response.user
@@ -122,13 +130,19 @@ public actor AuthService: TokenProvider {
         guard let client, let stored = await store.load(), epoch.isCurrent(session) else { return }
         guard now().timeIntervalSince(stored.issuedAt) > Self.refreshAfter else { return }
         do {
-            let response: TokenResponse = try await client.send("POST", "/api/auth/token/refresh", body: Optional<EmptyBody>.none)
+            // Signed for the token it goes out with: a session bound to this device's key is
+            // renewed only with it (a legacy session's server takes the headers' absence).
+            let signer = self.signer, clock = self.now
+            let response: TokenResponse = try await client.send("POST", "/api/auth/token/refresh") { token in
+                guard let signer, let token else { return [:] }
+                return await signer.refreshHeaders(token: token, now: clock())
+            }
             // Signed out (or in as someone else) meanwhile: this token belongs to a session that
             // has ended. The server issues it for the same session row, so the sign-out's revoke
             // covers it too.
             guard epoch.isCurrent(session) else { return }
             // Not saved: the old token is for the same session and still valid, so keep using it.
-            try? await keep(response)
+            try? await keep(response, startedAt: stored.sessionStartedAt)
         } catch let error as LKError where error.status == 401 {
             guard epoch.isCurrent(session) else { return }
             epoch.next()
@@ -148,6 +162,7 @@ public actor AuthService: TokenProvider {
         let stored = await store.load()
         await store.clear()
         if let revoke = token ?? stored?.token { await store.savePendingRevoke(revoke) }
+        await signer?.remove()
     }
 
     public func logout() async {
@@ -192,7 +207,7 @@ public actor AuthService: TokenProvider {
         epoch.next()
         cached = nil
         do {
-            try await keep(response)
+            try await keep(response, startedAt: now())
         } catch {
             if let client {
                 let token = response.token
@@ -202,11 +217,12 @@ public actor AuthService: TokenProvider {
         }
     }
 
-    private func keep(_ response: TokenResponse) async throws {
+    private func keep(_ response: TokenResponse, startedAt: Date?) async throws {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let expires = formatter.date(from: response.expiresAt) ?? now().addingTimeInterval(30 * 86_400)
-        let stored = StoredToken(token: response.token, expiresAt: expires, issuedAt: now(), userId: response.user.userId)
+        let stored = StoredToken(token: response.token, expiresAt: expires, issuedAt: now(), userId: response.user.userId,
+                                 sessionStartedAt: startedAt)
         let session = epoch.current
         try await store.save(stored)
         // A sign-out while the Keychain was writing: it cleared before this save landed.

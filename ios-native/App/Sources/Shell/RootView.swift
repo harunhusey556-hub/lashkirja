@@ -35,6 +35,8 @@ private struct LaunchPhaseMarker: View {
 
     var body: some View {
         let value = value
+        // Read for its observation: a later moment (Koti's figures) rebuilds the label.
+        _ = LaunchTimelineVersion.shared.value
         return Color.clear
             .frame(width: 1, height: 1)
             .allowsHitTesting(false)

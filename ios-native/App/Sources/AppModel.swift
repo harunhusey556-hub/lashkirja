@@ -89,9 +89,11 @@ final class AppModel {
     private var versionRouteMissing = false
 
     init(baseURL: URL = AppConfig.apiBaseURL, store: TokenStore = KeychainTokenStore(),
-         resources: ResourceCache = ResourceCache(store: .standard())) {
+         resources: ResourceCache = ResourceCache(store: .standard()), signer: DeviceKeySigner? = DeviceKey(),
+         lastActive: Date? = UsageClock.lastActive) {
         self.resources = resources
-        let auth = AuthService(store: store)
+        self.launchLastActive = lastActive
+        let auth = AuthService(store: store, signer: signer)
         self.auth = auth
         let api = APIClient(baseURL: baseURL, transport: URLSessionTransport(), tokens: auth)
         self.api = api
@@ -104,48 +106,60 @@ final class AppModel {
             app: ObserveAppInfo.current,
             isSignedIn: { await auth.currentToken() != nil },
             send: { batch in let _: Ignored = try await api.send("POST", "/api/observe/events", body: batch) })
+        openStoredSession(store, lastActive: lastActive)
     }
 
     /// Now, for a problem report or a trip to the background; otherwise every 30 s.
     func flushEvents() async { await eventUploader.flush() }
 
-    /// The launch's session check (`checkStoredSession`): the restored user and the server's verdict.
-    @ObservationIgnored private var launchCheck: Task<(AuthUser, Task<SessionCheck, Never>)?, Never>?
-    /// When `launchCheck` went out. A process started in the background (Background App Refresh,
-    /// iOS prewarming) opens its screen much later: its verdict is not taken then.
-    @ObservationIgnored private var launchCheckStarted: ContinuousClock.Instant?
+    /// The client's handlers, set from `init` before any screen can ask for anything: a launch's
+    /// first 401 signs out like any other.
+    @ObservationIgnored private var clientConnected: Task<Void, Never>?
+    /// The stored session this device opened at launch without asking the server (`TrustedSession`);
+    /// nil when the launch went to the sign-in screen or the store cannot be read before the first frame.
+    @ObservationIgnored private var launchUser: AuthUser?
+    /// A stored session found past its idle or absolute limit at launch: `start()` ends it, and has
+    /// the server revoke it, behind the sign-in screen.
+    @ObservationIgnored private var launchExpired = false
+    /// When the app was last in use before this launch (`UsageClock`): the Face ID lock's idle
+    /// time and the usage-gap histogram read it before `start()` moves the clock on.
+    let launchLastActive: Date?
     /// What the sign-in screen says when the server refused the session.
     static let expiredNotice = "Istunto vanheni. Kirjaudu uudelleen."
     /// Set off the main thread as soon as a 401 has cleared the session's token. The main thread
-    /// is busy building the first frame when the launch's 401 comes back (CI, w56): that frame
-    /// shows the sign-in screen at once instead of the launch look and one more frame later.
+    /// may be busy building a frame when the launch's 401 comes back (CI, w56): that frame shows
+    /// the sign-in screen at once instead of the tabs and one more frame later.
     nonisolated let refusal = Refusal()
 
     /// What RootView shows: the phase, or the sign-in screen for a refusal the main actor has not
     /// yet handled (`sessionCleared` then sets the same phase, so nothing is rebuilt).
     var shownPhase: Phase {
-        if case .launching = phase, refusal.isSet { return .signedOut(notice: Self.expiredNotice) }
-        return phase
+        if case .signedOut = phase { return phase }
+        return refusal.isSet ? .signedOut(notice: Self.expiredNotice) : phase
     }
 
-    /// From the App's init: the stored token goes to the server off the main thread while UIKit
-    /// still builds the first frame, so a refusal can be known by the time `start()` runs (on CI
-    /// the first frame comes 0.5–0.9 s after init, w52).
-    func checkStoredSession() {
-        let auth = self.auth
-        let api = self.api
-        let observer = self.observer
-        launchCheckStarted = .now
-        launchCheck = Task.detached { [weak self] in
-            // Before the check goes out: its 401 signs out like any other, and its answer reaches
-            // the debugging trail, the offline banner and the failure report.
+    /// From `init`, before the first frame: a stored session that is valid on this device (not past
+    /// its idle or absolute limit) opens on Koti's cached figures at once (owner, w67). No request
+    /// is held for a session check: the screens' own loads verify it, and their first 401 signs out
+    /// with the notice. A launch that cannot read the store this early (tests) stays `.launching`
+    /// and `start()` restores the session the slow way.
+    private func openStoredSession(_ store: TokenStore, lastActive: Date?) {
+        let auth = self.auth, api = self.api, observer = self.observer
+        clientConnected = Task.detached { [weak self] in
             await AppModel.connect(api, auth: auth, observer: observer, to: self)
-            guard let user = await auth.restore() else { return nil }
-            // The stored token goes first and alone: every other request (Koti's own load, the
-            // prefetch, the version poll) waits for its answer, at most `SessionCheck.hold`.
-            // Behind the launch's burst of loads a revoked session reached the sign-in screen only
-            // 7–9 s later (CI, w45); offline or a slow server leaves the owner signed in.
-            return (user, await api.checkSession("/api/auth/me", hold: SessionCheck.hold))
+        }
+        guard let launchStore = store as? LaunchTokenReading else { return }
+        let stored = launchStore.loadAtLaunch()
+        switch TrustedSession.decide(stored, lastActive: lastActive, now: Date()) {
+        case .open:
+            guard let stored else { return }
+            let user = AuthUser(userId: stored.userId, email: "", firstName: nil)
+            primeKotiFromDisk(user: user.userId)
+            launchUser = user
+            phase = .signedIn(user)
+        case .signIn(let expired):
+            launchExpired = expired
+            phase = .signedOut(notice: expired ? Self.expiredNotice : nil)
         }
     }
 
@@ -181,10 +195,8 @@ final class AppModel {
     }
 
     func start() async {
-        // A check from a launch long before the screen opened says nothing about the session now.
-        if let started = launchCheckStarted, ContinuousClock.now - started > .seconds(SessionCheck.hold) { launchCheck = nil }
-        if launchCheck == nil { checkStoredSession() }
         EventLog.shared.log(.lifecycle("launch"))
+        noteUsageGap(since: launchLastActive, trigger: "launch")
         let uploader = eventUploader
         eventFlushLoop = Task {
             // What the previous run left on the phone (a freeze, a crash) goes first, soon after
@@ -196,38 +208,40 @@ final class AppModel {
             }
         }
         Connectivity.shared.attach { [api] in let _: Ignored? = try? await api.get("/api/auth/me") }
-        let launch = await launchCheck?.value
-        launchCheck = nil
-        launchCheckStarted = nil
+        await clientConnected?.value
         let auth = self.auth
-        // After the check bound the client. The revoke of an earlier sign-out is a network call: it
-        // must not hold up opening the app.
-        Task { await auth.revokePending() }
-        guard case let (user, check)? = launch else {
-            Perf.dropLaunch()
-            // An earlier check's 401 may have signed out already, with its notice.
-            if case .launching = phase { phase = .signedOut(notice: nil) }
-            return
+        if launchExpired {
+            launchExpired = false
+            // Past its idle or absolute limit on this device: the token goes, and the revoke below
+            // tells the server.
+            await auth.endSession()
         }
-        // The calm launch look stays until the verdict, at most the hold (owner, 2026-10-16): a
-        // refused token goes straight to the sign-in screen and the tabs are never built. Building
-        // them first kept the main thread busy and the 401 waited behind it (~1–6 s on CI, w52).
-        let verdict = await SessionCheck.verdict(of: check, within: SessionCheck.hold)
-        UITestHooks.mark("verdict")
-        guard verdict != .refused, await auth.currentToken() != nil else {
+        // The revoke of an earlier sign-out is a network call: it must not hold up opening the app.
+        Task { await auth.revokePending() }
+        let user: AuthUser
+        if let opened = launchUser {
+            launchUser = nil
+            // A load's 401 may already have signed out (with its notice).
+            guard case .signedIn(let current) = phase, current == opened else { return Perf.dropLaunch() }
+            user = opened
+        } else if case .launching = phase, let restored = await auth.restore() {
+            await primeKoti(user: restored.userId)
+            phase = .signedIn(restored)
+            user = restored
+        } else {
             Perf.dropLaunch()
-            if case .launching = phase { phase = .signedOut(notice: Self.expiredNotice) }
+            if case .launching = phase { phase = .signedOut(notice: nil) }
             return
         }
         // A lock set up before its owner was recorded belongs to this session's account.
         AppLock.shared.adoptOwnerIfUnknown(user.userId)
         AppLock.shared.keepOnly(for: user.userId)
-        await primeKoti(user: user.userId)
-        phase = .signedIn(user)
         let started = session.current
+        // Out first and light: of the launch's requests its answer usually comes back first, so a
+        // revoked session reaches the sign-in screen soonest. Nothing waits on it.
+        let me = Task { [api] in try? await api.get("/api/auth/me") as MeResponse }
         await auth.refreshIfDue()
-        // A refused refresh already signed out (with the notice): stop here. The session check's
-        // 401 can land before the tabs were put up above, and is not undone by them.
+        // A refused refresh already signed out (with the notice): stop here.
         guard await auth.currentToken() != nil else {
             if case .signedIn = phase { phase = .signedOut(notice: Self.expiredNotice) }
             return
@@ -237,8 +251,8 @@ final class AppModel {
         prefetch()
         // Only for the account it was asked for: a sign-out (and maybe another sign-in) can
         // happen while it loads.
-        if case .accepted(let body) = await check.value, let me = try? JSONDecoder().decode(MeResponse.self, from: body),
-           session.isCurrent(started), case .signedIn(let current) = phase, current.userId == me.user.userId {
+        if let me = await me.value, session.isCurrent(started),
+           case .signedIn(let current) = phase, current.userId == me.user.userId {
             phase = .signedIn(me.user)
         }
     }
@@ -252,6 +266,8 @@ final class AppModel {
         // previous owner's PIN (the same policy as signing out).
         AppLock.shared.keepOnly(for: user.userId)
         Haptics.success()
+        refusal.clear()
+        AppLock.shared.endIdleLock()
         session.next()
         phase = .signedIn(user)
         startVersionPolling()
@@ -265,6 +281,7 @@ final class AppModel {
     func logout() async {
         // The lock belongs to the signed-in owner; the next account sets its own.
         AppLock.shared.disable()
+        AppLock.shared.idleLockEnabled = false
         // Receipt photos waiting for a connection belong to this owner: they leave with them.
         OfflineReceiptQueueModel.shared.clearForSignOut()
         endLocalSession()
@@ -305,8 +322,17 @@ final class AppModel {
         await sessionExpired(sentToken: sentToken)
     }
 
+    /// The time since `last` as a usage-gap bucket in the debugging trail (anonymous on the server),
+    /// then the clock moves on: the app is in use now.
+    private func noteUsageGap(since last: Date?, trigger: String) {
+        let now = Date()
+        if let last, now > last { EventLog.shared.log(UsageGap.event(now.timeIntervalSince(last), trigger: trigger)) }
+        UsageClock.touch(now)
+    }
+
     func background() {
         backgroundedAt = Date()
+        UsageClock.touch()
         // Nothing to keep fresh while the app is not on screen; `foreground()` asks at once.
         stopVersionPolling()
         EventLog.shared.log(.lifecycle("background"))
@@ -316,6 +342,16 @@ final class AppModel {
 
     func foreground() async {
         EventLog.shared.log(.lifecycle("foreground"))
+        // Only a return from the background this process saw (the launch's own `.active` is not one).
+        if let backgroundedAt {
+            if case .signedIn = phase { AppLock.shared.lockIfIdle(lastActive: backgroundedAt) }
+            noteUsageGap(since: backgroundedAt, trigger: "foreground")
+            // Away for a while: the session is asked about again, without holding anything up;
+            // a 401 signs out as usual.
+            if Date().timeIntervalSince(backgroundedAt) > TrustedSession.reverifyAfterBackground, case .signedIn = phase {
+                Task { [api] in let _: Ignored? = try? await api.get("/api/auth/me") }
+            }
+        }
         // Back after more than five minutes: what the screens show may be out of date.
         let stale = ForegroundRefresh.isStale(backgroundedAt: backgroundedAt, now: Date())
         if stale, case .signedIn = phase {
@@ -394,6 +430,14 @@ final class AppModel {
     /// Koti's last dashboard of the month from the previous run's disk cache, read and decoded on the
     /// cache's actor before the tabs appear: Koti's first frame after a launch is the figures, not a
     /// spinner that two more hops later the same figures replaced (w44, launch → Koti).
+    /// The same from the file the previous run left, read in `init` so the first frame has it.
+    private func primeKotiFromDisk(user: String) {
+        let key = ResourceKey(user: user, path: "/api/dashboard", query: ["month": MonthKey.current()])
+        guard let entry = resources.disk?.read(user: user)[key.id],
+              let dashboard = try? JSONDecoder().decode(Dashboard.self, from: entry.data) else { return }
+        lastPainted[key.id] = dashboard
+    }
+
     private func primeKoti(user: String) async {
         let query = ["month": MonthKey.current()]
         let key = ResourceKey(user: user, path: "/api/dashboard", query: query)
@@ -762,4 +806,14 @@ final class Refusal: @unchecked Sendable {
     private var value = false
     var isSet: Bool { lock.withLock { value } }
     func set() { lock.withLock { value = true } }
+    /// A new session signed in: the earlier refusal is not this one's.
+    func clear() { lock.withLock { value = false } }
+}
+
+/// When the app was last in use on this device (UserDefaults; not a secret): the trusted session's
+/// idle limit, the Face ID lock's idle time and the usage-gap histogram count from it.
+enum UsageClock {
+    private static let key = "usage.lastActiveAt"
+    static var lastActive: Date? { UserDefaults.standard.object(forKey: key) as? Date }
+    static func touch(_ now: Date = Date()) { UserDefaults.standard.set(now, forKey: key) }
 }

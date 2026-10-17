@@ -1,20 +1,31 @@
 name: iOS revoked-session launch
 
-# w49 (row 27): how long a revoked stored session takes from launch to the sign-in screen
-# (StabilityTests.test10, three launches per variant). "before" is this branch with the session
-# fix taken out (AppModel.swift and APIClient.swift as on native), keeping the test and the launch
-# marker's clock, so both variants are measured the same way against the same demo API.
+# Row 27. w67 (trusted-device sessions): a revoked stored session reaches the sign-in screen within
+# 1 s of the FIRST FRAME (StabilityTests.test10, asserted; process start → sign-in is noted), and a
+# valid one opens on Koti with nothing held (test11: launch → Koti, noted). Three launches per test
+# and variant. "before" is w49's blocking session check (PR #29) on the same native: the tree at
+# BEFORE_REF with this branch's tests and Perf's Koti mark copied in, so both variants are measured
+# the same way against the same demo API.
 # Every variant builds the app as Release-UITest (project.yml: Release plus the launch hooks): a
 # Debug build spends ~2.5 s loading on the CI simulator before the app's own code runs.
 on:
   push:
-    branches: ["fix/w49-revoked-session"]
+    branches: ["fix/w67-trusted-session"]
     paths: [".github/workflows/ios-session-gate.yml", "ios-native/**"]
   workflow_dispatch:
+    inputs:
+      before_ref:
+        description: "The tree measured as before (default: PR #29 merged with native, w67's base)"
+        required: false
+        default: ""
+
+env:
+  # 01dec20: fix/w49-revoked-session (PR #29) with native merged in, where w67 began.
+  BEFORE_REF: ${{ inputs.before_ref || '01dec20' }}
 
 jobs:
   walk:
-    name: Revoked session (before / after)
+    name: Revoked and valid session (before / after)
     runs-on: macos-26
     timeout-minutes: 90
     steps:
@@ -73,15 +84,11 @@ jobs:
       - name: Walk after and before
         run: |
           set -u
-          BASE=$(git merge-base HEAD origin/native)
-          echo "before = this branch with AppModel.swift and APIClient.swift from $BASE"
-          git worktree add --detach "$RUNNER_TEMP/before" HEAD
-          git -C "$RUNNER_TEMP/before" checkout "$BASE" -- ios-native/App/Sources/AppModel.swift \
-            ios-native/LashKirjaCore/Sources/LashKirjaCore/Net/APIClient.swift
-          # The App's init starts the fix's early session check; the launch timeline marks stay.
-          sed -i '' '/app.checkStoredSession()/d' "$RUNNER_TEMP/before/ios-native/App/Sources/LashKirjaApp.swift"
-          # RootView keeps its timeline marker but shows the base's phase (no early refusal).
-          sed -i '' 's/app\.shownPhase/app.phase/g' "$RUNNER_TEMP/before/ios-native/App/Sources/Shell/RootView.swift"
+          echo "before = $BEFORE_REF with this branch's StabilityTests.swift and PerfSignposts.swift"
+          git worktree add --detach "$RUNNER_TEMP/before" "$BEFORE_REF"
+          cp ios-native/App/Tests/LashKirjaUITests/StabilityTests.swift "$RUNNER_TEMP/before/ios-native/App/Tests/LashKirjaUITests/"
+          # The launch → Koti moment on the marker's clock (one line: UITestHooks.mark("koti")).
+          cp ios-native/App/Sources/Components/PerfSignposts.swift "$RUNNER_TEMP/before/ios-native/App/Sources/Components/"
           # A fresh simulator's first walk hangs on its first UI snapshots (WalkTestCase.probe): a
           # throwaway warm-up pass first, so neither measured variant is the first on this simulator.
           for variant in warmup before after; do
@@ -96,6 +103,7 @@ jobs:
             (cd "$src/ios-native/App" && set -o pipefail && TEST_RUNNER_LK_SHOT_DIR="$out" xcodebuild test \
               -project LashKirja.xcodeproj -scheme LashKirja-UITests -configuration Release-UITest -destination "id=$SIM_UDID" \
               -derivedDataPath "$RUNNER_TEMP/dd-$dd" -only-testing:LashKirjaUITests/StabilityTests/test10_RevokedSessionReachesSignInFast \
+              -only-testing:LashKirjaUITests/StabilityTests/test11_ValidSessionOpensOnKoti \
               -resultBundlePath "$out/result.xcresult" \
               CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
               API_BASE_URL=http://127.0.0.1:3999 | xcbeautify --renderer github-actions) \
@@ -107,26 +115,8 @@ jobs:
               | tee "$out/build.txt"
             grep MARK "$out/notes.txt" || true
           done
-          # The fixed (Release-UITest) build again, launched by `simctl launch` instead of XCTest: how much
-          # of the time before `main` is the test harness's. Launch 1 has a revoked session, 2–3 none (signed out).
-          B=http://127.0.0.1:3999
-          tok=$(curl -s -X POST "$B/api/auth/token" -H 'content-type: application/json' \
-            -d '{"email":"demo@lashkirja.fi","password":"demo123"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
-          for id in $(curl -s -H "authorization: Bearer $tok" "$B/api/auth/sessions" | python3 -c 'import json,sys
-          for s in json.load(sys.stdin)["sessions"]:
-              if s.get("label") == "iPhone · LashKirja-sovellus" and not s.get("current"): print(s["id"])'); do
-            curl -s -o /dev/null -X POST -H "authorization: Bearer $tok" -H 'content-type: application/json' \
-              -d "{\"id\":\"$id\"}" "$B/api/auth/sessions"
-          done
-          for i in 1 2 3; do
-            xcrun simctl terminate "$SIM_UDID" fi.tiyouba.lashkirja || true
-            sleep 2
-            xcrun simctl launch --console-pty "$SIM_UDID" fi.tiyouba.lashkirja -LKLaunchPhase > "build-session/plain-$i.txt" 2>&1 &
-            pid=$!; sleep 8; kill $pid 2>/dev/null || true
-            echo "MARK plain launch $i: $(grep -o 'LKMARK [a-zA-Z]*=[0-9-]*' "build-session/plain-$i.txt" | cut -d' ' -f2 | tr '\n' ' ')" | tee -a build-session/plain.txt
-          done
           { for v in before after; do echo "## $v ($(cat build-session/$v/status))"; echo '```'; grep MARK "build-session/$v/notes.txt" || true; echo '```'; done; } >> "$GITHUB_STEP_SUMMARY"
-          # The job's verdict is the fixed variant's.
+          # The job's verdict is w67's (test10 asserts first frame → sign-in ≤ 1 s).
           [ "$(cat build-session/after/status)" = PASS ]
       - uses: actions/upload-artifact@v4
         if: always()
