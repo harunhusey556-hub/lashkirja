@@ -40,7 +40,12 @@ struct MainTabView: View {
         // the smallest comfortable touch target.
         .listSectionSpacing(.compact)
         .background(AddTabGuard { select(.add) })
-        .background(TabPrebuild(ready: Self.places.map { item -> @MainActor () -> Bool in { hasFirstFrame(item) } }))
+        .background(TabPrebuild(
+            ready: Self.places.map { item -> @MainActor () -> Bool in { hasFirstFrame(item) } },
+            // Without `motionProbe`: the copy is not on screen, so its layers are not the audit's.
+            roots: Self.places.map { item -> @MainActor () -> AnyView in
+                { AnyView(NavigationStack { root(item) }.listSectionSpacing(.compact).environment(app)) }
+            }))
         .sheet(isPresented: $showAdd) { AddSheet().motionProbe("add-sheet") }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]).motionProbe("settings-sheet") }
         .sheet(isPresented: $showAssistant) { AssistantView().motionProbe("assistant") }
