@@ -16,7 +16,9 @@ struct CapturedFilePreview: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            Group {
+            // A ZStack, not a Group: while the picture fades in over the spinner both are on
+            // screen, and a Group would give each its own 260 pt frame and stack them.
+            ZStack {
                 if let image {
                     Image(uiImage: image)
                         .resizable()
@@ -35,15 +37,21 @@ struct CapturedFilePreview: View {
                         .font(.footnote)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 120, maxHeight: 260)
-            if image != nil {
-                Button { fullScreen = url } label: {
-                    Label("Avaa koko näytölle", systemImage: "arrow.up.left.and.arrow.down.right")
-                }
-                .font(.caption.bold())
-                .buttonStyle(.borderless)
-                .foregroundStyle(Theme.accent)
+            // The picture's height and its button's row are there before the picture is: the
+            // form opens while the file is still being decoded, and a box that grew from the
+            // spinner's 120 pt to the picture pushed every field down 160 pt (row 7, motion gate
+            // 2026-10-17: "the upload screen jumps down after processing").
+            .frame(maxWidth: .infinity)
+            .frame(height: 260)
+            Button { fullScreen = url } label: {
+                Label("Avaa koko näytölle", systemImage: "arrow.up.left.and.arrow.down.right")
             }
+            .font(.caption.bold())
+            .buttonStyle(.borderless)
+            .foregroundStyle(Theme.accent)
+            .opacity(image == nil ? 0 : 1)
+            .disabled(image == nil)
+            .accessibilityHidden(image == nil)
         }
         .padding(.vertical, 8)
         .quickLookPreview($fullScreen)
@@ -56,7 +64,11 @@ struct CapturedFilePreview: View {
         // A large PDF page or photo is decoded off the main actor.
         let loaded = await Task.detached(priority: .userInitiated) { CapturedFilePreview.render(url) }.value
         if let loaded {
-            image = loaded
+            // Faded in over the spinner rather than swapped: the swap changed a seventh of the
+            // screen in one frame a few seconds after the form settled (row 7, motion gate
+            // 2026-10-17: shift_video "pop", area 0.139, dy 0). Linear, so no frame of the fade
+            // changes much more than another.
+            withAnimation(.linear(duration: 0.6)) { image = loaded }
         } else {
             failed = true
         }

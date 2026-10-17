@@ -199,7 +199,9 @@ struct RouteScreen: View {
         case .emailImport:
             // A connected or removed mailbox changes the profile other screens read from AppModel.
             EmailImportView { app.profileChanged($0) }
-        case .receiptsFiltered(let month, let tab): ReceiptsView(month: month, tab: ReceiptTab(rawValue: tab) ?? .all, drilled: true)
+        case .receiptsFiltered(let month, let tab):
+            let chip = ReceiptTab(rawValue: tab) ?? .all
+            ReceiptsView(month: month, tab: chip, drilled: true, preview: app.receiptsPreview(.drilled(month: month, tab: chip)))
         case .bankFeedFiltered(let month, let onlyOpen, let focus): BankFeedView(month: month, onlyOpen: onlyOpen, focusTransactionId: focus)
         case .newInvoice: MyyntiView(openNewInvoice: true, preview: app.salesPreview())
         case .reports: RaportitView()
@@ -208,9 +210,11 @@ struct RouteScreen: View {
         case .monthClose(let month):
             PeriodsView(month: month, preview: app.periodsPreview(month: PeriodClose.startMonth(month, current: MonthKey.current())))
         case .receiptsCategory(let period, let tab, let category):
-            ReceiptsView(month: period, tab: ReceiptTab(rawValue: tab) ?? .all, category: category, drilled: true)
+            let chip = ReceiptTab(rawValue: tab) ?? .all
+            ReceiptsView(month: period, tab: chip, category: category, drilled: true,
+                         preview: app.receiptsPreview(.drilled(month: period, tab: chip, category: category)))
         case .receiptsMissingVat(let period):
-            ReceiptsView(month: period, missingVat: true, drilled: true)
+            ReceiptsView(month: period, missingVat: true, drilled: true, preview: app.receiptsPreview(.drilled(month: period, missingVat: true)))
         case .emailInbox: EmailInboxView()
         case .bankHub: BankHubView()
         case .invoicesFiltered(let month, let status, let customerId):

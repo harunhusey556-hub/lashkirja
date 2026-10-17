@@ -85,6 +85,11 @@ final class MotionAuditTests: WalkTestCase {
         try? encoder.encode(all).write(to: URL(fileURLWithPath: path))
     }
 
+    /// The host opens it (scripts/sim/run-ui.sh, also while a step records), as a notification would.
+    func sendLink(_ url: String) {
+        FileManager.default.createFile(atPath: "\(shotDir)/\(UUID().uuidString).openurl", contents: url.data(using: .utf8))
+    }
+
     /// An invoice id from the demo API itself (the runner shares the Mac's loopback with the tunnel).
     func demoInvoiceId() -> String? {
         func call(_ path: String, _ body: [String: String]?, _ token: String?) -> [String: Any]? {
@@ -466,18 +471,30 @@ final class MotionAuditTests: WalkTestCase {
         // Bad (item 9's mechanism, AppModel.pendingRoute): a link to an invoice while the Asetukset
         // sheet is up closes the sheet, switches to Myynti and pushes the invoice, each animated.
         if let id = demoInvoiceId() {
+            let link = "lashkirja://invoice/\(id)"
+            let invoice = app.navigationBars.matching(NSPredicate(format: "identifier CONTAINS[c] %@", "lasku")).firstMatch
+            // iOS asks "Open in LashKirja?" the first time a link reaches an install, and every walk
+            // is a fresh install: answered here, outside the recording, so the step films the app.
+            sendLink(link)
+            let open = springboard.buttons["Open"]
+            let deadline = Date().addingTimeInterval(20)
+            while Date() < deadline && !invoice.exists {
+                if open.exists { open.tap(); break }
+                usleep(250_000)
+            }
+            if invoice.waitForExistence(timeout: 15) { edgeSwipeBack(); sleep(1) } else { note("calibration: the first link opened no invoice") }
             tab("Koti")
             press(app.buttons["Asetukset"].firstMatch); _ = app.navigationBars["Asetukset"].waitForExistence(timeout: 8); sleep(2)
-            // iOS asks "Open in LashKirja?" only the first time on a device; after that the link
-            // opens straight away, so it is sent inside the recorded step.
-            step("bad-link-over-sheet", from: "Asetukset sheet on Koti", to: "Lasku (Myynti)", seconds: 7) {
-                let name = "\(shotDir)/\(UUID().uuidString).openurl"
-                FileManager.default.createFile(atPath: name, contents: "lashkirja://invoice/\(id)".data(using: .utf8))
-                let open = springboard.buttons["Open"]
+            step("bad-link-over-sheet", from: "Asetukset sheet on Koti", to: "Lasku (Myynti)", seconds: 7,
+                 reached: { invoice.waitForExistence(timeout: 8) && !self.app.navigationBars["Asetukset"].exists }) {
+                sendLink(link)
                 if open.waitForExistence(timeout: 3) { open.tap() }
                 return true
             }
             sleep(2)
+            // A link that did not open leaves the sheet over the tabs, and the rest of the walk
+            // (items 7 and 9) would tap through it.
+            if app.navigationBars["Asetukset"].exists { swipeSheetDown("Asetukset"); sleep(1) }
             tab("Kirjanpito")
         }
         // Bad (item 7): the capture fixture uploads and is read; the screen moves as rows finish.
@@ -490,10 +507,7 @@ final class MotionAuditTests: WalkTestCase {
         if !fixture.isHittable { app.swipeUp(); sleep(1) }
         step("bad-capture-upload", from: "Uusi kuitti", to: "Uusi kuitti (read)", kind: "load",
              expect: "rows finish in place, the screen does not move", seconds: 14) { press(fixture) }
-        sleep(4)
-        let back = app.buttons["Takaisin"].firstMatch
-        if back.exists { back.tap(); sleep(1) }
-        if app.buttons["Hylkää muutokset"].exists { app.buttons["Hylkää muutokset"].tap(); sleep(1) }
+        saveReviewRow()
         // Bad (item 9): the summary's way to Kuitit.
         if let go = find("label BEGINSWITH %@", "Näytä tarkistettavat", scrolls: 3) ?? find("label BEGINSWITH %@", "Siirry kuitteihin", scrolls: 3) {
             step("bad-show-review", from: "Uusi kuitti", to: "Kuitit", seconds: 6, reached: navBar("Kuitit")) { press(go) }
@@ -501,5 +515,98 @@ final class MotionAuditTests: WalkTestCase {
             note("SKIP calibration/bad-show-review: no Näytä tarkistettavat / Siirry kuitteihin")
             dump(app, "calibration-no-review-button")
         }
+    }
+
+    /// Item 9's button, "Näytä tarkistettavat", shows only once the queue has settled with a saved
+    /// receipt the server left for review, and the last save of a queue closes the screen. So the
+    /// first reading is kept in the queue (Takaisin) and a second copy of the fixture is added: with
+    /// two rows its reading takes the several-files path (`AutoAccept.takesAutoSavePath`) and is
+    /// saved at once, pending review, or, when the server refuses an empty reading, waits behind
+    /// "Avaa lomake" and is saved there as OwnerScreensTests.testC does (dummy data; the walk's demo
+    /// API reads nothing). It never offers "Käytä lomakkeessa": runs 39056167779 and 39056964743
+    /// waited 90 s for that one. The first row is then dropped with "Hylkää tallentamattomat".
+    /// Outside any recording; a miss is noted with the element tree.
+    func saveReviewRow() {
+        let vendor = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Myyjä", "Myyjä")).firstMatch
+        let use = app.buttons.matching(NSPredicate(format: "label == %@", "Käytä lomakkeessa"))
+        // The reading opens the form by itself; Takaisin keeps its row in the queue.
+        if vendor.waitForExistence(timeout: 60) {
+            press(app.buttons["Takaisin"].firstMatch)
+            let discard = app.buttons["Hylkää muutokset"].firstMatch
+            if discard.waitForExistence(timeout: 3) { discard.tap() }
+        }
+        guard use.firstMatch.waitForExistence(timeout: 30) else {
+            note("calibration: the read row offers no Käytä lomakkeessa"); dump(app, "calibration-first-row"); return
+        }
+        // An element tap, not `press`: a coordinate tap right after a swipe lands on the list
+        // still scrolling and only stops it.
+        guard let fixture = find("identifier == %@", "capture-fixture", scrolls: 4) else {
+            note("calibration: no capture fixture under the queue"); dump(app, "calibration-second-fixture"); return
+        }
+        fixture.tap()
+        // The row's own line ("Odottaa tarkistusta", or the duplicate's): the summary under the
+        // queue says "1 odottaa tarkistusta" already for the first, unsaved row.
+        let pending = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                                           "Odottaa tarkistusta", "Samanlainen kuitti on jo tallennettu")).firstMatch
+        let refused = app.buttons["Avaa lomake"].firstMatch
+        let approved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Hyväksytty automaattisesti")).firstMatch
+        guard let outcome = firstOf([pending, refused, approved], timeout: 90) else {
+            note("calibration: the second fixture was not read"); dump(app, "calibration-second-fixture"); return
+        }
+        guard outcome !== approved else {
+            note("calibration: the second fixture was approved, nothing waits for review"); dump(app, "calibration-second-fixture"); return
+        }
+        if outcome === refused {
+            if !refused.isHittable { app.swipeDown() }
+            refused.tap()
+            guard vendor.waitForExistence(timeout: 10) else { note("calibration: Avaa lomake opened no form"); dump(app, "calibration-refused-form"); return }
+            guard fillAndSave(vendor) else { return }
+            guard pending.waitForExistence(timeout: 30) else { note("calibration: the save left no row for review"); dump(app, "calibration-after-save"); return }
+        }
+        let actions = app.buttons["Toiminnot"].firstMatch
+        guard actions.waitForExistence(timeout: 30) else { note("calibration: no Toiminnot on the queue"); dump(app, "calibration-after-save"); return }
+        actions.tap()
+        let drop = app.buttons["Hylkää tallentamattomat"].firstMatch
+        guard drop.waitForExistence(timeout: 5) else { note("calibration: no Hylkää tallentamattomat"); dump(app, "calibration-drop"); return }
+        drop.tap()
+        let confirm = app.buttons["confirm-sheet-confirm"].firstMatch
+        if confirm.waitForExistence(timeout: 5) { confirm.tap(); _ = confirm.waitForNonExistence(timeout: 5) }
+    }
+
+    /// The first of `elements` to exist within `timeout`, or nil. Asks `exists` itself, as
+    /// OwnerScreensTests.waitGone does; the last answer is taken after the deadline.
+    func firstOf(_ elements: [XCUIElement], timeout: TimeInterval) -> XCUIElement? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let hit = elements.first(where: { $0.exists }) { return hit }
+            usleep(250_000)
+        }
+        return elements.first(where: { $0.exists })
+    }
+
+    /// The form a refused reading opened: dummy vendor, sum and category, then "Tallenna kuitti".
+    /// The first row is still unsaved, so the save returns to the queue.
+    func fillAndSave(_ vendor: XCUIElement) -> Bool {
+        func blank(_ field: XCUIElement, _ placeholder: String) -> Bool {
+            let value = (field.value as? String) ?? ""
+            return value.isEmpty || value == placeholder
+        }
+        if blank(vendor, "Myyjä") { type(vendor, "Testikauppa Oy") }
+        let total = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Summa €", "Summa €")).firstMatch
+        // Whole euros: the decimal key follows the simulator's region, not the app's Finnish.
+        if total.exists && blank(total, "Summa €") { type(total, "12") }
+        // The keyboard's Valmis: the queue's own Valmis is not on screen while the form is.
+        let done = app.buttons["Valmis"].firstMatch
+        if done.exists { done.tap(); _ = done.waitForNonExistence(timeout: 3) }
+        // Category is required and only the cloud AI suggests one.
+        let category = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kategoria, ")).firstMatch
+        if category.waitForExistence(timeout: 5), category.label.hasSuffix("Valitse") {
+            if !category.isHittable { app.swipeUp() }
+            category.tap()
+            let choice = app.buttons["Tarvikkeet & ostot"].firstMatch
+            if choice.waitForExistence(timeout: 5) { choice.tap() }
+        }
+        guard tap("Tallenna kuitti") else { note("calibration: no Tallenna kuitti"); dump(app, "calibration-no-save"); return false }
+        return true
     }
 }
