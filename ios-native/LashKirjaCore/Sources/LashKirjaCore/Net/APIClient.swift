@@ -35,7 +35,9 @@ public actor APIClient {
     /// request that started for an earlier session ends as a cancellation, so no screen shows an
     /// error for a session that is already gone, and a second 401 signs nobody out again.
     private var sessionGeneration = 0
-    /// The requests on the wire with a session's token, cancelled when that session ends.
+    /// The reads on the wire with a session's token, cancelled when that session ends. A write
+    /// already sent is left to finish: the server may have stored it (a receipt save), and only its
+    /// answer tells the owner whether it did. The generation check keeps an unsent write in.
     private var sessionRequests: [UUID: Task<HTTPResponse, Error>] = [:]
     /// While the launch's session check is out (`checkSession`), every other request waits on this,
     /// at most `hold`: the stored token's verdict comes back alone instead of behind the burst of
@@ -84,7 +86,7 @@ public actor APIClient {
     }
 
     /// The session ended on this device (sign-out, or a 401 seen outside this client): its
-    /// requests still on the wire are cancelled and any still waiting never go out.
+    /// reads still on the wire are cancelled and any request still waiting never goes out.
     public func endSessionRequests() {
         sessionGeneration += 1
         for request in sessionRequests.values { request.cancel() }
@@ -215,7 +217,7 @@ public actor APIClient {
             // backoff): it does not go out, with no token or with the next owner's.
             guard generation == sessionGeneration else { throw CancellationError() }
             let response: HTTPResponse
-            do { response = try await send(request, forSession: sentToken != nil) }
+            do { response = try await send(request, cancelledWithSession: sentToken != nil && method == "GET") }
             catch let error as LKError { throw error }
             catch {
                 if RetryPolicy.retriesTransport(error) && attempt < attempts - 1 {
@@ -261,10 +263,10 @@ public actor APIClient {
         throw APIErrorDecoder.decode(status: last?.status ?? 0, data: last?.body ?? Data())
     }
 
-    /// A request with a session's token is kept until it is answered, so the end of that
-    /// session can cancel it.
-    private func send(_ request: URLRequest, forSession: Bool) async throws -> HTTPResponse {
-        guard forSession else { return try await transport.send(request) }
+    /// A read with a session's token is kept until it is answered, so the end of that session can
+    /// cancel it.
+    private func send(_ request: URLRequest, cancelledWithSession: Bool) async throws -> HTTPResponse {
+        guard cancelledWithSession else { return try await transport.send(request) }
         let transport = self.transport
         let id = UUID()
         let task = Task { try await transport.send(request) }

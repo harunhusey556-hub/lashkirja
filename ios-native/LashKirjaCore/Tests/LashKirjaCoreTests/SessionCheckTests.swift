@@ -219,3 +219,45 @@ private func eventually(_ condition: () async -> Bool) async -> Bool {
     await c.endSessionRequests()
     #expect(await load.value is CancellationError)
 }
+
+@Test func aWriteOnTheWireFinishesWhenTheSessionEnds() async {
+    let gate = Gate()
+    let t = PathTransport { path in
+        switch path {
+        case "/api/receipts/save": try await gate.wait(); return ok()
+        default: return refused
+        }
+    }
+    let c = APIClient(baseURL: base, transport: t, tokens: StoredToken(), sleep: realSleep)
+    let signOuts = Tally()
+    await c.setOnUnauthorized { _ in await signOuts.bump() }
+    let save = Task { () -> Bool in
+        ((try? await c.send("POST", "/api/receipts/save", body: EmptyBody()) as Ok)?.ok) ?? false
+    }
+    #expect(await eventually { t.paths.contains("/api/receipts/save") })
+    // A sibling's 401 ends the session while the save is out, and so does a sign-out.
+    await #expect(throws: LKError.self) { let _: Ok = try await c.get("/api/sync/version") }
+    await c.endSessionRequests()
+    #expect(await signOuts.value == 1)
+    // The server may already have stored it: the save is answered, not cancelled client-side.
+    await gate.release()
+    #expect(await save.value)
+}
+
+@Test func aWriteNotYetSentDoesNotGoOutAfterTheSessionEnds() async {
+    let gate = Gate()
+    let t = PathTransport { path in
+        if path == "/api/auth/me" { try await gate.wait(); return refused }
+        return ok()
+    }
+    let c = APIClient(baseURL: base, transport: t, tokens: StoredToken(), sleep: realSleep)
+    let check = await c.checkSession("/api/auth/me", hold: 10)
+    let save = Task { () -> Error? in
+        do { let _: Ok = try await c.send("POST", "/api/receipts/save", body: EmptyBody()); return nil } catch { return error }
+    }
+    #expect(await eventually { t.paths == ["/api/auth/me"] })
+    await gate.release()
+    #expect(await check.value == .refused)
+    #expect(await save.value is CancellationError)
+    #expect(t.paths == ["/api/auth/me"])
+}
