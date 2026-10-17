@@ -1,11 +1,20 @@
 import { randomUUID } from "crypto";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GET as listSure, POST as linkSure } from "@/app/api/matching/sure/route";
 import { POST as undoSure } from "@/app/api/matching/sure/undo/route";
 import { PATCH as patchProfile } from "@/app/api/profile/route";
 import { prisma } from "@/lib/db";
 import { runMatching } from "@/lib/matching";
-import { SURE_MATCH_BATCH_KIND, SURE_MATCH_CHUNK } from "@/lib/sure-matches";
+import { IDEMPOTENCY_PROCESSING_MS } from "@/lib/idempotency";
+import {
+  failSureMatchChunkForTests,
+  setSureRunBudgetForTests,
+  SURE_MATCH_BATCH_KIND,
+  SURE_MATCH_CHUNK,
+  SURE_MATCH_UNDO_KIND,
+  SURE_RUN_LOCK_SCOPE,
+  SURE_RUN_MAX_MS,
+} from "@/lib/sure-matches";
 import { createReceipt, createStatementWithTransactions, createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildRequest, readJson, sessionCookie, type JsonValue } from "./helpers/http";
 
@@ -21,6 +30,11 @@ beforeEach(async () => {
   await resetDatabase();
   user = await createUser();
   cookie = await sessionCookie(user);
+});
+
+afterEach(() => {
+  failSureMatchChunkForTests(null);
+  setSureRunBudgetForTests(null);
 });
 
 /**
@@ -287,4 +301,139 @@ describe("Kohdista varmat: a long backlog and a guarded Kumoa (review 2026-10-16
       skipped: [{ ...pair, reason: "changed" }],
     });
   });
+});
+
+const confirmedCount = () => prisma.transaction.count({ where: { matchStatus: "confirmed" } });
+
+describe("Kohdista varmat: a run that stops early can still be taken back (ultrareview PR #31)", () => {
+  it("a failing third chunk answers with the batch of chunks 1-2, and Kumoa restores them", async () => {
+    await seedSurePairs(4 * SURE_MATCH_CHUNK);
+    failSureMatchChunkForTests(2);
+    const response = await post("sure-fail-1");
+    expect(response.status).toBe(200);
+    const batch = await readJson(response);
+    expect(batch).toMatchObject({ partial: true, failed: true, error: "SURE_MATCH_CHUNK_FAILED", remaining: 2 * SURE_MATCH_CHUNK });
+    expect(batch.batchId).toEqual(expect.any(String));
+    expect(batch.linked).toHaveLength(2 * SURE_MATCH_CHUNK);
+    expect(await confirmedCount()).toBe(2 * SURE_MATCH_CHUNK);
+
+    const undone = await readJson(await undo(batch.batchId));
+    expect(undone.restored).toBe(2 * SURE_MATCH_CHUNK);
+    expect(await confirmedCount()).toBe(0);
+  }, 60_000);
+
+  it("a retry with the same key continues the same batch, so one Kumoa covers both runs", async () => {
+    await seedSurePairs(4 * SURE_MATCH_CHUNK);
+    failSureMatchChunkForTests(2);
+    const first = await readJson(await post("sure-fail-2"));
+    expect(first.failed).toBe(true);
+
+    const again = await readJson(await post("sure-fail-2"));
+    expect(again.batchId).toBe(first.batchId);
+    expect(again.partial).toBeUndefined();
+    expect(again.linked).toHaveLength(4 * SURE_MATCH_CHUNK);
+    expect(await prisma.automationEvent.count({ where: { userId: user.id, kind: SURE_MATCH_BATCH_KIND } })).toBe(1);
+    // The finished answer is the key's answer now.
+    expect(await readJson(await post("sure-fail-2"))).toEqual(again);
+
+    expect((await readJson(await undo(again.batchId))).restored).toBe(4 * SURE_MATCH_CHUNK);
+    expect(await confirmedCount()).toBe(0);
+  }, 60_000);
+
+  it("a failing first chunk links nothing and leaves no empty batch behind", async () => {
+    await seedSurePairs(3);
+    failSureMatchChunkForTests(0);
+    expect((await post()).status).toBe(500);
+    expect(await confirmedCount()).toBe(0);
+    expect(await prisma.automationEvent.count({ where: { userId: user.id, kind: SURE_MATCH_BATCH_KIND } })).toBe(0);
+  });
+
+  it("a run past its time stops after the chunk it is in and says how many are left", async () => {
+    await seedSurePairs(SURE_MATCH_CHUNK + 20);
+    setSureRunBudgetForTests(0);
+    const batch = await readJson(await post("sure-slow-1"));
+    expect(batch).toMatchObject({ partial: true, remaining: 20 });
+    expect(batch.failed).toBeUndefined();
+    expect(batch.linked).toHaveLength(SURE_MATCH_CHUNK);
+    expect(batch.batchId).toEqual(expect.any(String));
+
+    setSureRunBudgetForTests(null);
+    const rest = await readJson(await post("sure-slow-2"));
+    expect(rest.partial).toBeUndefined();
+    expect(rest.linked).toHaveLength(20);
+    expect(rest.batchId).not.toBe(batch.batchId);
+    expect(await confirmedCount()).toBe(SURE_MATCH_CHUNK + 20);
+  }, 60_000);
+});
+
+describe("Kohdista varmat: one run per owner at a time (ultrareview PR #31)", () => {
+  it("a run while another holds the owner's run marker is refused with SURE_MATCH_RUNNING", async () => {
+    await seedSurePairs(2);
+    await prisma.idempotencyRecord.create({
+      data: { userId: user.id, scope: SURE_RUN_LOCK_SCOPE, key: "run", statusCode: 0, body: "" },
+    });
+    const refused = await post("sure-busy-1");
+    expect(refused.status).toBe(409);
+    expect((await readJson(refused)).error.code).toBe("SURE_MATCH_RUNNING");
+    expect(await confirmedCount()).toBe(0);
+    // The refused key is free again: the same tap works once the other run is gone.
+    await prisma.idempotencyRecord.deleteMany({ where: { userId: user.id, scope: SURE_RUN_LOCK_SCOPE } });
+    expect((await readJson(await post("sure-busy-1"))).linked).toHaveLength(2);
+    expect(await prisma.idempotencyRecord.count({ where: { userId: user.id, scope: SURE_RUN_LOCK_SCOPE } })).toBe(0);
+  });
+
+  it("a marker left by a crashed run is taken over once it is older than any run can last", async () => {
+    await seedSurePairs(2);
+    await prisma.idempotencyRecord.create({
+      data: {
+        userId: user.id,
+        scope: SURE_RUN_LOCK_SCOPE,
+        key: "run",
+        statusCode: 0,
+        body: "",
+        createdAt: new Date(Date.now() - IDEMPOTENCY_PROCESSING_MS - 1000),
+      },
+    });
+    expect((await readJson(await post())).linked).toHaveLength(2);
+  });
+
+  it("the stale windows outlast the longest run", () => {
+    expect(SURE_RUN_MAX_MS).toBeLessThan(IDEMPOTENCY_PROCESSING_MS);
+  });
+
+  it("two runs at the same moment do not split the backlog between two batches", async () => {
+    await seedSurePairs(3 * SURE_MATCH_CHUNK);
+    const answers = await Promise.all([post("sure-race-a"), post("sure-race-b")]);
+    const bodies = await Promise.all(answers.map((answer) => readJson(answer)));
+    const linked = bodies.reduce((total, body) => total + (body.linked?.length ?? 0), 0);
+    expect(linked).toBe(3 * SURE_MATCH_CHUNK);
+    const batches = await prisma.automationEvent.findMany({ where: { userId: user.id, kind: SURE_MATCH_BATCH_KIND } });
+    expect(batches).toHaveLength(1);
+    for (const [index, answer] of answers.entries()) {
+      if (answer.status === 409) expect(bodies[index].error.code).toBe("SURE_MATCH_RUNNING");
+      else expect(answer.status).toBe(200);
+    }
+  }, 60_000);
+});
+
+describe("Kohdista varmat: Kumoa of a long batch (ultrareview PR #31)", () => {
+  it("undoes in chunks; a Kumoa cut off midway is finished by the next one, each pair once", async () => {
+    await seedSurePairs(500);
+    const batch = await readJson(await post());
+    expect(batch.linked).toHaveLength(500);
+
+    failSureMatchChunkForTests(3);
+    expect((await undo(batch.batchId)).status).toBe(500);
+    // Chunks 1-3 committed on their own; the failing fourth rolled back.
+    expect(await confirmedCount()).toBe(500 - 3 * SURE_MATCH_CHUNK);
+
+    const rest = await readJson(await undo(batch.batchId));
+    expect(rest.restored).toBe(500 - 3 * SURE_MATCH_CHUNK);
+    expect(rest.skipped).toEqual([]);
+    expect(await confirmedCount()).toBe(0);
+    expect(await readJson(await undo(batch.batchId))).toEqual({ restored: 0, undone: [], skipped: [] });
+    const markers = await prisma.automationEvent.findMany({ where: { userId: user.id, kind: SURE_MATCH_UNDO_KIND } });
+    expect(markers).toHaveLength(1);
+    expect(markers[0].newValue).toBe("500");
+  }, 120_000);
 });

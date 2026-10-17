@@ -17,16 +17,19 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
  * Links every sure pair (a chunk of pairs per transaction) and answers which
  * ones, with the batch id that "Kumoa" takes back. The chunks commit on their
  * own, so the key is held outside them: the same Idempotency-Key replays the
- * answer, and any repeat simply finds nothing left to link.
+ * answer, and any repeat simply finds nothing left to link. A run that stopped
+ * early (`partial`) still answers with its batch, but does not keep the key:
+ * the same key again continues that batch.
  */
 export const POST = withErrorHandler(async (req: NextRequest) => {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
   const session = await requireSession(req);
   if (!session) throw new UnauthorizedError();
-  const result = await withIdempotentSideEffect(session.userId, "matching.sure", idempotencyKeyFrom(req), async () => ({
-    status: 200,
-    body: await linkSureMatches(session.userId),
-  }));
+  const key = idempotencyKeyFrom(req);
+  const result = await withIdempotentSideEffect(session.userId, "matching.sure", key, async () => {
+    const body = await linkSureMatches(session.userId, { runKey: key });
+    return { status: 200, body, release: body.partial === true };
+  });
   return noStoreJson(result.body, { status: result.status });
 });

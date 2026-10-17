@@ -29,6 +29,12 @@ public struct SureMatchList: Decodable, Sendable {
 public struct SureMatchBatch: Decodable, Sendable {
     public let batchId: String?
     public let linked: [SureMatchPair]
+    /// The run stopped before the end (its time ran out or a chunk failed); what it linked can still be undone.
+    public let partial: Bool?
+    /// Sure pairs it did not reach; the next tap links them.
+    public let remaining: Int?
+
+    public var stoppedEarly: Bool { partial == true }
 }
 
 /// The body of `POST /api/matching/sure/undo`.
@@ -50,6 +56,11 @@ public enum SureMatchText {
     /// The toast after linking, with "Kumoa".
     public static func linked(_ count: Int) -> String {
         count == 1 ? "1 kuitti kohdistettu." : "\(count) kuittia kohdistettu."
+    }
+
+    /// The toast after a run that stopped early, with "Kumoa" for what it linked.
+    public static func linkedPartly(_ count: Int) -> String {
+        "\(count) kohdistettu, loput seuraavalla kerralla."
     }
 
     public static func restored(_ count: Int) -> String {

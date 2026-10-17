@@ -475,7 +475,9 @@ struct ReceiptsView: View {
             withMotion(.snappy) { sure = nil }
             app.dataVersion += 1
             if let batchId = batch.batchId {
-                showToast(SureMatchText.linked(batch.linked.count), action: "Kumoa") { await undoSure(batchId) }
+                // A run that ran out of time still linked part of the backlog: that part stays undoable.
+                let text = batch.stoppedEarly ? SureMatchText.linkedPartly(batch.linked.count) : SureMatchText.linked(batch.linked.count)
+                showToast(text, action: "Kumoa") { await undoSure(batchId) }
             }
         } catch is CancellationError {
         } catch {
