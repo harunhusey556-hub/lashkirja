@@ -518,10 +518,14 @@ final class MotionAuditTests: WalkTestCase {
     }
 
     /// Item 9's button, "Näytä tarkistettavat", shows only once the queue has settled with a saved
-    /// receipt the server left for review, and the last save of a queue closes the screen. So a
-    /// second copy of the fixture keeps the screen up: the first is saved as OwnerScreensTests.testC
-    /// does (dummy data; the walk's demo API reads nothing, so the receipt waits for review) and the
-    /// second is dropped with "Hylkää tallentamattomat". Outside any recording; a miss is noted.
+    /// receipt the server left for review, and the last save of a queue closes the screen. So the
+    /// first reading is kept in the queue (Takaisin) and a second copy of the fixture is added: with
+    /// two rows its reading takes the several-files path (`AutoAccept.takesAutoSavePath`) and is
+    /// saved at once, pending review, or, when the server refuses an empty reading, waits behind
+    /// "Avaa lomake" and is saved there as OwnerScreensTests.testC does (dummy data; the walk's demo
+    /// API reads nothing). It never offers "Käytä lomakkeessa": runs 39056167779 and 39056964743
+    /// waited 90 s for that one. The first row is then dropped with "Hylkää tallentamattomat".
+    /// Outside any recording; a miss is noted with the element tree.
     func saveReviewRow() {
         let vendor = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Myyjä", "Myyjä")).firstMatch
         let use = app.buttons.matching(NSPredicate(format: "label == %@", "Käytä lomakkeessa"))
@@ -531,15 +535,58 @@ final class MotionAuditTests: WalkTestCase {
             let discard = app.buttons["Hylkää muutokset"].firstMatch
             if discard.waitForExistence(timeout: 3) { discard.tap() }
         }
-        guard use.firstMatch.waitForExistence(timeout: 30) else { note("calibration: the read row offers no Käytä lomakkeessa"); return }
-        let fixture = app.buttons["capture-fixture"].firstMatch
-        if !fixture.isHittable { app.swipeUp() }
-        guard press(fixture.exists ? fixture : nil), use.element(boundBy: 1).waitForExistence(timeout: 90) else {
-            note("calibration: the second fixture was not read"); return
+        guard use.firstMatch.waitForExistence(timeout: 30) else {
+            note("calibration: the read row offers no Käytä lomakkeessa"); dump(app, "calibration-first-row"); return
         }
-        if !use.firstMatch.isHittable { app.swipeDown() }
-        use.firstMatch.tap()
-        guard vendor.waitForExistence(timeout: 10) else { note("calibration: Käytä lomakkeessa opened no form"); return }
+        // An element tap, not `press`: a coordinate tap right after a swipe lands on the list
+        // still scrolling and only stops it.
+        guard let fixture = find("identifier == %@", "capture-fixture", scrolls: 4) else {
+            note("calibration: no capture fixture under the queue"); dump(app, "calibration-second-fixture"); return
+        }
+        fixture.tap()
+        // The row's own line ("Odottaa tarkistusta", or the duplicate's): the summary under the
+        // queue says "1 odottaa tarkistusta" already for the first, unsaved row.
+        let pending = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                                           "Odottaa tarkistusta", "Samanlainen kuitti on jo tallennettu")).firstMatch
+        let refused = app.buttons["Avaa lomake"].firstMatch
+        let approved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Hyväksytty automaattisesti")).firstMatch
+        guard let outcome = firstOf([pending, refused, approved], timeout: 90) else {
+            note("calibration: the second fixture was not read"); dump(app, "calibration-second-fixture"); return
+        }
+        guard outcome !== approved else {
+            note("calibration: the second fixture was approved, nothing waits for review"); dump(app, "calibration-second-fixture"); return
+        }
+        if outcome === refused {
+            if !refused.isHittable { app.swipeDown() }
+            refused.tap()
+            guard vendor.waitForExistence(timeout: 10) else { note("calibration: Avaa lomake opened no form"); dump(app, "calibration-refused-form"); return }
+            guard fillAndSave(vendor) else { return }
+            guard pending.waitForExistence(timeout: 30) else { note("calibration: the save left no row for review"); dump(app, "calibration-after-save"); return }
+        }
+        let actions = app.buttons["Toiminnot"].firstMatch
+        guard actions.waitForExistence(timeout: 30) else { note("calibration: no Toiminnot on the queue"); dump(app, "calibration-after-save"); return }
+        actions.tap()
+        let drop = app.buttons["Hylkää tallentamattomat"].firstMatch
+        guard drop.waitForExistence(timeout: 5) else { note("calibration: no Hylkää tallentamattomat"); dump(app, "calibration-drop"); return }
+        drop.tap()
+        let confirm = app.buttons["confirm-sheet-confirm"].firstMatch
+        if confirm.waitForExistence(timeout: 5) { confirm.tap(); _ = confirm.waitForNonExistence(timeout: 5) }
+    }
+
+    /// The first of `elements` to exist within `timeout`, or nil. Asks `exists` itself, as
+    /// OwnerScreensTests.waitGone does; the last answer is taken after the deadline.
+    func firstOf(_ elements: [XCUIElement], timeout: TimeInterval) -> XCUIElement? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let hit = elements.first(where: { $0.exists }) { return hit }
+            usleep(250_000)
+        }
+        return elements.first(where: { $0.exists })
+    }
+
+    /// The form a refused reading opened: dummy vendor, sum and category, then "Tallenna kuitti".
+    /// The first row is still unsaved, so the save returns to the queue.
+    func fillAndSave(_ vendor: XCUIElement) -> Bool {
         func blank(_ field: XCUIElement, _ placeholder: String) -> Bool {
             let value = (field.value as? String) ?? ""
             return value.isEmpty || value == placeholder
@@ -559,15 +606,7 @@ final class MotionAuditTests: WalkTestCase {
             let choice = app.buttons["Tarvikkeet & ostot"].firstMatch
             if choice.waitForExistence(timeout: 5) { choice.tap() }
         }
-        guard tap("Tallenna kuitti") else { note("calibration: no Tallenna kuitti"); return }
-        // Saved with a reading still waiting: the screen stays on the queue.
-        let actions = app.buttons["Toiminnot"].firstMatch
-        guard actions.waitForExistence(timeout: 30) else { note("calibration: the save did not return to the queue"); dump(app, "calibration-after-save"); return }
-        actions.tap()
-        let drop = app.buttons["Hylkää tallentamattomat"].firstMatch
-        guard drop.waitForExistence(timeout: 5) else { note("calibration: no Hylkää tallentamattomat"); return }
-        drop.tap()
-        let confirm = app.buttons["confirm-sheet-confirm"].firstMatch
-        if confirm.waitForExistence(timeout: 5) { confirm.tap(); _ = confirm.waitForNonExistence(timeout: 5) }
+        guard tap("Tallenna kuitti") else { note("calibration: no Tallenna kuitti"); dump(app, "calibration-no-save"); return false }
+        return true
     }
 }
