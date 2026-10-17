@@ -67,8 +67,16 @@ class WalkTestCase: XCTestCase {
         // On a just-booted simulator typeText can garble the password (CI 2026-10-16: P1 01, seven
         // characters the server refused while the email was right). Typed again once, on the same screen.
         if signingIn, !app.tabBars.firstMatch.waitForExistence(timeout: 30), launchPhase(["signedOut"]).exists {
-            type(app.secureTextFields.firstMatch, String(repeating: XCUIKeyboardKey.delete.rawValue, count: 12) + "demo123")
-            app.buttons["Kirjaudu sisään"].firstMatch.tap()
+            // The phase stays "signedOut" while the sign-in request is in flight (CI 2026-10-17: P3 A,
+            // "Kirjaudutaan…" still up at 30 s; Koti painted during the retype's 38 s snapshot and the
+            // password field was gone). Retyped only once the server has answered and refused.
+            let busy = app.buttons["Kirjaudutaan…"].firstMatch
+            _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: busy)], timeout: 60)
+            let password = app.secureTextFields.firstMatch
+            if !app.tabBars.firstMatch.exists, password.exists {
+                type(password, String(repeating: XCUIKeyboardKey.delete.rawValue, count: 12) + "demo123")
+                app.buttons["Kirjaudu sisään"].firstMatch.tap()
+            }
         }
         _ = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         return signingIn
