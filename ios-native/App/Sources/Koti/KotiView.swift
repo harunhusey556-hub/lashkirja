@@ -21,7 +21,12 @@ struct KotiView: View {
             // Pull-to-refresh asks every screen again (Pankki, Raportit…); Koti's own load
             // stands for the bump here, so the gate does not load it twice.
             gate.mark(version: app.refreshEverything())
-            await model.load()
+            // Not awaited: the system spinner held for the whole load (1–2 s on CI) and then
+            // sprang back, moving the content a second time after it had come to rest (motion
+            // audit koti-refresh, every walk). Returning at once ends the refresh under the
+            // finger, so letting go is the only movement; the figures update in place
+            // (`ScreenLoad.begin` keeps them on screen while refreshing).
+            Task { await model.load() }
         })
         .perfReady("koti", model.state.value != nil)
         .task(id: app.dataVersion) {

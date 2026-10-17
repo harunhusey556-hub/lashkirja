@@ -13,7 +13,7 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: Binding(get: { tab }, set: select)) {
-            ForEach([AppTab.koti, .myynti, .kirjanpito, .raportit], id: \.self) { item in
+            ForEach(Self.places, id: \.self) { item in
                 Tab(item.title, systemImage: item.symbol, value: item) {
                     NavigationStack(path: path(item)) {
                         root(item)
@@ -40,6 +40,7 @@ struct MainTabView: View {
         // the smallest comfortable touch target.
         .listSectionSpacing(.compact)
         .background(AddTabGuard { select(.add) })
+        .background(TabPrebuild(ready: Self.places.map { item -> @MainActor () -> Bool in { hasFirstFrame(item) } }))
         .sheet(isPresented: $showAdd) { AddSheet().motionProbe("add-sheet") }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]).motionProbe("settings-sheet") }
         .sheet(isPresented: $showAssistant) { AssistantView().motionProbe("assistant") }
@@ -103,6 +104,18 @@ struct MainTabView: View {
         .task { await OnboardingGate.shared.check(app) }
         // Receipts photographed offline go out as soon as the app runs, not only once Kuitit opens.
         .task { OfflineReceiptQueueModel.shared.start(app: app) }
+    }
+
+    /// The tabs that are places, in the tab bar's order ("+" comes after them).
+    private static let places: [AppTab] = [.koti, .myynti, .kirjanpito, .raportit]
+
+    /// Whether the tab's root, built now, would open on its data (`root` reads these previews once).
+    private func hasFirstFrame(_ item: AppTab) -> Bool {
+        switch item {
+        case .myynti: app.salesPreview() != nil
+        case .raportit: app.raportitPreview() != nil
+        default: true
+        }
     }
 
     @ViewBuilder private func root(_ item: AppTab) -> some View {
