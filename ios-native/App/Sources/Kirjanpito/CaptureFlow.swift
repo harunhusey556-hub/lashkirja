@@ -31,13 +31,18 @@ struct CaptureFlow: View {
     /// down with it in one movement. Dismissing the cover and then the sheet showed two (owner, 2026-10-15).
     let onClose: (() -> Void)?
 
+    /// Kuitit under the cover: takes the review queue "Näytä tarkistettavat" asked for, before the cover goes.
+    let onReviewQueue: ((ReceiptList) -> Void)?
+
     /// `opensCamera`: a missing-receipt action goes straight to the camera; "+" → "Lisää tiedosto"
     /// opens this page so the owner picks camera, photos or files. Kuitit's "Jatka" opens on the
     /// unfinished files instead.
-    init(transactionId: String?, onSaved: (() -> Void)? = nil, opensCamera: Bool = true, onClose: (() -> Void)? = nil) {
+    init(transactionId: String?, onSaved: (() -> Void)? = nil, opensCamera: Bool = true, onClose: (() -> Void)? = nil,
+         onReviewQueue: ((ReceiptList) -> Void)? = nil) {
         self.transactionId = transactionId
         self.onSaved = onSaved
         self.onClose = onClose
+        self.onReviewQueue = onReviewQueue
         let model = transactionId == nil ? CaptureQueueModel.shared : CaptureQueueModel(transactionId: transactionId)
         _model = State(initialValue: model)
         _showCamera = State(initialValue: opensCamera && CaptureFlow.cameraAvailable && !model.resuming)
@@ -54,6 +59,8 @@ struct CaptureFlow: View {
     /// Set by `close`: the queue is let go only once the cover is gone, so it never turns into the
     /// empty picker page while it slides down.
     @State private var closing = false
+    /// "Näytä tarkistettavat" is asking for the review queue before the cover goes.
+    @State private var openingReceipts = false
     @State private var confirmDiscard = false
     @State private var confirmDropUnsaved = false
     /// The form on screen has changes the owner made (`ReceiptEditor`).
@@ -89,7 +96,10 @@ struct CaptureFlow: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            // A ZStack, not a Group: a Group gives its modifiers to each page, so the fade below sat
+            // inside the page being swapped and never ran; queue → form changed in one frame
+            // (row 7, motion gate 39067168826: shift_video "pop", area 0.139, dy 0).
+            ZStack {
                 switch model.step {
                 case .pick:
                     if scannerInline {
@@ -109,8 +119,8 @@ struct CaptureFlow: View {
                 }
             }
             // The page changes (picker → queue → form → queue) fade into each other instead of
-            // swapping in one frame.
-            .motion(.snappy, value: stepKey)
+            // swapping in one frame. Linear: a spring changes most of the screen in its first frames.
+            .motion(.linear(duration: 0.4), value: stepKey)
             .motion(.snappy, value: scannerInline)
             .background(Theme.canvas)
             .toolbar(scannerInline ? .hidden : .automatic, for: .navigationBar)
@@ -577,9 +587,28 @@ struct CaptureFlow: View {
     /// "Näytä tarkistettavat" and "Siirry kuitteihin": Kuitit, whose review queue sits on top of the list.
     /// One movement (owner, 2026-10-15: several screens went by): the tab and Kuitit are put in place
     /// behind this cover without animation, then the cover (with the "+" sheet under it) goes down once.
+    /// The review queue is asked for first (at most 1.5 s): Kuitit puts it on top while still
+    /// hidden (`onReviewQueue`, or a Kuitit pushed now paints it from `lastPainted`), and the cover
+    /// goes down onto the list as it ends up. Asked after, it was inserted above the rows 0.4 s
+    /// after the cover had gone (motion audit bad-show-review, run 39067168826).
     private func openReceipts() {
-        app.pendingRoute = PendingRoute(tab: .kirjanpito, route: .receipts, animated: false)
-        close()
+        guard !openingReceipts else { return }
+        openingReceipts = true
+        Task {
+            let query = ReceiptListQuery.pendingQueue()
+            let asked = Task { () -> ReceiptList? in try? await app.cachedGet("/api/receipts", query: query, force: true, persist: true) }
+            let cap = Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                asked.cancel()
+            }
+            if let queue = await asked.value {
+                app.rememberPainted(queue, "/api/receipts", query: query)
+                onReviewQueue?(queue)
+            }
+            cap.cancel()
+            app.pendingRoute = PendingRoute(tab: .kirjanpito, route: .receipts, animated: false)
+            close()
+        }
     }
 
     // MARK: Closing

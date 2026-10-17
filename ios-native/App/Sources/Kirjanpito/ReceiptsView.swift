@@ -232,7 +232,15 @@ struct ReceiptsView: View {
                 await load()
                 if !Task.isCancelled { gate.mark(key: String(describing: query), version: version) }
             }
-        }) { CaptureFlow(transactionId: nil) }
+        }) {
+            // "Näytä tarkistettavat": the review queue is on top before the cover goes (unanimated,
+            // as hidden), not inserted above the rows once it has gone.
+            CaptureFlow(transactionId: nil, onReviewQueue: { queue in
+                var hidden = Transaction()
+                hidden.disablesAnimations = true
+                withTransaction(hidden) { applyPending(queue) }
+            })
+        }
         .alert("Summarajaus", isPresented: $editingAmount) {
             TextField("Vähintään €", text: $minDraft).moneyInput()
             TextField("Enintään €", text: $maxDraft).moneyInput()
