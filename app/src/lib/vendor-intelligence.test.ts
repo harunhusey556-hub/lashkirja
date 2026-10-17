@@ -38,6 +38,7 @@ describe("promptSafeVendor", () => {
   // Ultrareview PR #31: the words of an instruction drop an entry only as whole phrases.
   it("keeps company names that merely contain such a word", () => {
     expect(promptSafeVendor("XYZ Systems Oy")).toBe("XYZ Systems Oy");
+    expect(promptSafeVendor("Nordic Systems Oy")).toBe("Nordic Systems Oy");
     expect(promptSafeVendor("Tietosystemit")).toBe("Tietosystemit");
     expect(promptSafeVendor("Prompt Media")).toBe("Prompt Media");
     expect(promptSafeVendor("Assistant Partners Oy")).toBe("Assistant Partners Oy");

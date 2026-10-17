@@ -13,6 +13,16 @@ struct PaymentsSettingsView: View {
     @State private var failure: String?
     @State private var notice: String?
 
+    /// The status Asetukset already asked for is on screen in the first frame: without it the push
+    /// slid in a spinner that the status replaced a second later (motion audit
+    /// asetukset-payments-open, CI 2026-10-17). `load` then refreshes it in place.
+    init() {
+        guard let known = POSCoordinator.shared.status else { return }
+        var shown = ScreenLoad<POSStatus>()
+        shown.succeed(known)
+        _state = State(initialValue: shown)
+    }
+
     var body: some View {
         List {
             if let status = state.value {

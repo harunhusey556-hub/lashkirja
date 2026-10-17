@@ -383,14 +383,26 @@ struct PurchaseInvoicesView: View {
         let timing = ScreenTiming("Ostolaskut")
         var query: [String: String] = [:]
         if let status = filter.queryValue { query["status"] = status }
+        // The cached list when it could not be painted with its rows: still better than an error offline.
+        var unpainted: PurchaseInvoiceTaggedList?
         if state.value == nil, let cached: PurchaseInvoiceTaggedList = await app.cachedValue("/api/purchase-invoices", query: query) {
-            state.succeed(cached.list)
-            recurringIds = cached.recurringIds
-            if let cachedCounts: PurchaseInvoiceCountsResponse = await app.cachedValue("/api/purchase-invoices/counts") { counts = cachedCounts.counts }
-            // The rows above the list too, or they arrive later and push it down.
-            if let cachedRecurring: RecurringPurchaseList = await app.cachedValue("/api/recurring-purchases") { recurringCount = cachedRecurring.activeCount }
-            if let cachedPending: PurchaseSuggestionList = await app.cachedValue("/api/purchase-invoices/match") { suggestions = cachedPending.suggestions.filter(\.canAccept) }
-            timing.painted(fromCache: true)
+            let cachedCounts: PurchaseInvoiceCountsResponse? = await app.cachedValue("/api/purchase-invoices/counts")
+            let cachedRecurring: RecurringPurchaseList? = await app.cachedValue("/api/recurring-purchases")
+            let cachedPending: PurchaseSuggestionList? = await app.cachedValue("/api/purchase-invoices/match")
+            // Painted from the cache only with the rows above the list and the chips' counts: a
+            // list cached without them got them from the server a beat later, which pushed it
+            // down (motion audit kirjanpito-purchases-open, CI 2026-10-17). Then the server's
+            // answer is the first paint.
+            if let cachedCounts, let cachedRecurring, let cachedPending {
+                state.succeed(cached.list)
+                recurringIds = cached.recurringIds
+                counts = cachedCounts.counts
+                recurringCount = cachedRecurring.activeCount
+                suggestions = cachedPending.suggestions.filter(\.canAccept)
+                timing.painted(fromCache: true)
+            } else {
+                unpainted = cached
+            }
         }
         state.begin()
         // Counts load alongside the list (one round trip instead of two).
@@ -416,6 +428,10 @@ struct PurchaseInvoicesView: View {
         } catch is CancellationError {
             return
         } catch {
+            if state.value == nil, let unpainted {
+                state.succeed(unpainted.list)
+                recurringIds = unpainted.recurringIds
+            }
             state.fail(error)
             if let response = await freshCounts { counts = response.counts }
             recurringCount = await recurring.map { $0.activeCount }

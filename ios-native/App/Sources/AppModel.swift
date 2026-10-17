@@ -300,6 +300,11 @@ final class AppModel {
         lastPainted("/api/dashboard", query: ["month": MonthKey.current()])
     }
 
+    /// Raportit's year as last painted, for its first frame (`RaportitView`); nil when there is none.
+    func raportitPreview() -> ProfitLoss? {
+        lastPainted("/api/reports/profit-loss", query: RaportitView.query(year: RaportitView.currentYear))
+    }
+
     /// Koti's last dashboard of the month from the previous run's disk cache, read and decoded on the
     /// cache's actor before the tabs appear: Koti's first frame after a launch is the figures, not a
     /// spinner that two more hops later the same figures replaced (w44, launch → Koti).
@@ -340,6 +345,11 @@ final class AppModel {
         }
         if let value: ReceiptCounts = await cachedValue("/api/receipts/counts", query: kuitit.countsQuery()) {
             primePainted(value, "/api/receipts/counts", query: kuitit.countsQuery(), replacing: replacing)
+        }
+        // Raportit's year (warmed after Koti), so its tab opens on the figures, not a spinner.
+        let report = RaportitView.query(year: RaportitView.currentYear)
+        if let value: ProfitLoss = await cachedValue("/api/reports/profit-loss", query: report) {
+            primePainted(value, "/api/reports/profit-loss", query: report, replacing: replacing)
         }
     }
 

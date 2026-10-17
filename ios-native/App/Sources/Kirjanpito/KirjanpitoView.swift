@@ -69,11 +69,12 @@ struct KirjanpitoView: View {
                 let vatKind = VatKind(profile: await app.cachedProfile()?.vatPeriod)
                 let vatPeriod = VatDue.nextDueKey(today: APIDate.dayString(Date()), kind: vatKind)
                 _ = try? await app.cachedGet("/api/alv", query: ["period": vatPeriod]) as AlvReport
-                // Ostolaskut's first screen (no chip) and the rows above its list.
-                _ = try? await app.cachedGet("/api/purchase-invoices", persist: true) as PurchaseInvoiceTaggedList
+                // Ostolaskut's first screen (no chip): the rows above its list first, so a cached
+                // list always has them (Ostolaskut paints from the cache only with them).
                 _ = try? await app.cachedGet("/api/purchase-invoices/counts") as PurchaseInvoiceCountsResponse
                 _ = try? await app.cachedGet("/api/recurring-purchases") as RecurringPurchaseList
                 _ = try? await app.cachedGet("/api/purchase-invoices/match") as PurchaseSuggestionList
+                _ = try? await app.cachedGet("/api/purchase-invoices", persist: true) as PurchaseInvoiceTaggedList
             }
             guard counts == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
