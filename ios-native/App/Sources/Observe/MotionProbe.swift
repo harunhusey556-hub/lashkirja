@@ -30,6 +30,8 @@ final class MotionProbe: NSObject {
     /// Smaller moves are antialiasing and text re-measuring, not a shift anyone sees.
     private static let threshold: CGFloat = 2
     private static let quiet: CFTimeInterval = 0.4
+    /// Ticks come every 0.1–0.2 s (5–10 fps); a longer gap is the main thread held.
+    private static let stall: CFTimeInterval = 0.25
 
     private var link: CADisplayLink?
     private var handle: FileHandle?
@@ -38,6 +40,9 @@ final class MotionProbe: NSObject {
     private var screen = "launch"
     private var lastMove: CFTimeInterval = 0
     private var moving: OSSignpostIntervalState?
+    private var lastTick: CFTimeInterval = 0
+    private var windowCount = 0
+    private var presented: ObjectIdentifier?
 
     func start() {
         guard Self.active, link == nil else { return }
@@ -64,6 +69,13 @@ final class MotionProbe: NSObject {
         write("ROOT \(Self.now) \(name.replacingOccurrences(of: " ", with: "_")) \(Int(size.width))x\(Int(size.height))")
     }
 
+    /// A moment the audit's reader wants on the timeline (a tap handled, a copy freed); the
+    /// analyzer reads only MOVE, SCROLLJUMP and QUIET, so these never count as motion.
+    func mark(_ name: String) {
+        guard Self.active else { return }
+        write("MARK \(Self.now) \(name.replacingOccurrences(of: " ", with: "_"))")
+    }
+
     private static var now: String { String(format: "%.3f", Date().timeIntervalSince1970) }
 
     private func write(_ line: String) {
@@ -71,8 +83,27 @@ final class MotionProbe: NSObject {
     }
 
     @objc private func tick() {
-        guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
-            .flatMap(\.windows).first(where: \.isKeyWindow) else { return }
+        // A tick that comes late is a main thread that was busy: the gap is written, so a late
+        // change can be told apart from one that waited for nothing (w65, koti-add-sheet).
+        let now = CACurrentMediaTime()
+        if lastTick > 0, now - lastTick > Self.stall {
+            write("STALL \(Self.now) \(screen) ms=\(Int((now - lastTick) * 1000))")
+        }
+        lastTick = now
+        let windows = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows)
+        if windows.count != windowCount {
+            windowCount = windows.count
+            write("MARK \(Self.now) windows=\(windows.count)")
+        }
+        guard let window = windows.first(where: \.isKeyWindow) else { return }
+        // When a presentation is asked for: its animation starts with the commit of this turn.
+        var front = window.rootViewController
+        while let next = front?.presentedViewController { front = next }
+        let presented = front === window.rootViewController ? nil : front.map { ObjectIdentifier($0) }
+        if presented != self.presented {
+            self.presented = presented
+            if presented != nil { write("MARK \(Self.now) presented") }
+        }
         var seen: [ObjectIdentifier: CGRect] = [:]
         var moved: [(delta: CGFloat, dx: CGFloat, dy: CGFloat, what: String)] = []
         var budget = 4000

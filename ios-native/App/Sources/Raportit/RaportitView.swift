@@ -114,7 +114,10 @@ struct RaportitView: View {
         .refreshable {
             // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
             gate.mark(key: String(year), version: app.refreshEverything())
-            await load()
+            // Not awaited, as on Koti: the spinner held for the whole load and then sprang back,
+            // moving the figures again after they had come to rest (motion audit raportit-refresh,
+            // w60 gate). The figures stay on screen while they refresh and update in place.
+            Task { await load() }
         }
         .perfReady("raportit", state.value != nil)
         .task(id: "\(year)|\(app.dataVersion)") {
