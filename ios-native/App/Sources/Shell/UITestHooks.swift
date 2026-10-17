@@ -18,6 +18,7 @@ enum UITestHooks {
     static let launchPhase = false
     #endif
 
+    #if DEBUG || LK_UITEST_HOOKS
     /// Milliseconds since this process was started (by the kernel's clock), for launch timings
     /// that include what happens before `main`.
     static func processAgeMs() -> Int? {
@@ -40,6 +41,10 @@ enum UITestHooks {
         // For a launch outside XCTest (`simctl launch --console-pty`, ios-session-gate.yml).
         print("LKMARK \(timeline.last ?? "")")
     }
+    #else
+    /// The launch timeline is the UI tests' only: a Release build marks nothing.
+    static func mark(_ moment: String) {}
+    #endif
 
     static let fixtureName = "testikuitti.jpg"
 

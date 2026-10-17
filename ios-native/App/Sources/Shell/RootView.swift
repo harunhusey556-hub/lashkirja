@@ -17,11 +17,14 @@ struct RootView: View {
         }
         .motion(.default, value: app.phase)
         .overlay(alignment: .topLeading) {
+            #if DEBUG || LK_UITEST_HOOKS
             if UITestHooks.launchPhase { LaunchPhaseMarker(phase: app.phase) }
+            #endif
         }
     }
 }
 
+#if DEBUG || LK_UITEST_HOOKS
 /// UI tests only: the phase the launch is in, so a walk waits for what the app decided instead of
 /// a fixed window. A token stored by an earlier walk paints the tabs first and drops to the sign-in
 /// screen once the server refuses it (7–9 s later on a CI runner before w49's session check).
@@ -57,3 +60,4 @@ private struct LaunchPhaseMarker: View {
         }
     }
 }
+#endif
