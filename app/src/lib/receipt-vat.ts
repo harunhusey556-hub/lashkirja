@@ -232,6 +232,28 @@ export function sameVatLines(
   );
 }
 
+export const NEGATIVE_ONLY_CREDIT_MESSAGE = "Negatiivinen summa kirjataan vain hyvityslaskulle.";
+
+/**
+ * Negative amounts belong to a credit note only. The one rule of the save
+ * route, the receipt edit and the assistant's receipt_update, so a change to it
+ * reaches every write path (ultrareview PR #31). The caller says what makes
+ * this receipt a credit note.
+ */
+export function negativeAmountProblem(
+  amounts: {
+    totalAmount?: number | null;
+    originalAmount?: number | null;
+    vatDetails?: Array<{ rate: number; amount: number }> | null;
+  },
+  isCreditNote: boolean
+): string | null {
+  if (isCreditNote) return null;
+  const negative = [amounts.totalAmount, amounts.originalAmount, ...(amounts.vatDetails ?? []).map((line) => line.amount)]
+    .some((amount) => amount != null && amount < 0);
+  return negative ? NEGATIVE_ONLY_CREDIT_MESSAGE : null;
+}
+
 export const VAT_TOO_LARGE_MESSAGE = "ALV-summa ei voi olla suurempi kuin kuitin summa.";
 export const VAT_SIGN_MESSAGE =
   "ALV-rivien etumerkki ei täsmää summaan: hyvityksen (negatiivinen summa) ALV on negatiivinen tai nolla, muun kuitin positiivinen tai nolla.";

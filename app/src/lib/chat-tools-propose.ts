@@ -14,7 +14,7 @@ import { computeInvoiceTotals, dueDateFor, InvoiceValidationError, MAX_PAYMENT_T
 import { customerSearchFields } from "./search";
 import { categoryLabel, normalizeExtractedCategory, RECEIPT_CATEGORY_IDS } from "./receipt-categories";
 import { parseVatDetails } from "./alv";
-import { sameVatLines, vatLinesProblem } from "./receipt-vat";
+import { negativeAmountProblem, sameVatLines, vatLinesProblem } from "./receipt-vat";
 import { assertPeriodOpen, PeriodLockedError } from "./period-lock";
 import { AppError } from "./api-errors";
 import { applyReceiptPatch, type ReceiptPatch } from "./receipt-update";
@@ -316,8 +316,8 @@ const proposeReceiptUpdate: ChatTool = {
     const args = parsed.data;
     const receipt = await prisma.receipt.findFirst({ where: { id: args.receiptId, userId: ctx.userId } });
     if (!receipt) return { ok: false, error: "No such receipt. Use an id from search_receipts." };
-    const negative = [args.totalAmount, ...(args.vatLines ?? []).map((line) => line.amount)].some((amount) => amount != null && amount < 0);
-    if (negative && !((receipt.totalAmountCents ?? 0) < 0)) {
+    // The edit's own rule (applyReceiptPatch checks it again on Hyväksy); the model gets it in English.
+    if (negativeAmountProblem({ totalAmount: args.totalAmount, vatDetails: args.vatLines }, (receipt.totalAmountCents ?? 0) < 0)) {
       return { ok: false, error: "Negative amounts are only for a credit note: this receipt's total is not negative." };
     }
 

@@ -13,7 +13,7 @@ import {
   rejectCrossSite,
   rejectOversizedContentLength,
 } from "@/lib/http-security";
-import { withErrorHandler, UnauthorizedError, AppError, ValidationError } from "@/lib/api-errors";
+import { withErrorHandler, UnauthorizedError, AppError } from "@/lib/api-errors";
 
 import { assertPeriodOpen } from "@/lib/period-lock";
 import { expectedUpdatedAtDate } from "@/lib/edit-conflict";
@@ -172,11 +172,6 @@ export const PATCH = withErrorHandler(async (
   const { expectedUpdatedAt, documentType, ...body } = parsed.data;
   if (Object.keys(body).length === 0 && !documentType) {
     return noStoreJson({ error: "Ei päivitettäviä kenttiä" }, { status: 400 });
-  }
-  const negative = [body.totalAmount, body.originalAmount, ...(body.vatDetails ?? []).map((line) => line.amount)]
-    .some((amount) => amount != null && amount < 0);
-  if (negative && !((owned.totalAmountCents ?? 0) < 0)) {
-    throw new ValidationError("Negatiivinen summa kirjataan vain hyvityslaskulle.");
   }
   const expected = expectedUpdatedAtDate(expectedUpdatedAt);
 

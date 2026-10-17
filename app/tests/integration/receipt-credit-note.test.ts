@@ -11,6 +11,7 @@ import { processDocumentJob, setDocumentExtractorForTests } from "@/lib/document
 import { storeEmailDocument } from "@/lib/mail-sync";
 import { loadLedger } from "@/lib/ledger/load";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
+import { applyReceiptPatch } from "@/lib/receipt-update";
 import { createReceipt, createUpload, createUser, resetDatabase, type TestUser } from "./helpers/factories";
 import { buildFormRequest, buildRequest, readJson, routeContext, sessionCookie } from "./helpers/http";
 
@@ -215,6 +216,21 @@ describe("POST /api/receipts/save with a credit note", () => {
     );
     expect(edit.status).toBe(200);
     expect((await readJson<Json>(edit)).receipt).toMatchObject({ totalAmount: -125.5, category: "muut" });
+  });
+
+  // Ultrareview PR #31: one rule (negativeAmountProblem) in the write both PATCH and Hyväksy use.
+  it("an ordinary receipt refuses a negative original amount on PATCH, and a negative total on Hyväksy", async () => {
+    const ordinary = await createReceipt(user.id, { totalAmountCents: 100_00 });
+    const edit = await patchReceipt(
+      buildRequest("PATCH", `/api/receipts/${ordinary.id}`, { originalAmount: -90 }, { cookie }),
+      routeContext({ id: ordinary.id })
+    );
+    expect(edit.status).toBe(400);
+    expect((await readJson<Json>(edit)).error.message).toBe("Negatiivinen summa kirjataan vain hyvityslaskulle.");
+    await expect(applyReceiptPatch(user.id, ordinary.id, { totalAmount: -100 })).rejects.toThrow(
+      "Negatiivinen summa kirjataan vain hyvityslaskulle."
+    );
+    expect((await prisma.receipt.findUniqueOrThrow({ where: { id: ordinary.id } })).totalAmountCents).toBe(100_00);
   });
 });
 
