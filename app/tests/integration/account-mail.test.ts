@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, generateKeyPairSync } from "crypto";
 import bcrypt from "bcryptjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as signupStart } from "@/app/api/auth/signup/start/route";
@@ -193,6 +193,44 @@ describe("sign-up with an emailed code", () => {
     const reused = await verify({ email: NEW_EMAIL, code, password: PASSWORD });
     expect(reused.status).toBe(410);
     expect(await prisma.accountCodeGuard.count()).toBe(0);
+  });
+
+  it.each([
+    ["stores a valid deviceKey on the new session", true],
+    ["ignores an invalid deviceKey and still signs in", false],
+  ])("%s", async (_name, valid) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await start({ email: NEW_EMAIL, password: PASSWORD, firstName: "Uusi" });
+    const code = codeIn(mailsTo(NEW_EMAIL)[0].subject);
+    const jwk = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).publicKey.export({ format: "jwk" });
+    const deviceKey = valid
+      ? Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x as string, "base64url"), Buffer.from(jwk.y as string, "base64url")]).toString("base64")
+      : "not-a-key";
+
+    const verified = await verify({ email: NEW_EMAIL, code, password: PASSWORD, device: "ios-app", deviceKey });
+    expect(verified.status).toBe(200);
+    const created = await prisma.user.findUniqueOrThrow({ where: { email: NEW_EMAIL } });
+    const row = await prisma.authSession.findFirstOrThrow({ where: { userId: created.id } });
+    expect(row.deviceKey).toBe(valid ? deviceKey : null);
+  });
+
+  it.each([
+    ["stores a valid deviceKey on the new session", true],
+    ["ignores an invalid deviceKey and still signs in", false],
+  ])("%s", async (_name, valid) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await start({ email: NEW_EMAIL, password: PASSWORD, firstName: "Uusi" });
+    const code = codeIn(mailsTo(NEW_EMAIL)[0].subject);
+    const jwk = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).publicKey.export({ format: "jwk" });
+    const deviceKey = valid
+      ? Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x as string, "base64url"), Buffer.from(jwk.y as string, "base64url")]).toString("base64")
+      : "not-a-key";
+
+    const verified = await verify({ email: NEW_EMAIL, code, password: PASSWORD, device: "ios-app", deviceKey });
+    expect(verified.status).toBe(200);
+    const created = await prisma.user.findUniqueOrThrow({ where: { email: NEW_EMAIL } });
+    const row = await prisma.authSession.findFirstOrThrow({ where: { userId: created.id } });
+    expect(row.deviceKey).toBe(valid ? deviceKey : null);
   });
 
   it("answers an existing address exactly like a new one and mails the owner instead", async () => {

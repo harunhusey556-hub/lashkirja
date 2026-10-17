@@ -36,6 +36,8 @@ public struct PasskeySignInVerify: Encodable, Sendable {
     public let response: Credential
     public let transport = "bearer"
     public let device = "ios-app"
+    /// The trusted device's public key (`DeviceKeySigner`), set by AuthService; absent without one.
+    public var deviceKey: String?
 
     public struct Credential: Encodable, Sendable {
         public let id: String

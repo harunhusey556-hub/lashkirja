@@ -1,6 +1,7 @@
 import { sealData } from "iron-session";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sessionOptions } from "@/lib/session-options";
+import { SESSION_ABSOLUTE_MS } from "@/lib/session-limits";
 import { readCredential, sealBearerToken } from "./auth-credential";
 
 const denyAppOrigin = () => false;
@@ -38,6 +39,48 @@ describe("sealBearerToken + readCredential", () => {
         kind: "bearer",
       },
     });
+  });
+
+  it("carries gen and sessionStartedAt through", async () => {
+    const startedAt = Date.now() - 1000;
+    const { token } = await sealBearerToken({
+      userId: "user-1",
+      email: "demo@lashkirja.fi",
+      firstName: "Demo",
+      sessionId: "session-1",
+      gen: 3,
+      sessionStartedAt: startedAt,
+    });
+    const credential = await readCredential(headersWith({ authorization: `Bearer ${token}` }), undefined, denyAppOrigin);
+    expect(credential?.data).toMatchObject({ gen: 3, sessionStartedAt: startedAt });
+  });
+
+  it("refuses a bearer whose sessionStartedAt is past the absolute cap, without a database", async () => {
+    const read = async (age: number) => {
+      const { token } = await sealBearerToken({
+        userId: "user-1",
+        email: "demo@lashkirja.fi",
+        firstName: "Demo",
+        sessionId: "session-1",
+        gen: 0,
+        sessionStartedAt: Date.now() - age,
+      });
+      return readCredential(headersWith({ authorization: `Bearer ${token}` }), undefined, denyAppOrigin);
+    };
+    expect(await read(SESSION_ABSOLUTE_MS - 60_000)).not.toBeNull();
+    expect(await read(SESSION_ABSOLUTE_MS + 60_000)).toBeNull();
+  });
+
+  it("refuses a bearer with a malformed gen", async () => {
+    for (const gen of [-1, 1.5, "2"]) {
+      const sealed = await sealData(
+        { userId: "user-1", sessionId: "session-1", kind: "bearer", gen },
+        { password: sessionOptions.password as string, ttl: 3600 }
+      );
+      expect(
+        await readCredential(headersWith({ authorization: `Bearer ${sealed}` }), undefined, denyAppOrigin)
+      ).toBeNull();
+    }
   });
 
   it("rejects a bearer payload without kind: \"bearer\"", async () => {

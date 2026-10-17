@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { checkCredentials } from "@/lib/auth-login";
-import { openAuthSession } from "@/lib/account-security";
-import { sealBearerToken } from "@/lib/auth-credential";
+import { openBearerSession } from "@/lib/account-security";
+import { acceptDeviceKey } from "@/lib/device-key";
 
 /**
  * Password login for the bundled app: exchanges email + password for a
@@ -32,13 +32,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const row = await openAuthSession(result.user.id, req.headers.get("user-agent"), device);
-    const sealed = await sealBearerToken({
-      userId: result.user.id,
-      email: result.user.email,
-      firstName: result.user.firstName,
-      sessionId: row.id,
-    });
+    const deviceKey = acceptDeviceKey(body?.deviceKey, "POST /api/auth/token");
+    const sealed = await openBearerSession(result.user, req.headers.get("user-agent"), device, deviceKey);
 
     return NextResponse.json({
       token: sealed.token,

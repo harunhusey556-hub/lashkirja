@@ -20,6 +20,12 @@ public struct LKError: Error, Equatable, Sendable {
     /// The receipt a re-uploaded file already became (`DUPLICATE_DOCUMENT` with `receiptId`).
     public var duplicateReceiptId: String? { code == "DUPLICATE_DOCUMENT" ? fields["receiptId"] : nil }
 
+    /// A token refresh signed on a clock too far off (`DEVICE_CLOCK`): the server's time to sign on.
+    public var serverTime: Date? {
+        guard code == "DEVICE_CLOCK", let seconds = fields["serverTime"].flatMap(TimeInterval.init) else { return nil }
+        return Date(timeIntervalSince1970: seconds)
+    }
+
     /// A 401 that means the session is gone (not, say, a wrong current password).
     public var endsSession: Bool {
         guard status == 401 else { return false }
@@ -60,7 +66,8 @@ public enum APIErrorDecoder {
         let code: String?
         let attemptsLeft: Int?
         let receiptId: String?
-        enum CodingKeys: String, CodingKey { case error, code, attemptsLeft, receiptId }
+        let serverTime: Int?
+        enum CodingKeys: String, CodingKey { case error, code, attemptsLeft, receiptId, serverTime }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             error = try c.decodeIfPresent(String.self, forKey: .error)
@@ -68,6 +75,7 @@ public enum APIErrorDecoder {
             code = try? c.decodeIfPresent(String.self, forKey: .code)
             attemptsLeft = try? c.decodeIfPresent(Int.self, forKey: .attemptsLeft)
             receiptId = try? c.decodeIfPresent(String.self, forKey: .receiptId)
+            serverTime = try? c.decodeIfPresent(Int.self, forKey: .serverTime)
         }
     }
     private struct Nested: Decodable {
@@ -100,6 +108,7 @@ public enum APIErrorDecoder {
             var fields: [String: String] = [:]
             if let left = flat.attemptsLeft { fields["attemptsLeft"] = String(left) }
             if let receiptId = flat.receiptId { fields["receiptId"] = receiptId }
+            if let serverTime = flat.serverTime { fields["serverTime"] = String(serverTime) }
             return LKError(status: status, code: flat.code, message: flat.error ?? LKError.unreachable, fields: fields)
         }
         if let nested = try? decoder.decode(Nested.self, from: data) {

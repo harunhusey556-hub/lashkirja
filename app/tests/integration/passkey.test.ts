@@ -1,5 +1,6 @@
+import { generateKeyPairSync } from "node:crypto";
 import bcrypt from "bcryptjs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as registerOptions } from "@/app/api/auth/passkey/register/options/route";
 import { POST as registerVerify } from "@/app/api/auth/passkey/register/verify/route";
 import { POST as authOptions } from "@/app/api/auth/passkey/authenticate/options/route";
@@ -42,6 +43,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   delete process.env.WEBAUTHN_RP_ID;
   delete process.env.APPLE_TEAM_ID;
 });
@@ -181,6 +183,28 @@ describe("usernameless sign-in", () => {
     expect(session?.label).toBe("iPhone · LashKirja-sovellus");
     const row = await prisma.passkeyCredential.findUnique({ where: { id: authenticator.id } });
     expect(row?.lastUsedAt).not.toBeNull();
+  });
+
+  it("binds the new session to a valid deviceKey and ignores an invalid one", async () => {
+    const authenticator = new SoftAuthenticator(RP_ID, ORIGIN);
+    await registerPasskey(authenticator);
+    const jwk = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).publicKey.export({ format: "jwk" });
+    const deviceKey = Buffer.concat([
+      Buffer.from([4]),
+      Buffer.from(jwk.x as string, "base64url"),
+      Buffer.from(jwk.y as string, "base64url"),
+    ]).toString("base64");
+
+    const bound = await startSignIn();
+    const ok = await verify({ challengeId: bound.challengeId, response: authenticator.authenticate(bound.options), transport: "bearer", deviceKey });
+    expect(ok.status).toBe(200);
+    expect((await prisma.authSession.findFirstOrThrow({ where: { userId: user.id } })).deviceKey).toBe(deviceKey);
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const unbound = await startSignIn();
+    const bad = await verify({ challengeId: unbound.challengeId, response: authenticator.authenticate(unbound.options), transport: "bearer", deviceKey: "AAAA" });
+    expect(bad.status).toBe(200);
+    expect(await prisma.authSession.count({ where: { userId: user.id, deviceKey: null } })).toBe(1);
   });
 
   it("cookie transport sets the web session cookie", async () => {

@@ -54,6 +54,38 @@ describe("POST /api/observe/events", () => {
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("[problem-report] K7Q2XM"));
   });
 
+  it("writes usage_gap events anonymously and drops unknown buckets and screens", async () => {
+    const response = await POST(
+      post({
+        sessionId: "s1",
+        app: { version: "1.0", build: "42", os: "26.0" },
+        events: [
+          { id: "e1", ts: "2026-10-08T10:00:00Z", kind: "usage_gap", name: "7-30d", screen: "launch", requestId: "r1", message: "u1" },
+          { id: "e2", ts: "2026-10-08T10:00:01Z", kind: "usage_gap", name: "<1h", screen: "foreground" },
+          { id: "e3", ts: "2026-10-08T10:00:02Z", kind: "usage_gap", name: "3 weeks", screen: "launch" },
+          { id: "e4", ts: "2026-10-08T10:00:03Z", kind: "usage_gap", name: "<1h", screen: "dashboard" },
+          { id: "e5", ts: "2026-10-08T10:00:04Z", kind: "usage_gap" },
+          { id: "e6", ts: "2026-10-08T10:00:05Z", kind: "screen", screen: "receipts" },
+        ],
+      })
+    );
+    expect(response.status).toBe(200);
+    const lines = (await readFile(eventLogFile(new Date(), dir), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(lines).toHaveLength(3);
+    for (const line of lines.slice(0, 2)) {
+      expect(Object.keys(line).sort()).toEqual(["eventId", "kind", "name", "screen", "source", "ts"]);
+      // The day only: an exact time would join the gap to the batch's other rows.
+      expect(line.ts).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+    expect(lines.map((line) => line.name)).toEqual(["7-30d", "<1h", undefined]);
+    // The phone's random per-event id stays, for counting a resent batch once; nothing else of it.
+    expect(lines.slice(0, 2).map((line) => line.eventId)).toEqual(["e1", "e2"]);
+    expect(JSON.stringify(lines.slice(0, 2))).not.toMatch(/u1|s1|r1|26\.0|10:00/);
+    expect(lines[2].ts).not.toBe(lines[0].ts);
+    // Other kinds keep their ids.
+    expect(lines[2]).toMatchObject({ kind: "screen", userId: "u1", sessionId: "s1", eventId: "e6" });
+  });
+
   it("refuses a signed-out caller and a malformed batch", async () => {
     vi.mocked(requireSession).mockResolvedValueOnce(null as never);
     expect((await POST(post(batch))).status).toBe(401);

@@ -11,6 +11,8 @@ const bodySchema = z.object({
   response: z.unknown(),
   transport: z.enum(["bearer", "cookie"]),
   device: z.literal("ios-app").optional(),
+  // Any type parses: a bad key is ignored (acceptDeviceKey) rather than failing the sign-in.
+  deviceKey: z.unknown().optional(),
 });
 
 /**
@@ -50,7 +52,7 @@ export async function POST(req: NextRequest) {
     if (!result.ok) {
       return noStore(NextResponse.json({ error: result.error }, { status: result.status }));
     }
-    return issuePasskeySession(req, result.user, parsed.data.transport, parsed.data.device);
+    return issuePasskeySession(req, result.user, parsed.data.transport, parsed.data.device, parsed.data.deviceKey);
   } catch (error) {
     return passkeyErrorResponse(error, "Passkey sign-in failed");
   }

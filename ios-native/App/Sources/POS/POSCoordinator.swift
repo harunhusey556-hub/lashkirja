@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import StripeTerminal
 #if canImport(ProximityReader)
 import ProximityReader
 #endif
@@ -79,11 +78,9 @@ final class POSCoordinator {
 
     @ObservationIgnored private var api: APIClient?
     @ObservationIgnored private var userId: String?
-    @ObservationIgnored private let tokenProvider = StripeConnectionTokenProvider()
-    @ObservationIgnored private var bridgeStorage: TerminalBridge?
-    @ObservationIgnored private var sdkIntent: PaymentIntent?
-    @ObservationIgnored private var collectCancelable: Cancelable?
-    @ObservationIgnored private var discoverCancelable: Cancelable?
+    @ObservationIgnored private let tokenClient = StripeConnectionTokenProvider()
+    /// A Stripe PaymentIntent, opaque here: the SDK is loaded on demand (StripeTerminalLoader).
+    @ObservationIgnored private var sdkIntent: NSObject?
     @ObservationIgnored private var finalizeAttempts = 0
     /// Bumped when a payment session is dropped: a step still running for the old one (a late
     /// finalize answer) must not move the new one.
@@ -94,12 +91,10 @@ final class POSCoordinator {
 
     private init() {}
 
-    /// Made on first use (it needs `self`); kept for the app's life because Stripe holds it weakly.
-    private var bridge: TerminalBridge {
-        if let bridgeStorage { return bridgeStorage }
-        let made = TerminalBridge(owner: self)
-        bridgeStorage = made
-        return made
+    /// The SDK once a card payment has loaded and started it; nil before.
+    private var loadedTerminal: StripeTerminalDriving? {
+        guard let driver = StripeTerminalLoader.loaded, driver.isInitialized else { return nil }
+        return driver
     }
 
     // MARK: Session and status
@@ -109,7 +104,7 @@ final class POSCoordinator {
     func bind(_ app: AppModel) {
         guard case .signedIn(let user) = app.phase else { return }
         api = app.api
-        tokenProvider.api = app.api
+        tokenClient.api = app.api
         guard userId != user.userId else { return }
         let switching = userId != nil
         userId = user.userId
@@ -118,11 +113,7 @@ final class POSCoordinator {
         simulatedReader = nil
         testCard = .defaultCard
         resetPayment()
-        if switching && Terminal.isInitialized() {
-            Terminal.shared.disconnectReader { _ in
-                Task { @MainActor in _ = Terminal.shared.clearCachedCredentials() }
-            }
-        }
+        if switching { loadedTerminal?.disconnectAndClearCredentials() }
     }
 
     /// `GET /api/pos/status`; a server without Stripe (503) reads as not enabled.
@@ -149,20 +140,24 @@ final class POSCoordinator {
         testModeChosen = on
         simulatedReader = nil
         testCard = .defaultCard
-        if Terminal.isInitialized() { Task { await disconnectIfConnected() } }
+        if loadedTerminal != nil { Task { await disconnectIfConnected() } }
     }
 
     func update(status new: POSStatus) {
         status = new
-        // Lazily, and only for an account that can ask for connection tokens.
-        if new.enabled && new.account.connected { initTerminalIfNeeded() }
+        // Lazily: with the payment sheet open, and only for an account that can ask for connection
+        // tokens. Opening an invoice (its status check) does not load the SDK.
+        if invoiceId != nil && new.enabled && new.account.connected { _ = startedTerminal() }
     }
 
-    private func initTerminalIfNeeded() {
-        if !Terminal.isInitialized() {
-            Terminal.initWithTokenProvider(tokenProvider)
-        }
-        Terminal.shared.delegate = bridge
+    /// The SDK, loaded and started on first use; nil when this install cannot load it.
+    private func startedTerminal() -> StripeTerminalDriving? {
+        guard let driver = StripeTerminalLoader.driver() else { return nil }
+        let tokens = tokenClient
+        driver.start(fetchToken: { completion in tokens.fetchConnectionToken(completion) }, events: { [weak self] kind, value, text in
+            Task { @MainActor in self?.readerEvent(kind, value: value, text: text) }
+        })
+        return driver
     }
 
     // MARK: Payment session
@@ -173,6 +168,7 @@ final class POSCoordinator {
         let resumable = self.invoiceId == invoiceId && !machine.amountEditable && !machine.isFinished
         if !resumable { resetPayment() }
         self.invoiceId = invoiceId
+        if let status, status.enabled && status.account.connected { _ = startedTerminal() }
     }
 
     /// After a finished payment (Valmis) or a sheet closed with nothing in flight.
@@ -185,8 +181,7 @@ final class POSCoordinator {
         machine = POSPaymentMachine(idempotencyKey: UUID().uuidString)
         invoiceId = nil
         sdkIntent = nil
-        collectCancelable = nil
-        discoverCancelable = nil
+        StripeTerminalLoader.loaded?.forgetRunning()
         readerMessage = nil
         updateProgress = nil
         notice = nil
@@ -256,63 +251,55 @@ final class POSCoordinator {
             feed(.failed(.make(.rejected, message: POSMissing.location.detail)), gen: gen)
             return
         }
-        initTerminalIfNeeded()
-        readerMessage = nil
-        if simulationActive {
-            await connectSimulated(locationId: locationId, gen: gen)
+        guard let terminal = startedTerminal() else {
+            feed(.failed(.make(.other)), gen: gen)
             return
         }
-        if Terminal.shared.connectionStatus == .connected, let connected = Terminal.shared.connectedReader {
+        readerMessage = nil
+        if simulationActive {
+            await connectSimulated(terminal, locationId: locationId, gen: gen)
+            return
+        }
+        if let kind = terminal.connectedReaderKind {
             // A reader left from Testitila is never used for a real payment.
-            if connected.deviceType == .tapToPay && connected.simulated == POSDevice.isSimulator {
+            if kind == "tapToPay" && terminal.connectedReaderSimulated == POSDevice.isSimulator {
                 feed(.readerConnected, gen: gen)
                 return
             }
             await disconnectIfConnected()
         }
         do {
-            let reader = try await discoverReader()
-            try await connect(reader, locationId: locationId)
+            try await connect(terminal, kind: "tapToPay", simulated: POSDevice.isSimulator, locationId: locationId)
             feed(.readerConnected, gen: gen)
         } catch {
             feed(.failed(Self.sdkFailure(error)), gen: gen)
         }
     }
 
-    private func discoverReader() async throws -> Reader {
-        let config = try TapToPayDiscoveryConfigurationBuilder().setSimulated(POSDevice.isSimulator).build()
-        return try await withCheckedThrowingContinuation { continuation in
-            let once = ResumeOnce(continuation)
-            bridge.onDiscovered = { readers in
-                if let first = readers.first { once.resume(.success(first)) }
-            }
-            discoverCancelable = Terminal.shared.discoverReaders(config, delegate: bridge) { error in
-                // Called again (with nil) when a connect ends discovery; only the first answer counts.
-                once.resume(.failure(error ?? POSFlowError.noReader))
-            }
+    /// Discovers and connects a reader of `kind` ("tapToPay" or "bluetooth").
+    private func connect(_ terminal: StripeTerminalDriving, kind: String, simulated: Bool, locationId: String) async throws {
+        let error: Error? = await withCheckedContinuation { continuation in
+            terminal.connect(kind: kind, simulated: simulated, locationId: locationId) { continuation.resume(returning: $0) }
         }
+        if let error { throw Self.flowError(error) }
     }
 
-    private func connect(_ reader: Reader, locationId: String) async throws {
-        let config = try TapToPayConnectionConfigurationBuilder(delegate: bridge, locationId: locationId).build()
-        let _: Reader = try await withCheckedThrowingContinuation { continuation in
-            Terminal.shared.connectReader(reader, connectionConfig: config) { connected, error in
-                if let connected { continuation.resume(returning: connected) }
-                else { continuation.resume(throwing: error ?? POSFlowError.noReader) }
-            }
-        }
-        discoverCancelable = nil
+    /// The driver's own failures (no reader, no answer) as this flow names them.
+    private static func flowError(_ error: Error) -> Error {
+        let ns = error as NSError
+        guard ns.domain == StripeDriverError.domain else { return error }
+        return ns.code == StripeDriverError.noResult ? POSFlowError.noResult : POSFlowError.noReader
     }
 
     // MARK: Testitila (simulated readers)
 
     /// Stripe's simulated Tap to Pay reader first; when Stripe refuses it (an install without the
     /// Tap to Pay entitlement, an older iPhone), its simulated Bluetooth WisePad 3.
-    private func connectSimulated(locationId: String, gen: Int) async {
-        if let connected = Terminal.shared.connectedReader, Terminal.shared.connectionStatus == .connected {
-            let fits = connected.simulated
-                && ((simulatedReader == .tapToPay && connected.deviceType == .tapToPay)
-                    || (simulatedReader == .bluetooth && connected.deviceType != .tapToPay))
+    private func connectSimulated(_ terminal: StripeTerminalDriving, locationId: String, gen: Int) async {
+        if let kind = terminal.connectedReaderKind {
+            let fits = terminal.connectedReaderSimulated
+                && ((simulatedReader == .tapToPay && kind == "tapToPay")
+                    || (simulatedReader == .bluetooth && kind != "tapToPay"))
             if fits {
                 feed(.readerConnected, gen: gen)
                 return
@@ -322,9 +309,7 @@ final class POSCoordinator {
         do {
             if !tapToPaySimulatorRefused {
                 do {
-                    let config = try TapToPayDiscoveryConfigurationBuilder().setSimulated(true).build()
-                    let reader = try await discover(config) { $0.first }
-                    try await connect(reader, locationId: locationId)
+                    try await connect(terminal, kind: "tapToPay", simulated: true, locationId: locationId)
                     guard gen == generation else { return }
                     simulatedReader = .tapToPay
                     feed(.readerConnected, gen: gen)
@@ -335,15 +320,12 @@ final class POSCoordinator {
                         && (error is POSFlowError || POSSimulatedReader.fallsBackToBluetooth(errorCode: ns.code))
                     guard refused else { throw error }
                     tapToPaySimulatorRefused = true
-                    discoverCancelable = nil
+                    terminal.forgetRunning()
                     await disconnectIfConnected()
                 }
             }
-            let config = try BluetoothScanDiscoveryConfigurationBuilder().setSimulated(true).build()
-            // The simulator offers several Bluetooth readers; the WisePad 3 is the one Stripe sells in Finland.
-            let reader = try await discover(config) { readers in readers.first { $0.deviceType == .wisePad3 } ?? readers.first }
-            let connection = try BluetoothConnectionConfigurationBuilder(delegate: bridge, locationId: locationId).build()
-            try await connect(reader, config: connection)
+            // The driver picks the WisePad 3 (the one Stripe sells in Finland) among the simulated ones.
+            try await connect(terminal, kind: "bluetooth", simulated: true, locationId: locationId)
             guard gen == generation else { return }
             simulatedReader = .bluetooth
             feed(.readerConnected, gen: gen)
@@ -352,60 +334,30 @@ final class POSCoordinator {
         }
     }
 
-    private func discover(_ config: DiscoveryConfiguration, pick: @escaping ([Reader]) -> Reader?) async throws -> Reader {
-        try await withCheckedThrowingContinuation { continuation in
-            let once = ResumeOnce(continuation)
-            bridge.onDiscovered = { readers in
-                if let chosen = pick(readers) { once.resume(.success(chosen)) }
-            }
-            discoverCancelable = Terminal.shared.discoverReaders(config, delegate: bridge) { error in
-                once.resume(.failure(error ?? POSFlowError.noReader))
-            }
-        }
-    }
-
-    private func connect(_ reader: Reader, config: ConnectionConfiguration) async throws {
-        let _: Reader = try await withCheckedThrowingContinuation { continuation in
-            Terminal.shared.connectReader(reader, connectionConfig: config) { connected, error in
-                if let connected { continuation.resume(returning: connected) }
-                else { continuation.resume(throwing: error ?? POSFlowError.noReader) }
-            }
-        }
-        discoverCancelable = nil
-    }
-
     private func disconnectIfConnected() async {
-        guard Terminal.isInitialized(), Terminal.shared.connectionStatus == .connected else { return }
+        guard let terminal = loadedTerminal, terminal.connectedReaderKind != nil else { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            Terminal.shared.disconnectReader { _ in continuation.resume() }
+            terminal.disconnect { continuation.resume() }
         }
     }
 
     /// The card Stripe's simulator presents next; set before every test payment (Stripe resets it
     /// after a payment).
-    private func applyTestCard() {
+    private func applyTestCard(_ terminal: StripeTerminalDriving) {
         let reader = simulatedReader ?? .tapToPay
         if !testCard.isSupported(on: reader) { testCard = .defaultCard }
-        Terminal.shared.simulatorConfiguration.simulatedCard = SimulatedCard(type: Self.sdkCardType(testCard))
-    }
-
-    static func sdkCardType(_ card: POSTestCard) -> SimulatedCardType {
-        switch card {
-        case .visa: .visa
-        case .mastercard: .mastercard
-        case .declined: .chargeDeclined
-        case .insufficientFunds: .chargeDeclinedInsufficientFunds
-        case .expired: .chargeDeclinedExpiredCard
-        case .processingError: .chargeDeclinedProcessingError
-        case .offlinePin: .offlinePinScaRetry
-        }
+        terminal.setSimulatedCard(testCard.rawValue)
     }
 
     private func process(gen: Int) async {
         guard let payment = machine.payment else { return }
+        guard let terminal = startedTerminal() else {
+            feed(.failed(.make(.other)), gen: gen)
+            return
+        }
         do {
-            let intent: PaymentIntent
-            if let held = sdkIntent, held.stripeId == payment.paymentIntentId {
+            let intent: NSObject
+            if let held = sdkIntent, terminal.intentId(held) == payment.paymentIntentId {
                 intent = held
             } else {
                 intent = try await retrieve(clientSecret: payment.clientSecret)
@@ -414,20 +366,19 @@ final class POSCoordinator {
             guard gen == generation, machine.phase == .readyForCard || machine.phase == .waitingForCard else { return }
             sdkIntent = intent
             // Already charged (a lost answer before): only the server's check remains.
-            if intent.status == .succeeded || intent.status == .processing || intent.status == .requiresCapture {
+            if Self.charged(terminal.intentStatus(intent)) {
                 feed(.cardRead, gen: gen)
                 feed(.processed, gen: gen)
                 return
             }
-            if simulationActive, Terminal.shared.connectedReader?.simulated == true { applyTestCard() }
-            let result: Result<PaymentIntent, Error> = await withCheckedContinuation { continuation in
-                collectCancelable = Terminal.shared.processPaymentIntent(intent, collectConfig: nil, confirmConfig: nil) { processed, error in
+            if simulationActive, terminal.connectedReaderSimulated { applyTestCard(terminal) }
+            let result: Result<NSObject, Error> = await withCheckedContinuation { continuation in
+                terminal.processPaymentIntent(intent) { processed, error in
                     if let processed { continuation.resume(returning: .success(processed)) }
-                    else { continuation.resume(returning: .failure(error ?? POSFlowError.noResult)) }
+                    else { continuation.resume(returning: .failure(Self.flowError(error ?? POSFlowError.noResult))) }
                 }
             }
             guard gen == generation else { return }
-            collectCancelable = nil
             readerMessage = nil
             switch result {
             case .success(let processed):
@@ -436,7 +387,7 @@ final class POSCoordinator {
                 feed(.processed, gen: gen)
             case .failure(let error):
                 // processPaymentIntent fails with a ConfirmPaymentIntentError when the intent was reached.
-                if let updated = (error as? ConfirmPaymentIntentError)?.paymentIntent {
+                if let updated = terminal.intent(in: error) {
                     sdkIntent = updated
                 }
                 feed(.failed(Self.sdkFailure(error)), gen: gen)
@@ -446,14 +397,19 @@ final class POSCoordinator {
         }
     }
 
-    private func retrieve(clientSecret: String) async throws -> PaymentIntent {
-        initTerminalIfNeeded()
+    private func retrieve(clientSecret: String) async throws -> NSObject {
+        guard let terminal = startedTerminal() else { throw POSFlowError.noResult }
         return try await withCheckedThrowingContinuation { continuation in
-            Terminal.shared.retrievePaymentIntent(clientSecret: clientSecret) { intent, error in
+            terminal.retrievePaymentIntent(clientSecret: clientSecret) { intent, error in
                 if let intent { continuation.resume(returning: intent) }
-                else { continuation.resume(throwing: error ?? POSFlowError.noResult) }
+                else { continuation.resume(throwing: Self.flowError(error ?? POSFlowError.noResult)) }
             }
         }
+    }
+
+    /// The card was taken (or is being): only the server's check remains.
+    private static func charged(_ status: String) -> Bool {
+        status == "succeeded" || status == "processing" || status == "requiresCapture"
     }
 
     /// Asks the server to check the PaymentIntent with Stripe; only its "succeeded" counts.
@@ -488,11 +444,12 @@ final class POSCoordinator {
 
     private func notYetFinal(_ payment: POSCreatedPayment, gen: Int) async {
         finalizeAttempts += 1
-        let charged = sdkIntent.map { $0.status == .succeeded || $0.status == .processing || $0.status == .requiresCapture } ?? false
+        let charged = sdkIntent.flatMap { intent in loadedTerminal.map { Self.charged($0.intentStatus(intent)) } } ?? false
         if !charged, let intent = try? await retrieve(clientSecret: payment.clientSecret) {
             guard gen == generation else { return }
             sdkIntent = intent
-            if intent.status == .requiresPaymentMethod || intent.status == .requiresConfirmation {
+            let status = loadedTerminal?.intentStatus(intent)
+            if status == "requiresPaymentMethod" || status == "requiresConfirmation" {
                 // Nothing was taken: collect again on the same PaymentIntent.
                 feed(.notCharged, gen: gen)
                 return
@@ -511,9 +468,7 @@ final class POSCoordinator {
     }
 
     private func cancelCollection(gen: Int) {
-        if let cancelable = collectCancelable ?? discoverCancelable, !cancelable.completed {
-            cancelable.cancel { _ in }
-        } else {
+        if StripeTerminalLoader.loaded?.cancelRunning() != true {
             // Between steps: nothing on the reader to stop.
             feed(.failed(.make(.canceled)), gen: gen)
         }
@@ -536,44 +491,34 @@ final class POSCoordinator {
     }
 
     private var sdkCardLabel: String? {
-        guard let card = sdkIntent?.charges.first?.paymentMethodDetails?.cardPresent else { return nil }
-        return POSCard.label(brand: Terminal.stringFromCardBrand(card.brand), last4: card.last4)
+        guard let intent = sdkIntent, let parts = loadedTerminal?.cardLabelParts(intent), parts.count == 2 else { return nil }
+        return POSCard.label(brand: parts[0], last4: parts[1])
     }
 
-    // MARK: Reader events (from TerminalBridge, on the main actor)
+    // MARK: Reader events (from the driver, on the main actor)
 
-    fileprivate func readerWaitsForCard() {
-        readerMessage = nil
-        if machine.phase == .readyForCard { _ = machine.send(.waitingForCard) }
-    }
-
-    fileprivate func paymentStatusChanged(_ status: PaymentStatus) {
-        switch status {
-        case .waitingForInput: readerWaitsForCard()
-        case .processing:
+    private func readerEvent(_ kind: String, value: Double, text: String?) {
+        switch kind {
+        case StripeDriverEvent.waitingForInput, StripeDriverEvent.readerInput:
+            readerMessage = nil
+            if machine.phase == .readyForCard { _ = machine.send(.waitingForCard) }
+        case StripeDriverEvent.processing:
             if machine.phase == .readyForCard || machine.phase == .waitingForCard { _ = machine.send(.cardRead) }
-        default: break
+        case StripeDriverEvent.updateStarted:
+            updateProgress = 0
+            readerMessage = "Päivitetään Tap to Pay -ohjelmistoa…"
+        case StripeDriverEvent.updateProgress:
+            updateProgress = value
+        case StripeDriverEvent.updateFinished:
+            updateProgress = nil
+            readerMessage = nil
+        case StripeDriverEvent.reconnecting:
+            readerMessage = value > 0 ? "Yhteys katkesi, yhdistetään uudelleen…" : nil
+        default:
+            if kind.hasPrefix(StripeDriverEvent.messagePrefix) {
+                readerMessage = Self.finnish(String(kind.dropFirst(StripeDriverEvent.messagePrefix.count)), sdkText: text)
+            }
         }
-    }
-
-    fileprivate func readerMessage(_ message: ReaderDisplayMessage) {
-        readerMessage = Self.finnish(message)
-    }
-
-    fileprivate func updateStarted() {
-        updateProgress = 0
-        readerMessage = "Päivitetään Tap to Pay -ohjelmistoa…"
-    }
-
-    fileprivate func updateProgressed(_ progress: Float) { updateProgress = Double(progress) }
-
-    fileprivate func updateFinished() {
-        updateProgress = nil
-        readerMessage = nil
-    }
-
-    fileprivate func reconnecting(_ active: Bool) {
-        readerMessage = active ? "Yhteys katkesi, yhdistetään uudelleen…" : nil
     }
 
     // MARK: Errors
@@ -597,131 +542,28 @@ final class POSCoordinator {
 
     /// The card network's reason, wherever this SDK version puts it.
     private static func declineCode(_ error: Error) -> String? {
-        if let confirm = error as? ConfirmPaymentIntentError {
-            return confirm.declineCode ?? confirm.apiError?.declineCode ?? confirm.paymentIntent?.lastPaymentError?.declineCode
-        }
+        if let code = StripeTerminalLoader.loaded?.declineCode(in: error) { return code }
         // Fall back to any decline code string in userInfo.
         return (error as NSError).userInfo.values.lazy
             .compactMap { $0 as? String }
             .first { POSErrorMapping.offlinePinDeclineCodes.contains($0) }
     }
 
-    static func finnish(_ message: ReaderDisplayMessage) -> String {
+    /// The reader's prompt (a ReaderDisplayMessage case name) in Finnish; any other as the SDK says it.
+    static func finnish(_ message: String, sdkText: String?) -> String? {
         switch message {
-        case .retryCard: "Yritä korttia uudelleen."
-        case .insertCard: "Aseta kortti lukijaan."
-        case .insertOrSwipeCard: "Aseta tai vedä kortti."
-        case .swipeCard: "Vedä kortti."
-        case .removeCard: "Poista kortti."
-        case .multipleContactlessCardsDetected: "Useita kortteja havaittiin. Näytä vain yksi kortti."
-        case .tryAnotherReadMethod: "Korttia ei voitu lukea. Yritä uudelleen."
-        case .tryAnotherCard: "Kokeile toista korttia."
-        case .cardRemovedTooEarly: "Kortti poistettiin liian aikaisin. Yritä uudelleen."
-        @unknown default: Terminal.stringFromReaderDisplayMessage(message)
+        case "retryCard": "Yritä korttia uudelleen."
+        case "insertCard": "Aseta kortti lukijaan."
+        case "insertOrSwipeCard": "Aseta tai vedä kortti."
+        case "swipeCard": "Vedä kortti."
+        case "removeCard": "Poista kortti."
+        case "multipleContactlessCardsDetected": "Useita kortteja havaittiin. Näytä vain yksi kortti."
+        case "tryAnotherReadMethod": "Korttia ei voitu lukea. Yritä uudelleen."
+        case "tryAnotherCard": "Kokeile toista korttia."
+        case "cardRemovedTooEarly": "Kortti poistettiin liian aikaisin. Yritä uudelleen."
+        default: sdkText
         }
     }
 }
 
 enum POSFlowError: Error, Equatable { case noReader, noResult }
-
-/// Resumes a continuation once; Stripe may call a completion again after the first answer.
-private final class ResumeOnce<T>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<T, Error>?
-
-    init(_ continuation: CheckedContinuation<T, Error>) { self.continuation = continuation }
-
-    func resume(_ result: Result<T, Error>) {
-        let pending: CheckedContinuation<T, Error>? = lock.withLock {
-            defer { continuation = nil }
-            return continuation
-        }
-        pending?.resume(with: result)
-    }
-}
-
-/// The Objective-C delegates Stripe Terminal calls (from any thread); each event is handed to the
-/// coordinator on the main actor. The connection configuration holds its delegate weakly, so the
-/// coordinator keeps this object alive.
-private final class TerminalBridge: NSObject, DiscoveryDelegate, TapToPayReaderDelegate, TerminalDelegate {
-    weak var owner: POSCoordinator?
-    var onDiscovered: (([Reader]) -> Void)?
-
-    init(owner: POSCoordinator) { self.owner = owner }
-
-    fileprivate func onMain(_ work: @escaping @MainActor (POSCoordinator) -> Void) {
-        Task { @MainActor [weak self] in
-            if let owner = self?.owner { work(owner) }
-        }
-    }
-
-    // DiscoveryDelegate
-    func terminal(_ terminal: Terminal, didUpdateDiscoveredReaders readers: [Reader]) {
-        onDiscovered?(readers)
-    }
-
-    // TerminalDelegate
-    func terminal(_ terminal: Terminal, didChangePaymentStatus status: PaymentStatus) {
-        onMain { $0.paymentStatusChanged(status) }
-    }
-
-    // TapToPayReaderDelegate
-    func tapToPayReader(_ reader: Reader, didStartInstallingUpdate update: ReaderSoftwareUpdate, cancelable: Cancelable?) {
-        onMain { $0.updateStarted() }
-    }
-
-    func tapToPayReader(_ reader: Reader, didReportReaderSoftwareUpdateProgress progress: Float) {
-        onMain { $0.updateProgressed(progress) }
-    }
-
-    func tapToPayReader(_ reader: Reader, didFinishInstallingUpdate update: ReaderSoftwareUpdate?, error: Error?) {
-        onMain { $0.updateFinished() }
-    }
-
-    func tapToPayReader(_ reader: Reader, didRequestReaderInput inputOptions: ReaderInputOptions = []) {
-        onMain { $0.readerWaitsForCard() }
-    }
-
-    func tapToPayReader(_ reader: Reader, didRequestReaderDisplayMessage displayMessage: ReaderDisplayMessage) {
-        onMain { $0.readerMessage(displayMessage) }
-    }
-
-    // ReaderDelegate (auto-reconnect is on by default for Tap to Pay)
-    func reader(_ reader: Reader, didStartReconnect cancelable: Cancelable, disconnectReason: DisconnectReason) {
-        onMain { $0.reconnecting(true) }
-    }
-
-    func readerDidSucceedReconnect(_ reader: Reader) {
-        onMain { $0.reconnecting(false) }
-    }
-
-    func readerDidFailReconnect(_ reader: Reader) {
-        onMain { $0.reconnecting(false) }
-    }
-}
-
-/// Testitila's simulated Bluetooth reader (WisePad 3) reports through the mobile-reader delegate;
-/// the events mean the same as Tap to Pay's.
-extension TerminalBridge: MobileReaderDelegate {
-    func reader(_ reader: Reader, didReportAvailableUpdate update: ReaderSoftwareUpdate) {}
-
-    func reader(_ reader: Reader, didStartInstallingUpdate update: ReaderSoftwareUpdate, cancelable: Cancelable?) {
-        onMain { $0.updateStarted() }
-    }
-
-    func reader(_ reader: Reader, didReportReaderSoftwareUpdateProgress progress: Float) {
-        onMain { $0.updateProgressed(progress) }
-    }
-
-    func reader(_ reader: Reader, didFinishInstallingUpdate update: ReaderSoftwareUpdate?, error: Error?) {
-        onMain { $0.updateFinished() }
-    }
-
-    func reader(_ reader: Reader, didRequestReaderInput inputOptions: ReaderInputOptions = []) {
-        onMain { $0.readerWaitsForCard() }
-    }
-
-    func reader(_ reader: Reader, didRequestReaderDisplayMessage displayMessage: ReaderDisplayMessage) {
-        onMain { $0.readerMessage(displayMessage) }
-    }
-}

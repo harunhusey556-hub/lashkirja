@@ -59,6 +59,8 @@ enum Perf {
         case .tab: signposter.endInterval("tab", entry.state)
         case .open: signposter.endInterval("open", entry.state)
         }
+        // The revoked-session gate's launch → Koti, on the same clock as its other moments.
+        if entry.kind == .launch { UITestHooks.mark("koti") }
         let elapsed = ContinuousClock.now - entry.start
         let ms = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
         logger.log("perf \(entry.kind.rawValue, privacy: .public) \(entry.row, privacy: .public) \(ms, privacy: .public)")

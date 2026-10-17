@@ -4,7 +4,9 @@ import LocalAuthentication
 import Security
 import LashKirjaCore
 
-/// The app lock: a PIN (salted, stretched SHA-256 in the Keychain) and optional Face ID.
+/// The app lock: a PIN (salted, stretched SHA-256 in the Keychain) and optional Face ID, and the
+/// lighter idle lock ("Lukitse sovellus Face ID:llä"): no PIN, only Face ID or the device passcode
+/// after the app went unused for `idleLockAfter`.
 /// Fails closed: a PIN that cannot be read keeps the app locked, and the
 /// wrong-PIN backoff survives a relaunch.
 @MainActor
@@ -40,6 +42,41 @@ final class AppLock {
     var biometricsAvailable: Bool { LAContext().canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) }
 
     func lockIfEnabled() { if isEnabled { isLocked = true } }
+
+    /// The idle lock's wait (owner decision, w67; reversible).
+    static let idleLockAfter: TimeInterval = 12 * 3_600
+    /// Off by default (owner, w67). A preference, not a secret.
+    var idleLockEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "lock.idle") }
+        set { UserDefaults.standard.set(newValue, forKey: "lock.idle") }
+    }
+    /// Face ID, Touch ID or at least a device passcode: what the idle lock opens with.
+    var deviceOwnerAuthAvailable: Bool { LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) }
+
+    /// At launch and on coming back, signed in: unused for `idleLockAfter` since `lastActive` locks
+    /// the app over its cached screens until the owner proves it is them, on the phone alone.
+    func lockIfIdle(lastActive: Date?, now: Date = Date()) {
+        guard idleLockEnabled, let lastActive, now.timeIntervalSince(lastActive) >= Self.idleLockAfter else { return }
+        isLocked = true
+    }
+
+    /// A sign-in proved the owner already: an idle lock (not the PIN's) is lifted.
+    func endIdleLock() { if !isEnabled { lift() } }
+
+    /// The idle lock's way in: Face ID, falling back to the device passcode (no PIN of the app's).
+    func unlockWithDeviceOwner() async {
+        let context = LAContext()
+        if (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Avaa LashKirja")) == true {
+            lift()
+        }
+    }
+
+    /// The owner proved it is them: the app is in use from now, so the idle time counts from here
+    /// (`UsageClock` stands still while the lock is up).
+    private func lift() {
+        isLocked = false
+        UsageClock.touch()
+    }
 
     /// The account the lock was set up for (a user id, not a secret).
     private var owner: String? { UserDefaults.standard.string(forKey: "lock.owner") }
@@ -101,7 +138,7 @@ final class AppLock {
             return false
         }
         resetBackoff()
-        isLocked = false
+        lift()
         return true
     }
 
@@ -110,7 +147,7 @@ final class AppLock {
         let context = LAContext()
         if (try? await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: "Avaa LashKirja")) == true {
             resetBackoff()
-            isLocked = false
+            lift()
         }
     }
 
@@ -166,6 +203,25 @@ struct LockScreen: View {
     @FocusState private var focused: Bool
 
     var body: some View {
+        if lock.isEnabled { pinLock } else { idleLock }
+    }
+
+    /// Locked by the idle lock alone: Face ID or the passcode opens it.
+    private var idleLock: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "lock.fill").scaledFont(size: 40, relativeTo: .largeTitle).foregroundStyle(Theme.accent).accessibilityHidden(true)
+            Text("LashKirja on lukittu").font(.title3.weight(.semibold))
+            Text("Sovellusta ei ole käytetty 12 tuntiin.").foregroundStyle(Theme.ink2)
+            Button { Task { await lock.unlockWithDeviceOwner() } } label: { Label("Avaa Face ID:llä", systemImage: "faceid") }
+                .buttonStyle(.primary)
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.canvas.ignoresSafeArea())
+        .task { await lock.unlockWithDeviceOwner() }
+    }
+
+    private var pinLock: some View {
         VStack(spacing: 20) {
             Image(systemName: "lock.fill").scaledFont(size: 40, relativeTo: .largeTitle).foregroundStyle(Theme.accent).accessibilityHidden(true)
             Text("LashKirja on lukittu").font(.title3.weight(.semibold))
@@ -254,6 +310,13 @@ struct AppLockSettingsView: View {
                     }
                 }
                 .disabled(lock.checking)
+            }
+            if lock.deviceOwnerAuthAvailable {
+                Section {
+                    Toggle("Lukitse sovellus Face ID:llä", isOn: Binding(get: { lock.idleLockEnabled }, set: { lock.idleLockEnabled = $0 }))
+                } footer: {
+                    Text("Kun sovellusta ei ole käytetty 12 tuntiin, sen avaaminen vaatii Face ID:n tai laitteen pääsykoodin.")
+                }
             }
             if let message { Text(message).foregroundStyle(Theme.danger) }
         }

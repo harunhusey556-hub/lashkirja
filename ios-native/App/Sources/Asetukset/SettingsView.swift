@@ -383,7 +383,8 @@ struct DevicesView: View {
                 ForEach(list.prefix(limit.visible(list.count))) { s in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(s.label + (s.current ? " (tämä laite)" : ""))
-                        Text("Käytetty \(InvoiceDetailView.timestamp(s.lastSeenAt ?? s.createdAt))").font(.caption).foregroundStyle(Theme.ink2)
+                        Text("Käytetty \(InvoiceDetailView.timestamp(s.lastSeenAt ?? s.createdAt))" + (s.trusted == true ? " · Luotettu laite" : ""))
+                            .font(.caption).foregroundStyle(Theme.ink2)
                     }
                     .swipeActions {
                         if !s.current { Button("Kirjaa ulos", role: .destructive) { confirmSession = s } }
