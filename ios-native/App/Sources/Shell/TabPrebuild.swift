@@ -125,4 +125,11 @@ enum RunLoopIdle {
             CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
         }
     }
+
+    /// Resumes once the frame being built now is committed. The first idle is still the turn the
+    /// change was made in, ahead of that turn's commit; the second comes after it.
+    static func afterFrame() async {
+        await next()
+        await next()
+    }
 }

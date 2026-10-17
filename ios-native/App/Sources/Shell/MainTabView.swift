@@ -126,12 +126,25 @@ struct MainTabView: View {
     @ViewBuilder private func root(_ item: AppTab) -> some View {
         switch item {
         case .koti: KotiView(app: app)
-        // Built again when the tab is chosen (`tab` changes), so it carries the list as painted by then.
-        case .myynti: MyyntiView(preview: app.salesPreview())
+        case .myynti: MyyntiRoot()
         case .kirjanpito: KirjanpitoView()
-        case .raportit: RaportitView(preview: app.raportitPreview())
+        case .raportit: RaportitRoot()
         default: PlaceholderScreen(title: item.title)
         }
+    }
+
+    // The previews are read in these bodies, not in `MainTabView`'s: `lastPainted` changes with
+    // every load, and read here each change ran the whole tab container again (its toolbars too),
+    // also while a tab was building its first frame (w60 motion gate, offline-tab-myynti). Built
+    // when the tab is first shown, so the root carries the data as painted by then.
+    private struct MyyntiRoot: View {
+        @Environment(AppModel.self) private var app
+        var body: some View { MyyntiView(preview: app.salesPreview()) }
+    }
+
+    private struct RaportitRoot: View {
+        @Environment(AppModel.self) private var app
+        var body: some View { RaportitView(preview: app.raportitPreview()) }
     }
 
     private func path(_ item: AppTab) -> Binding<[Route]> {
