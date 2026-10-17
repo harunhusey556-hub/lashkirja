@@ -17,12 +17,16 @@ struct LashKirjaApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        // The revoked-session walk's timeline: what comes before `main` (dyld) and what `init` costs.
+        UITestHooks.mark("main")
         Perf.beginLaunch()
         // The first date formatter of a run costs ~90 ms: built here, beside the scene setup, it is
         // ready before `start()` asks for this month's key (w47, launch → Koti).
         Task.detached(priority: .userInitiated) { APIDate.warmUp() }
         let app = AppModel()
         _app = State(initialValue: app)
+        // Before UIKit builds the first frame: a revoked session's 401 comes back meanwhile.
+        app.checkStoredSession()
         // Before launch finishes: a notification tap that launched the app must find its delegate.
         AppNotifications.shared.activate(app: app)
         // MetricKit hands over the previous run's crash and hang reports shortly after launch.
@@ -31,6 +35,7 @@ struct LashKirjaApp: App {
         MotionProbe.shared.start()
         // A quick action that launched the app is already waiting in QuickActions.
         QuickActions.attach { url in app.handle(url: url) }
+        UITestHooks.mark("init")
     }
 
     var body: some Scene {

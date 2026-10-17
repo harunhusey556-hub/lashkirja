@@ -109,26 +109,81 @@ final class AppModel {
     /// Now, for a problem report or a trip to the background; otherwise every 30 s.
     func flushEvents() async { await eventUploader.flush() }
 
-    func start() async {
+    /// The launch's session check (`checkStoredSession`): the restored user and the server's verdict.
+    @ObservationIgnored private var launchCheck: Task<(AuthUser, Task<SessionCheck, Never>)?, Never>?
+    /// When `launchCheck` went out. A process started in the background (Background App Refresh,
+    /// iOS prewarming) opens its screen much later: its verdict is not taken then.
+    @ObservationIgnored private var launchCheckStarted: ContinuousClock.Instant?
+    /// What the sign-in screen says when the server refused the session.
+    static let expiredNotice = "Istunto vanheni. Kirjaudu uudelleen."
+    /// Set off the main thread as soon as a 401 has cleared the session's token. The main thread
+    /// is busy building the first frame when the launch's 401 comes back (CI, w56): that frame
+    /// shows the sign-in screen at once instead of the launch look and one more frame later.
+    nonisolated let refusal = Refusal()
+
+    /// What RootView shows: the phase, or the sign-in screen for a refusal the main actor has not
+    /// yet handled (`sessionCleared` then sets the same phase, so nothing is rebuilt).
+    var shownPhase: Phase {
+        if case .launching = phase, refusal.isSet { return .signedOut(notice: Self.expiredNotice) }
+        return phase
+    }
+
+    /// From the App's init: the stored token goes to the server off the main thread while UIKit
+    /// still builds the first frame, so a refusal can be known by the time `start()` runs (on CI
+    /// the first frame comes 0.5–0.9 s after init, w52).
+    func checkStoredSession() {
+        let auth = self.auth
+        let api = self.api
+        let observer = self.observer
+        launchCheckStarted = .now
+        launchCheck = Task.detached { [weak self] in
+            // Before the check goes out: its 401 signs out like any other, and its answer reaches
+            // the debugging trail, the offline banner and the failure report.
+            await AppModel.connect(api, auth: auth, observer: observer, to: self)
+            guard let user = await auth.restore() else { return nil }
+            // The stored token goes first and alone: every other request (Koti's own load, the
+            // prefetch, the version poll) waits for its answer, at most `SessionCheck.hold`.
+            // Behind the launch's burst of loads a revoked session reached the sign-in screen only
+            // 7–9 s later (CI, w45); offline or a slow server leaves the owner signed in.
+            return (user, await api.checkSession("/api/auth/me", hold: SessionCheck.hold))
+        }
+    }
+
+    /// The client's handlers, set once per launch before its first request.
+    private nonisolated static func connect(_ api: APIClient, auth: AuthService, observer: ObserveReporter, to model: AppModel?) async {
         await auth.bind(api)
         // Every write the server accepts marks what the screens show as out of date, so a list
         // reloads when the owner comes back to it after acting on a detail screen or a sheet.
         // Sign-in, chat housekeeping and the app's own diagnostics change no bookkeeping data.
         // /api/observe above all: an event upload that marked the screens stale made them
         // reload, the reloads logged new events, and the next upload reloaded them again.
-        await api.setOnWrite { [weak self] path in
+        await api.setOnWrite { [weak model] path in
             guard !path.hasPrefix("/api/auth"), !path.hasPrefix("/api/ai/"), !path.hasPrefix("/api/observe") else { return }
             await MainActor.run {
-                self?.dataVersion += 1
-                self?.settleVersionSoon()
+                model?.dataVersion += 1
+                model?.settleVersionSoon()
             }
         }
-        await api.setOnUnauthorized { [weak self] sentToken in await self?.sessionExpired(sentToken: sentToken) }
-        let observer = self.observer
+        await api.setOnUnauthorized { [weak model] sentToken in
+            // Here, off the main actor: the token is cleared and the refusal known while the main
+            // thread still builds the first frame.
+            UITestHooks.mark("refused")
+            guard await auth.handleUnauthorized(sentToken: sentToken) else { return }
+            model?.refusal.set()
+            await model?.sessionCleared()
+        }
         await api.setOnUnexpectedFailure { method, path, status, decodeError in
             await observer.reportAPIFailure(method: method, path: path, status: status, decodeError: decodeError)
         }
         await api.setOnRequestFinished { trace in await EventLog.shared.record(.request(trace)) }
+        // The offline banner also covers a server that does not answer while the phone has a network.
+        await api.setOnReachability { reached in await MainActor.run { Connectivity.shared.requestFinished(reached: reached) } }
+    }
+
+    func start() async {
+        // A check from a launch long before the screen opened says nothing about the session now.
+        if let started = launchCheckStarted, ContinuousClock.now - started > .seconds(SessionCheck.hold) { launchCheck = nil }
+        if launchCheck == nil { checkStoredSession() }
         EventLog.shared.log(.lifecycle("launch"))
         let uploader = eventUploader
         eventFlushLoop = Task {
@@ -140,15 +195,28 @@ final class AppModel {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
-        // The offline banner also covers a server that does not answer while the phone has a network.
-        await api.setOnReachability { reached in await MainActor.run { Connectivity.shared.requestFinished(reached: reached) } }
         Connectivity.shared.attach { [api] in let _: Ignored? = try? await api.get("/api/auth/me") }
+        let launch = await launchCheck?.value
+        launchCheck = nil
+        launchCheckStarted = nil
         let auth = self.auth
-        // The revoke of an earlier sign-out is a network call: it must not hold up opening the app.
+        // After the check bound the client. The revoke of an earlier sign-out is a network call: it
+        // must not hold up opening the app.
         Task { await auth.revokePending() }
-        guard let user = await auth.restore() else {
+        guard case let (user, check)? = launch else {
             Perf.dropLaunch()
-            phase = .signedOut(notice: nil)
+            // An earlier check's 401 may have signed out already, with its notice.
+            if case .launching = phase { phase = .signedOut(notice: nil) }
+            return
+        }
+        // The calm launch look stays until the verdict, at most the hold (owner, 2026-10-16): a
+        // refused token goes straight to the sign-in screen and the tabs are never built. Building
+        // them first kept the main thread busy and the 401 waited behind it (~1–6 s on CI, w52).
+        let verdict = await SessionCheck.verdict(of: check, within: SessionCheck.hold)
+        UITestHooks.mark("verdict")
+        guard verdict != .refused, await auth.currentToken() != nil else {
+            Perf.dropLaunch()
+            if case .launching = phase { phase = .signedOut(notice: Self.expiredNotice) }
             return
         }
         // A lock set up before its owner was recorded belongs to this session's account.
@@ -158,15 +226,19 @@ final class AppModel {
         phase = .signedIn(user)
         let started = session.current
         await auth.refreshIfDue()
-        // A refused refresh already signed out (with the notice): stop here.
-        guard await auth.currentToken() != nil else { return }
+        // A refused refresh already signed out (with the notice): stop here. The session check's
+        // 401 can land before the tabs were put up above, and is not undone by them.
+        guard await auth.currentToken() != nil else {
+            if case .signedIn = phase { phase = .signedOut(notice: Self.expiredNotice) }
+            return
+        }
         // After the refresh: the first look at the version goes out with a current token.
         startVersionPolling()
         prefetch()
         // Only for the account it was asked for: a sign-out (and maybe another sign-in) can
         // happen while it loads.
-        if let me: MeResponse = try? await api.get("/api/auth/me"), session.isCurrent(started),
-           case .signedIn(let current) = phase, current.userId == me.user.userId {
+        if case .accepted(let body) = await check.value, let me = try? JSONDecoder().decode(MeResponse.self, from: body),
+           session.isCurrent(started), case .signedIn(let current) = phase, current.userId == me.user.userId {
             phase = .signedIn(me.user)
         }
     }
@@ -196,6 +268,7 @@ final class AppModel {
         // Receipt photos waiting for a connection belong to this owner: they leave with them.
         OfflineReceiptQueueModel.shared.clearForSignOut()
         endLocalSession()
+        await api.endSessionRequests()
         await auth.endSession()
         phase = .signedOut(notice: nil)
         let auth = self.auth
@@ -206,10 +279,23 @@ final class AppModel {
     /// on the device for when the same owner signs in again; nothing else of theirs stays.
     /// A 401 for an earlier session (sent before a sign-in) leaves the current one alone.
     func sessionExpired(sentToken: String) async {
+        UITestHooks.mark("refused")
         guard await auth.handleUnauthorized(sentToken: sentToken) else { return }
+        await sessionCleared()
+    }
+
+    /// The refused session's token is already gone (`AuthService.handleUnauthorized` said so):
+    /// the rest of the session ends here.
+    func sessionCleared() async {
+        UITestHooks.mark("cleared")
         OfflineReceiptQueueModel.shared.detach()
         endLocalSession()
-        phase = .signedOut(notice: "Istunto vanheni. Kirjaudu uudelleen.")
+        UITestHooks.mark("ended")
+        // Before the hop below: the sign-in screen does not wait on the client actor.
+        phase = .signedOut(notice: Self.expiredNotice)
+        // A 401 seen outside `api` (the assistant's stream, a receipt upload): its loads still out
+        // end here too, quietly, instead of each answering 401 behind the sign-in screen.
+        await api.endSessionRequests()
     }
 
     /// A 401 to a request made outside `api` (the assistant's stream and receipt upload): it ends
@@ -668,4 +754,12 @@ struct PendingCapture: Identifiable, Equatable {
 struct InvoicePreview {
     let detail: InvoiceDetailResponse
     let reminder: ReminderPreview?
+}
+
+/// A one-way flag any thread may set and read (`AppModel.refusal`).
+final class Refusal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
 }
