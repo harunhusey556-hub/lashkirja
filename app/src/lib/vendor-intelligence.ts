@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { normalizeExtractedCategory } from "./receipt-categories";
 
 export interface VendorIntelligence {
   vendor: string;
@@ -82,9 +83,17 @@ export function isAmountWithinRange(amountCents: number, intel: VendorIntelligen
 }
 
 const PROMPT_VENDOR_MAX = 60;
-// Words of an instruction, not of a company name. Losing a real vendor that happens to
-// contain one only costs a reading hint; letting an instruction through steers the model.
-const INSTRUCTION_WORDS = /ignore|system|assistant|prompt|instruction|ohita|unohda/i;
+// Phrases of an instruction, matched as whole words: a bare substring dropped ordinary
+// names like "XYZ Systems Oy", "Tietosystemit" or "Prompt Media" (ultrareview PR #31).
+const INSTRUCTION_PHRASES = [
+  /\bignore\s+(?:all|any|the|previous|prior|above|earlier)\b/i,
+  /\b(?:all|previous|prior|above|earlier)\s+instructions?\b/i,
+  /\b(?:disregard|ohita|unohda)\b/i,
+  /\byou\s+are\s+now\b/i,
+  /\b(?:system|new)\s+prompt\b/i,
+  // A role label that opens a turn of its own: "System:", "assistant:".
+  /\b(?:system|assistant|user|developer)\s*:/i,
+];
 
 /**
  * A vendor name as it may stand in a reading prompt, or null when it must not
@@ -100,7 +109,7 @@ export function promptSafeVendor(raw: string | null | undefined): string | null 
     .replace(/["'`\u2018\u2019\u201a\u201b\u201c\u201d\u201e\u201f\u00ab\u00bb]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  if (!text || INSTRUCTION_WORDS.test(text)) return null;
+  if (!text || INSTRUCTION_PHRASES.some((phrase) => phrase.test(text))) return null;
   return text.slice(0, PROMPT_VENDOR_MAX).trim();
 }
 
@@ -158,9 +167,11 @@ async function vendorCategoriesForAiPrompt(userId: string): Promise<string> {
   const vendorToCatCounts = new Map<string, Map<string, number>>();
   for (const r of receipts) {
     const vendor = promptSafeVendor(r.vendor);
-    if (!vendor || !r.category) continue;
+    // The category is owner-typed text too: only a known category id goes into the prompt line.
+    const category = normalizeExtractedCategory(r.category);
+    if (!vendor || !category) continue;
     const vendorMap = vendorToCatCounts.get(vendor) || new Map<string, number>();
-    vendorMap.set(r.category, (vendorMap.get(r.category) || 0) + 1);
+    vendorMap.set(category, (vendorMap.get(category) || 0) + 1);
     vendorToCatCounts.set(vendor, vendorMap);
   }
 
