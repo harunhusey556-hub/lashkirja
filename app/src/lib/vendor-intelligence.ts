@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { normalizeExtractedCategory } from "./receipt-categories";
 
 export interface VendorIntelligence {
   vendor: string;
@@ -81,6 +82,37 @@ export function isAmountWithinRange(amountCents: number, intel: VendorIntelligen
   return amountCents >= minExpected && amountCents <= maxExpected;
 }
 
+const PROMPT_VENDOR_MAX = 60;
+// Phrases of an instruction, matched as whole words: a bare substring dropped ordinary
+// names like "XYZ Systems Oy", "Tietosystemit" or "Prompt Media" (ultrareview PR #31).
+const INSTRUCTION_PHRASES = [
+  /\bignore\s+(?:all|any|the|previous|prior|above|earlier)\b/i,
+  /\b(?:all|previous|prior|above|earlier)\s+instructions?\b/i,
+  /\b(?:disregard|ohita|unohda)\b/i,
+  /\byou\s+are\s+now\b/i,
+  /\b(?:system|new)\s+prompt\b/i,
+  // A role label that opens a turn of its own: "System:", "assistant:".
+  /\b(?:system|assistant|user|developer)\s*:/i,
+];
+
+/**
+ * A vendor name as it may stand in a reading prompt, or null when it must not
+ * stand there at all. The name is typed by the owner (or read from a document),
+ * so it goes in as one short line of plain text: no line breaks or control
+ * characters to open a new prompt line, no quotes to close the one around it
+ * (review 2026-10-16).
+ */
+export function promptSafeVendor(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const text = raw
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ")
+    .replace(/["'`\u2018\u2019\u201a\u201b\u201c\u201d\u201e\u201f\u00ab\u00bb]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || INSTRUCTION_PHRASES.some((phrase) => phrase.test(text))) return null;
+  return text.slice(0, PROMPT_VENDOR_MAX).trim();
+}
+
 /** AutomationEvent kind of a vendor name the owner corrected on a receipt (receipt-update.ts). */
 export const VENDOR_CORRECTION_KIND = "vendor";
 const CORRECTIONS_IN_PROMPT = 8;
@@ -99,9 +131,11 @@ async function vendorCorrectionsForAiPrompt(userId: string): Promise<string> {
   });
   const lines = new Map<string, string>();
   for (const event of events) {
-    const corrected = event.newValue?.trim();
+    const corrected = promptSafeVendor(event.newValue);
     if (!corrected) continue;
-    const read = event.previousValue?.trim();
+    const read = promptSafeVendor(event.previousValue);
+    // A misread name that is not safe to quote drops the whole line, not only its first half.
+    if (!read && event.previousValue?.trim()) continue;
     const key = `${read?.toLowerCase() ?? ""}→${corrected.toLowerCase()}`;
     if (lines.has(key)) continue;
     lines.set(key, read ? `- luettu "${read}" → oikea myyjä ${corrected}` : `- ${corrected}`);
@@ -132,10 +166,13 @@ async function vendorCategoriesForAiPrompt(userId: string): Promise<string> {
 
   const vendorToCatCounts = new Map<string, Map<string, number>>();
   for (const r of receipts) {
-    if (!r.vendor || !r.category) continue;
-    const vendorMap = vendorToCatCounts.get(r.vendor) || new Map<string, number>();
-    vendorMap.set(r.category, (vendorMap.get(r.category) || 0) + 1);
-    vendorToCatCounts.set(r.vendor, vendorMap);
+    const vendor = promptSafeVendor(r.vendor);
+    // The category is owner-typed text too: only a known category id goes into the prompt line.
+    const category = normalizeExtractedCategory(r.category);
+    if (!vendor || !category) continue;
+    const vendorMap = vendorToCatCounts.get(vendor) || new Map<string, number>();
+    vendorMap.set(category, (vendorMap.get(category) || 0) + 1);
+    vendorToCatCounts.set(vendor, vendorMap);
   }
 
   const vendorPriors = Array.from(vendorToCatCounts.entries())

@@ -15,6 +15,9 @@ import {
   vatMismatchHint,
   vatRowsFromSaved,
   vatLinesProblem,
+  VAT_SIGN_MESSAGE,
+  negativeAmountProblem,
+  NEGATIVE_ONLY_CREDIT_MESSAGE,
 } from "./receipt-vat";
 
 const NBSP = " ";
@@ -191,9 +194,45 @@ describe("vatLinesProblem", () => {
     ).toMatch(/suurempi/);
   });
 
+  it("refuses VAT lines of the other sign than the total (review 2026-10-16)", () => {
+    // A credit note: negative total, VAT zero or negative.
+    expect(vatLinesProblem([{ rate: 25.5, amount: -25.5 }, { rate: 0, amount: 0 }], -125.5)).toBeNull();
+    expect(vatLinesProblem([{ rate: 25.5, amount: 25.5 }], -125.5)).toBe(VAT_SIGN_MESSAGE);
+    expect(vatLinesProblem([{ rate: 25.5, amount: -30 }, { rate: 14, amount: 10 }], -125.5)).toBe(VAT_SIGN_MESSAGE);
+    // Any other receipt: VAT zero or positive, even when the sizes would fit.
+    expect(vatLinesProblem([{ rate: 25.5, amount: -2 }], 10)).toBe(VAT_SIGN_MESSAGE);
+    expect(vatLinesProblem([{ rate: 25.5, amount: -2 }], 0)).toBe(VAT_SIGN_MESSAGE);
+    expect(vatLinesProblem([{ rate: 25.5, amount: 5 }, { rate: 14, amount: -4 }], 100)).toBe(VAT_SIGN_MESSAGE);
+    // No total: the lines still may not point both ways.
+    expect(vatLinesProblem([{ rate: 25.5, amount: -2 }], null)).toBeNull();
+    expect(vatLinesProblem([{ rate: 25.5, amount: -2 }, { rate: 14, amount: 1 }], null)).toBe(VAT_SIGN_MESSAGE);
+    // Stored lines not being changed are held to the sign too.
+    expect(vatLinesProblem([{ rate: 24, amount: -24 }], 124, false)).toBe(VAT_SIGN_MESSAGE);
+  });
+
   it("refuses a rate the VAT return does not know", () => {
     expect(vatLinesProblem([{ rate: 99, amount: 0.5 }], 10)).toMatch(/99 %/);
     expect(vatLinesProblem([{ rate: 12.5, amount: 0.5 }], 10)).toMatch(/12,5 %/);
+  });
+});
+
+describe("negativeAmountProblem (ultrareview PR #31: one rule for every write path)", () => {
+  it("lets a credit note carry negative amounts", () => {
+    expect(negativeAmountProblem({ totalAmount: -10, originalAmount: -9, vatDetails: [{ rate: 25.5, amount: -2 }] }, true)).toBeNull();
+  });
+
+  it("refuses a negative total, original amount or VAT line on any other receipt", () => {
+    expect(negativeAmountProblem({ totalAmount: -10 }, false)).toBe(NEGATIVE_ONLY_CREDIT_MESSAGE);
+    expect(negativeAmountProblem({ originalAmount: -10 }, false)).toBe(NEGATIVE_ONLY_CREDIT_MESSAGE);
+    expect(negativeAmountProblem({ vatDetails: [{ rate: 25.5, amount: 2 }, { rate: 14, amount: -1 }] }, false)).toBe(
+      NEGATIVE_ONLY_CREDIT_MESSAGE
+    );
+  });
+
+  it("has nothing to say about amounts that are not negative or not sent", () => {
+    expect(negativeAmountProblem({ totalAmount: 10, originalAmount: 0, vatDetails: [{ rate: 25.5, amount: 2 }] }, false)).toBeNull();
+    expect(negativeAmountProblem({ totalAmount: null, originalAmount: undefined, vatDetails: null }, false)).toBeNull();
+    expect(negativeAmountProblem({}, false)).toBeNull();
   });
 });
 
