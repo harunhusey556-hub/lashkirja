@@ -85,6 +85,11 @@ final class MotionAuditTests: WalkTestCase {
         try? encoder.encode(all).write(to: URL(fileURLWithPath: path))
     }
 
+    /// The host opens it (scripts/sim/run-ui.sh, also while a step records), as a notification would.
+    func sendLink(_ url: String) {
+        FileManager.default.createFile(atPath: "\(shotDir)/\(UUID().uuidString).openurl", contents: url.data(using: .utf8))
+    }
+
     /// An invoice id from the demo API itself (the runner shares the Mac's loopback with the tunnel).
     func demoInvoiceId() -> String? {
         func call(_ path: String, _ body: [String: String]?, _ token: String?) -> [String: Any]? {
@@ -466,18 +471,30 @@ final class MotionAuditTests: WalkTestCase {
         // Bad (item 9's mechanism, AppModel.pendingRoute): a link to an invoice while the Asetukset
         // sheet is up closes the sheet, switches to Myynti and pushes the invoice, each animated.
         if let id = demoInvoiceId() {
+            let link = "lashkirja://invoice/\(id)"
+            let invoice = app.navigationBars.matching(NSPredicate(format: "identifier CONTAINS[c] %@", "lasku")).firstMatch
+            // iOS asks "Open in LashKirja?" the first time a link reaches an install, and every walk
+            // is a fresh install: answered here, outside the recording, so the step films the app.
+            sendLink(link)
+            let open = springboard.buttons["Open"]
+            let deadline = Date().addingTimeInterval(20)
+            while Date() < deadline && !invoice.exists {
+                if open.exists { open.tap(); break }
+                usleep(250_000)
+            }
+            if invoice.waitForExistence(timeout: 15) { edgeSwipeBack(); sleep(1) } else { note("calibration: the first link opened no invoice") }
             tab("Koti")
             press(app.buttons["Asetukset"].firstMatch); _ = app.navigationBars["Asetukset"].waitForExistence(timeout: 8); sleep(2)
-            // iOS asks "Open in LashKirja?" only the first time on a device; after that the link
-            // opens straight away, so it is sent inside the recorded step.
-            step("bad-link-over-sheet", from: "Asetukset sheet on Koti", to: "Lasku (Myynti)", seconds: 7) {
-                let name = "\(shotDir)/\(UUID().uuidString).openurl"
-                FileManager.default.createFile(atPath: name, contents: "lashkirja://invoice/\(id)".data(using: .utf8))
-                let open = springboard.buttons["Open"]
+            step("bad-link-over-sheet", from: "Asetukset sheet on Koti", to: "Lasku (Myynti)", seconds: 7,
+                 reached: { invoice.waitForExistence(timeout: 8) && !self.app.navigationBars["Asetukset"].exists }) {
+                sendLink(link)
                 if open.waitForExistence(timeout: 3) { open.tap() }
                 return true
             }
             sleep(2)
+            // A link that did not open leaves the sheet over the tabs, and the rest of the walk
+            // (items 7 and 9) would tap through it.
+            if app.navigationBars["Asetukset"].exists { swipeSheetDown("Asetukset"); sleep(1) }
             tab("Kirjanpito")
         }
         // Bad (item 7): the capture fixture uploads and is read; the screen moves as rows finish.
