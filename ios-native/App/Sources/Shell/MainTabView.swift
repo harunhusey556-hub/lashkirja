@@ -39,6 +39,7 @@ struct MainTabView: View {
         // Less gap between sections, so more fits on a phone. Rows keep the system's 44 pt minimum,
         // the smallest comfortable touch target.
         .listSectionSpacing(.compact)
+        .background(AddTabGuard { select(.add) })
         .sheet(isPresented: $showAdd) { AddSheet().motionProbe("add-sheet") }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]).motionProbe("settings-sheet") }
         .sheet(isPresented: $showAssistant) { AssistantView().motionProbe("assistant") }
