@@ -52,12 +52,16 @@ export async function POST(req: NextRequest) {
   const { sessionId, app, events } = parsed.data;
 
   const rows: LoggedEvent[] = [];
+  // The day alone: an exact time (the phone's or the server's) would join a gap to the rows of
+  // the same batch, which carry the user.
+  const day = new Date().toISOString().slice(0, 10);
   for (const { ts, id, ...event } of events) {
     if (event.kind === "usage_gap") {
-      // Anonymous on purpose: the bucket and screen only, nothing that ties it to a person,
-      // device or request. Anything outside the known buckets is dropped, not logged.
+      // Anonymous on purpose: the bucket, the screen and the phone's random per-event id (a batch
+      // sent again repeats it, so it is counted once), nothing that ties it to a person, device
+      // or request. Anything outside the known buckets is dropped, not logged.
       if (isUsageGap(event.name, event.screen)) {
-        rows.push({ source: "ios", kind: "usage_gap", clientTs: ts, name: event.name, screen: event.screen });
+        rows.push({ eventId: id, source: "ios", kind: "usage_gap", ts: day, name: event.name, screen: event.screen });
       }
       continue;
     }

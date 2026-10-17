@@ -73,10 +73,15 @@ describe("POST /api/observe/events", () => {
     const lines = (await readFile(eventLogFile(new Date(), dir), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(lines).toHaveLength(3);
     for (const line of lines.slice(0, 2)) {
-      expect(Object.keys(line).sort()).toEqual(["clientTs", "kind", "name", "screen", "source", "ts"]);
+      expect(Object.keys(line).sort()).toEqual(["eventId", "kind", "name", "screen", "source", "ts"]);
+      // The day only: an exact time would join the gap to the batch's other rows.
+      expect(line.ts).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     }
     expect(lines.map((line) => line.name)).toEqual(["7-30d", "<1h", undefined]);
-    expect(JSON.stringify(lines.slice(0, 2))).not.toMatch(/u1|s1|r1|e1|e2|26\.0/);
+    // The phone's random per-event id stays, for counting a resent batch once; nothing else of it.
+    expect(lines.slice(0, 2).map((line) => line.eventId)).toEqual(["e1", "e2"]);
+    expect(JSON.stringify(lines.slice(0, 2))).not.toMatch(/u1|s1|r1|26\.0|10:00/);
+    expect(lines[2].ts).not.toBe(lines[0].ts);
     // Other kinds keep their ids.
     expect(lines[2]).toMatchObject({ kind: "screen", userId: "u1", sessionId: "s1", eventId: "e6" });
   });

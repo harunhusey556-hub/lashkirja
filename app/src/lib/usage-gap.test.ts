@@ -27,6 +27,17 @@ describe("tallyUsageGaps + formatUsageGaps", () => {
     expect(counts[">30d"]).toEqual({ launch: 1, foreground: 0 });
   });
 
+  it("counts an event of a batch sent again once, by its eventId", () => {
+    const resent = [
+      { eventId: "a1", kind: "usage_gap", name: "1-3d", screen: "launch" },
+      { eventId: "a2", kind: "usage_gap", name: "1-3d", screen: "foreground" },
+      { eventId: "a1", kind: "usage_gap", name: "1-3d", screen: "launch" },
+      { eventId: "a2", kind: "usage_gap", name: "1-3d", screen: "foreground" },
+      { eventId: "a3", kind: "usage_gap", name: "1-3d", screen: "launch" },
+    ];
+    expect(tallyUsageGaps(resent)["1-3d"]).toEqual({ launch: 2, foreground: 1 });
+  });
+
   it("prints counts with percentages of each column", () => {
     const lines = formatUsageGaps(tallyUsageGaps(events)).split("\n");
     expect(lines).toHaveLength(9);

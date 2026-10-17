@@ -1,7 +1,8 @@
 /**
  * The app reports how long it had been unused when it opened ("usage_gap"),
- * as a histogram of buckets. Rows are written without any id, so the log
- * answers "how often do people come back after a month" and nothing about who.
+ * as a histogram of buckets. Rows carry no user, session or exact time, only
+ * the phone's random per-event id (for counting a resent batch once), so the
+ * log answers "how often do people come back after a month" and nothing about who.
  */
 export const USAGE_GAP_BUCKETS = ["<1h", "1-12h", "12-24h", "1-3d", "3-7d", "7-30d", ">30d"] as const;
 export const USAGE_GAP_SCREENS = ["launch", "foreground"] as const;
@@ -26,11 +27,17 @@ export function emptyUsageGapCounts(): UsageGapCounts {
   return counts;
 }
 
-/** Counts usage_gap lines; anything else (and unknown buckets) is skipped. */
+/** Counts usage_gap lines; anything else (and unknown buckets) is skipped. A batch sent again
+ * after a lost answer repeats its events: a line whose eventId was already counted is skipped. */
 export function tallyUsageGaps(events: Iterable<Record<string, unknown>>): UsageGapCounts {
   const counts = emptyUsageGapCounts();
+  const seen = new Set<string>();
   for (const event of events) {
     if (event.kind !== "usage_gap" || !isUsageGap(event.name, event.screen)) continue;
+    if (typeof event.eventId === "string") {
+      if (seen.has(event.eventId)) continue;
+      seen.add(event.eventId);
+    }
     counts[event.name][event.screen as UsageGapScreen] += 1;
   }
   return counts;

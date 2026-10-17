@@ -5,10 +5,9 @@ import {
   AccountSecurityError,
   accountLinkBase,
   normalizeLoginEmail,
-  openAuthSession,
+  openBearerSession,
   sendAccountMail,
 } from "@/lib/account-security";
-import { sealBearerToken } from "@/lib/auth-credential";
 import { acceptDeviceKey } from "@/lib/device-key";
 import { rejectSignupRequest, verifySignup, welcomeMail } from "@/lib/signup";
 import { PASSWORD_MAX } from "@/lib/session-policy";
@@ -46,15 +45,7 @@ export async function POST(req: NextRequest) {
     const user = await verifySignup(email, parsed.data.code, parsed.data.password);
     const device = parsed.data.device === "ios-app" ? ("ios-app" as const) : undefined;
     const deviceKey = acceptDeviceKey(parsed.data.deviceKey, "POST /api/auth/signup/verify");
-    const row = await openAuthSession(user.id, req.headers.get("user-agent"), device, deviceKey);
-    const sealed = await sealBearerToken({
-      userId: user.id,
-      email: user.email,
-      firstName: user.firstName,
-      sessionId: row.id,
-      gen: 0,
-      sessionStartedAt: row.createdAt.getTime(),
-    });
+    const sealed = await openBearerSession(user, req.headers.get("user-agent"), device, deviceKey);
     // The account exists now; a welcome that cannot be sent is only logged.
     const linkBase = accountLinkBase(req.nextUrl.origin);
     if (linkBase) {
