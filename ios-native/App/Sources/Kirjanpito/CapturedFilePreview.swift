@@ -16,7 +16,9 @@ struct CapturedFilePreview: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            Group {
+            // A ZStack, not a Group: while the picture fades in over the spinner both are on
+            // screen, and a Group would give each its own 260 pt frame and stack them.
+            ZStack {
                 if let image {
                     Image(uiImage: image)
                         .resizable()
@@ -62,7 +64,11 @@ struct CapturedFilePreview: View {
         // A large PDF page or photo is decoded off the main actor.
         let loaded = await Task.detached(priority: .userInitiated) { CapturedFilePreview.render(url) }.value
         if let loaded {
-            image = loaded
+            // Faded in over the spinner rather than swapped: the swap changed a seventh of the
+            // screen in one frame a few seconds after the form settled (row 7, motion gate
+            // 2026-10-17: shift_video "pop", area 0.139, dy 0). Linear, so no frame of the fade
+            // changes much more than another.
+            withAnimation(.linear(duration: 0.6)) { image = loaded }
         } else {
             failed = true
         }
