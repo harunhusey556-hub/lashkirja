@@ -4,6 +4,8 @@ name: iOS revoked-session launch
 # (StabilityTests.test10, three launches per variant). "before" is this branch with the session
 # fix taken out (AppModel.swift and APIClient.swift as on native), keeping the test and the launch
 # marker's clock, so both variants are measured the same way against the same demo API.
+# Every variant builds the app as Release-UITest (project.yml: Release plus the launch hooks): a
+# Debug build spends ~2.5 s loading on the CI simulator before the app's own code runs.
 on:
   push:
     branches: ["fix/w49-revoked-session"]
@@ -90,17 +92,21 @@ jobs:
             xcrun simctl keychain "$SIM_UDID" reset || true
             (cd "$src/ios-native/App" && xcodegen generate)
             (cd "$src/ios-native/App" && set -o pipefail && TEST_RUNNER_LK_SHOT_DIR="$out" xcodebuild test \
-              -project LashKirja.xcodeproj -scheme LashKirja-UITests -destination "id=$SIM_UDID" \
+              -project LashKirja.xcodeproj -scheme LashKirja-UITests -configuration Release-UITest -destination "id=$SIM_UDID" \
               -derivedDataPath "$RUNNER_TEMP/dd-$dd" -only-testing:LashKirjaUITests/StabilityTests/test10_RevokedSessionReachesSignInFast \
               -resultBundlePath "$out/result.xcresult" \
               CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
               API_BASE_URL=http://127.0.0.1:3999 | xcbeautify --renderer github-actions) \
               && echo "PASS" > "$out/status" || echo "FAIL" > "$out/status"
             echo "== $variant: $(cat "$out/status")"
+            # The app under test must be the optimized one: no Debug products, no debug dylib.
+            app="$RUNNER_TEMP/dd-$dd/Build/Products/Release-UITest-iphonesimulator/LashKirja.app"
+            echo "app: $app; debug dylib: $(ls "$app" | grep -c 'debug.dylib'); Debug products: $(ls -d "$RUNNER_TEMP/dd-$dd/Build/Products/Debug-iphonesimulator" 2>/dev/null | wc -l | tr -d ' ')" \
+              | tee "$out/build.txt"
             grep MARK "$out/notes.txt" || true
           done
-          # The fixed build again, launched by `simctl launch` instead of XCTest: how much of the time
-          # before `main` is the test harness's. Launch 1 has a revoked session, 2–3 none (signed out).
+          # The fixed (Release-UITest) build again, launched by `simctl launch` instead of XCTest: how much
+          # of the time before `main` is the test harness's. Launch 1 has a revoked session, 2–3 none (signed out).
           B=http://127.0.0.1:3999
           tok=$(curl -s -X POST "$B/api/auth/token" -H 'content-type: application/json' \
             -d '{"email":"demo@lashkirja.fi","password":"demo123"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')

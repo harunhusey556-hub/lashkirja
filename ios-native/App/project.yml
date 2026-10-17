@@ -7,10 +7,13 @@ options:
 # Debug and Release stay unsigned (CI, the unsigned IPA). Release-Signed is the owner's own signed
 # build with the Tap to Pay entitlement; only it references the entitlements file, because a
 # free-account re-sign of the unsigned IPA would fail on an entitlement it cannot grant.
+# Release-UITest is Release (optimized, no debug dylib) plus the UI-test launch hooks, so the
+# launch-time gate (ios-session-gate.yml) measures optimized code, not a Debug build.
 configs:
   Debug: debug
   Release: release
   Release-Signed: release
+  Release-UITest: release
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -86,6 +89,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: fi.tiyouba.lashkirja
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       configs:
+        # UITestHooks reads its launch arguments only under DEBUG or LK_UITEST_HOOKS. One arch as
+        # in Debug: the simulator runs one, and the gate measures the optimization, not the slices.
+        Release-UITest:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: LK_UITEST_HOOKS
+          ENABLE_DEBUG_DYLIB: "NO"
+          ONLY_ACTIVE_ARCH: "YES"
         # The owner's signed Tap to Pay build. Needs a paid Apple Developer account with the
         # Tap to Pay on iPhone entitlement granted; set DEVELOPMENT_TEAM here (or pass
         # DEVELOPMENT_TEAM=XXXXXXXXXX to xcodebuild) before building scheme LashKirja-TapToPay.

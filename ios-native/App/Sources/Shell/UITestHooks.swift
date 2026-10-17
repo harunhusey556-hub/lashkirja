@@ -1,9 +1,10 @@
 import UIKit
 
 /// What the simulator UI tests (LashKirjaUITests/OwnerScreensTests) need from the app, switched on
-/// by the launch argument `-LKUITest`. Debug builds only: a Release build (the IPA) never reads it.
+/// by the launch argument `-LKUITest`. Debug and Release-UITest builds only (LK_UITEST_HOOKS): a
+/// Release build (the IPA) never reads it.
 enum UITestHooks {
-    #if DEBUG
+    #if DEBUG || LK_UITEST_HOOKS
     static let active = ProcessInfo.processInfo.arguments.contains("-LKUITest")
     #else
     static let active = false
@@ -11,7 +12,7 @@ enum UITestHooks {
 
     /// RootView's launch-phase marker for the walks' launch helper (WalkTestCase.launchSignedIn).
     /// Its own argument too: the acceptance walks run without `-LKUITest`'s capture fixture.
-    #if DEBUG
+    #if DEBUG || LK_UITEST_HOOKS
     static let launchPhase = active || ProcessInfo.processInfo.arguments.contains("-LKLaunchPhase")
     #else
     static let launchPhase = false
