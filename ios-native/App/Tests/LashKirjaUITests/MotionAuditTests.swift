@@ -507,10 +507,7 @@ final class MotionAuditTests: WalkTestCase {
         if !fixture.isHittable { app.swipeUp(); sleep(1) }
         step("bad-capture-upload", from: "Uusi kuitti", to: "Uusi kuitti (read)", kind: "load",
              expect: "rows finish in place, the screen does not move", seconds: 14) { press(fixture) }
-        sleep(4)
-        let back = app.buttons["Takaisin"].firstMatch
-        if back.exists { back.tap(); sleep(1) }
-        if app.buttons["Hylkää muutokset"].exists { app.buttons["Hylkää muutokset"].tap(); sleep(1) }
+        saveReviewRow()
         // Bad (item 9): the summary's way to Kuitit.
         if let go = find("label BEGINSWITH %@", "Näytä tarkistettavat", scrolls: 3) ?? find("label BEGINSWITH %@", "Siirry kuitteihin", scrolls: 3) {
             step("bad-show-review", from: "Uusi kuitti", to: "Kuitit", seconds: 6, reached: navBar("Kuitit")) { press(go) }
@@ -518,5 +515,59 @@ final class MotionAuditTests: WalkTestCase {
             note("SKIP calibration/bad-show-review: no Näytä tarkistettavat / Siirry kuitteihin")
             dump(app, "calibration-no-review-button")
         }
+    }
+
+    /// Item 9's button, "Näytä tarkistettavat", shows only once the queue has settled with a saved
+    /// receipt the server left for review, and the last save of a queue closes the screen. So a
+    /// second copy of the fixture keeps the screen up: the first is saved as OwnerScreensTests.testC
+    /// does (dummy data; the walk's demo API reads nothing, so the receipt waits for review) and the
+    /// second is dropped with "Hylkää tallentamattomat". Outside any recording; a miss is noted.
+    func saveReviewRow() {
+        let vendor = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Myyjä", "Myyjä")).firstMatch
+        let use = app.buttons.matching(NSPredicate(format: "label == %@", "Käytä lomakkeessa"))
+        // The reading opens the form by itself; Takaisin keeps its row in the queue.
+        if vendor.waitForExistence(timeout: 60) {
+            press(app.buttons["Takaisin"].firstMatch)
+            let discard = app.buttons["Hylkää muutokset"].firstMatch
+            if discard.waitForExistence(timeout: 3) { discard.tap() }
+        }
+        guard use.firstMatch.waitForExistence(timeout: 30) else { note("calibration: the read row offers no Käytä lomakkeessa"); return }
+        let fixture = app.buttons["capture-fixture"].firstMatch
+        if !fixture.isHittable { app.swipeUp() }
+        guard press(fixture.exists ? fixture : nil), use.element(boundBy: 1).waitForExistence(timeout: 90) else {
+            note("calibration: the second fixture was not read"); return
+        }
+        if !use.firstMatch.isHittable { app.swipeDown() }
+        use.firstMatch.tap()
+        guard vendor.waitForExistence(timeout: 10) else { note("calibration: Käytä lomakkeessa opened no form"); return }
+        func blank(_ field: XCUIElement, _ placeholder: String) -> Bool {
+            let value = (field.value as? String) ?? ""
+            return value.isEmpty || value == placeholder
+        }
+        if blank(vendor, "Myyjä") { type(vendor, "Testikauppa Oy") }
+        let total = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Summa €", "Summa €")).firstMatch
+        // Whole euros: the decimal key follows the simulator's region, not the app's Finnish.
+        if total.exists && blank(total, "Summa €") { type(total, "12") }
+        // The keyboard's Valmis: the queue's own Valmis is not on screen while the form is.
+        let done = app.buttons["Valmis"].firstMatch
+        if done.exists { done.tap(); _ = done.waitForNonExistence(timeout: 3) }
+        // Category is required and only the cloud AI suggests one.
+        let category = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kategoria, ")).firstMatch
+        if category.waitForExistence(timeout: 5), category.label.hasSuffix("Valitse") {
+            if !category.isHittable { app.swipeUp() }
+            category.tap()
+            let choice = app.buttons["Tarvikkeet & ostot"].firstMatch
+            if choice.waitForExistence(timeout: 5) { choice.tap() }
+        }
+        guard tap("Tallenna kuitti") else { note("calibration: no Tallenna kuitti"); return }
+        // Saved with a reading still waiting: the screen stays on the queue.
+        let actions = app.buttons["Toiminnot"].firstMatch
+        guard actions.waitForExistence(timeout: 30) else { note("calibration: the save did not return to the queue"); dump(app, "calibration-after-save"); return }
+        actions.tap()
+        let drop = app.buttons["Hylkää tallentamattomat"].firstMatch
+        guard drop.waitForExistence(timeout: 5) else { note("calibration: no Hylkää tallentamattomat"); return }
+        drop.tap()
+        let confirm = app.buttons["confirm-sheet-confirm"].firstMatch
+        if confirm.waitForExistence(timeout: 5) { confirm.tap(); _ = confirm.waitForNonExistence(timeout: 5) }
     }
 }
