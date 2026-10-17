@@ -113,12 +113,23 @@ targets:
       - target: LashKirjaStripe
         link: false
         embed: true
-      # The SDK LashKirjaStripe links: in the app's Frameworks (a framework does not embed its
-      # own), still not linked by the app.
-      - package: StripeTerminal
-        product: StripeTerminal
-        link: false
-        embed: true
+    # The SDK LashKirjaStripe links goes in the app's Frameworks too (a framework does not embed
+    # its own, and an unlinked package product is embedded under a wrong name), still not linked.
+    postBuildScripts:
+      - name: Embed Stripe Terminal
+        basedOnDependencyAnalysis: false
+        script: |
+          set -eu
+          src="${BUILT_PRODUCTS_DIR}/StripeTerminal.framework"
+          dst="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}"
+          [ -d "$src" ] || { echo "error: $src was not built"; exit 1; }
+          mkdir -p "$dst"
+          rm -rf "$dst/StripeTerminal.framework"
+          cp -R "$src" "$dst/"
+          identity="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:-}}"
+          if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ] && [ -n "$identity" ]; then
+            codesign --force --sign "$identity" --preserve-metadata=identifier,flags --timestamp=none "$dst/StripeTerminal.framework"
+          fi
   # Stripe Terminal behind StripeTerminalDriving (Shared/), loaded at run time by the app.
   LashKirjaStripe:
     type: framework
