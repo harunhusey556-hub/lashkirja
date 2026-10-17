@@ -41,11 +41,13 @@ struct MainTabView: View {
         .listSectionSpacing(.compact)
         .background(AddTabGuard { select(.add) })
         .background(TabPrebuild(
-            ready: Self.places.map { item -> @MainActor () -> Bool in { hasFirstFrame(item) } },
+            ready: Self.places.map { item -> @MainActor () -> Bool in { hasFirstFrame(item) } } + [{ @MainActor () -> Bool in true }],
             // Without `motionProbe`: the copy is not on screen, so its layers are not the audit's.
+            // "+" last: the Lisää sheet's first opening built its list, symbols and pickers between
+            // the tap and the sheet rising, which then rose late (w65 motion gate, koti-add-sheet).
             roots: Self.places.map { item -> @MainActor () -> AnyView in
                 { AnyView(NavigationStack { root(item) }.listSectionSpacing(.compact).environment(app)) }
-            }))
+            } + [{ @MainActor () -> AnyView in AnyView(AddSheet().environment(app)) }]))
         .sheet(isPresented: $showAdd) { AddSheet().motionProbe("add-sheet") }
         .sheet(isPresented: $showSettings) { SettingsSheet().presentationDetents([.large]).motionProbe("settings-sheet") }
         .sheet(isPresented: $showAssistant) { AssistantView().motionProbe("assistant") }
@@ -158,6 +160,7 @@ struct MainTabView: View {
     /// "Lisää" is an action, not a place: it opens the add sheet and stays on the current tab.
     private func select(_ next: AppTab) {
         if next == .add {
+            MotionProbe.shared.mark("add-tap")
             EventLog.shared.log(.screen("add-sheet"))
             Haptics.impact()
             showAdd = true

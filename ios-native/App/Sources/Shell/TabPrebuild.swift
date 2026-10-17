@@ -14,7 +14,7 @@ struct TabPrebuild: UIViewRepresentable {
     /// Per tab, in TabView order: whether its first frame's data is in memory yet. The copy is built
     /// from the same previews as the tab's first frame, so it waits for them (or is not built).
     let ready: [@MainActor () -> Bool]
-    /// Per tab, in TabView order: its root as the tab shows it.
+    /// Per tab, in TabView order: its root as the tab shows it ("+": the sheet it opens).
     let roots: [@MainActor () -> AnyView]
 
     func makeUIView(context: Context) -> UIView { UIView(frame: .zero) }
@@ -90,6 +90,13 @@ struct TabPrebuild: UIViewRepresentable {
             let views = Self.count(host.view), lists = Self.lists(host.view)
             window.isHidden = true
             window.rootViewController = nil
+            // Out of the scene too, so no part of the copy stays among the windows a later
+            // presentation goes through; the probe line tells whether the copy was freed (w65).
+            window.windowScene = nil
+            Task { [weak host, weak window] in
+                try? await Task.sleep(for: .seconds(2))
+                MotionProbe.shared.mark("prebuild-\(name)-freed=\(host == nil && window == nil)")
+            }
             let elapsed = ContinuousClock.now - start
             let ms = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
             Self.logger.log("prebuild \(name, privacy: .public) \(ms, privacy: .public) ms \(mode, privacy: .public) views=\(views, privacy: .public) lists=\(lists, privacy: .public)")
