@@ -138,6 +138,9 @@ struct ArchivedBadge: View {
 struct CustomerDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    /// A created invoice opens on the stack's path: pushed beside it, the invoice's customer opened
+    /// under it (G005).
+    @Environment(\.openRoute) private var openRoute
     let customerId: String
     @State private var state = ScreenLoad<CustomerDetail>()
     @State private var showEdit = false
@@ -152,7 +155,6 @@ struct CustomerDetailView: View {
     @State private var others: [Customer] = []
     /// A just-created invoice, opened when the form's sheet has closed.
     @State private var createdId: String?
-    @State private var openedInvoiceId: String?
     @State private var invoiceLimit = ShowMore()
 
     var body: some View {
@@ -253,12 +255,11 @@ struct CustomerDetailView: View {
             Task { await load() }
             if let id = createdId {
                 createdId = nil
-                openedInvoiceId = id
+                openRoute(.invoice(id))
             }
         }) {
             InvoiceFormView(existing: nil, presetCustomerId: customerId, preview: app.invoiceFormPreview(), onCreated: { id in createdId = id })
         }
-        .navigationDestination(item: $openedInvoiceId) { id in InvoiceDetailView(invoiceId: id, preview: app.invoicePreview(id)) }
         .sheet(isPresented: $showMerge) {
             CustomerMergeSheet(keepId: customerId, others: others) {
                 notice = "Asiakkaat yhdistettiin. Kaksoiskappale arkistoitiin."

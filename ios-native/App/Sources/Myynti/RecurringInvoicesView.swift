@@ -390,9 +390,11 @@ struct RecurringFormSheet: View {
     let existing: RecurringInvoice?
     let onSaved: (String) -> Void
     @State private var draft = RecurringDraft(today: APIDate.dayString(Date()))
-    @State private var startDate = Date()
+    /// Days as the DatePicker draws them (`APIDate.pickerDate`). West of Helsinki a saved start drew
+    /// as the day before, and `Date()` drew the device's own day, not the Helsinki day it saved.
+    @State private var startDate = APIDate.pickerDate(APIDate.dayString(Date())) ?? Date()
     @State private var hasEnd = false
-    @State private var endDate = Date()
+    @State private var endDate = APIDate.pickerDate(APIDate.dayString(Date())) ?? Date()
     @State private var customers: [Customer] = []
     @State private var catalog: [CatalogItem] = []
     @State private var showNewCustomer = false
@@ -437,7 +439,7 @@ struct RecurringFormSheet: View {
                             set: { updated in
                                 if let i = draft.lines.firstIndex(where: { $0.id == updated.id }) { draft.lines[i] = updated }
                             }
-                        ), catalog: catalog, issueDate: APIDate.dayString(startDate), showsVat: sellerRegistered)
+                        ), catalog: catalog, issueDate: APIDate.pickerDay(startDate), showsVat: sellerRegistered)
                     }
                     .onDelete { offsets in
                         let ids = offsets.map { draft.lines[$0].id }
@@ -468,7 +470,7 @@ struct RecurringFormSheet: View {
             .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
             // A start date moved into 2026 turns old 14 % lines into 13,5 % (as the web form does).
             .onChange(of: startDate) { _, date in
-                draft.lines.adjustVatRates(issueDate: APIDate.dayString(date))
+                draft.lines.adjustVatRates(issueDate: APIDate.pickerDay(date))
             }
             .task { await prepare() }
         }
@@ -477,8 +479,8 @@ struct RecurringFormSheet: View {
     /// The draft with the picked dates, as it would be sent.
     private var snapshot: RecurringDraft {
         var current = draft
-        current.startDate = APIDate.dayString(startDate)
-        current.endDate = hasEnd ? APIDate.dayString(endDate) : nil
+        current.startDate = APIDate.pickerDay(startDate)
+        current.endDate = hasEnd ? APIDate.pickerDay(endDate) : nil
         return current
     }
 
@@ -498,8 +500,8 @@ struct RecurringFormSheet: View {
         loaded = true
         if let existing {
             draft = RecurringDraft(existing)
-            startDate = APIDate.day(draft.startDate) ?? Date()
-            if let end = draft.endDate, let date = APIDate.day(end) {
+            startDate = APIDate.pickerDate(draft.startDate) ?? Date()
+            if let end = draft.endDate, let date = APIDate.pickerDate(end) {
                 hasEnd = true
                 endDate = date
             }
@@ -518,9 +520,9 @@ struct RecurringFormSheet: View {
     }
 
     private func save() async {
-        draft.startDate = APIDate.dayString(startDate)
+        draft.startDate = APIDate.pickerDay(startDate)
         draft.lines.followSellerVat(registered: sellerRegistered)
-        draft.endDate = hasEnd ? APIDate.dayString(endDate) : nil
+        draft.endDate = hasEnd ? APIDate.pickerDay(endDate) : nil
         if let problem = draft.validationError { failure = problem; Haptics.error(); return }
         busy = true
         failure = nil

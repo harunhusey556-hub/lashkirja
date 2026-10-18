@@ -557,8 +557,8 @@ struct RecurringPurchaseFormSheet: View {
 
     private func dayBinding(_ keyPath: WritableKeyPath<RecurringPurchaseForm, String>) -> Binding<Date> {
         Binding(
-            get: { APIDate.day(form[keyPath: keyPath]) ?? Date() },
-            set: { form[keyPath: keyPath] = APIDate.dayString($0) }
+            get: { APIDate.pickerDate(form[keyPath: keyPath]) ?? Date() },
+            set: { form[keyPath: keyPath] = APIDate.pickerDay($0) }
         )
     }
 
@@ -571,8 +571,8 @@ struct RecurringPurchaseFormSheet: View {
 
     private var endBinding: Binding<Date> {
         Binding(
-            get: { form.endDate.flatMap(APIDate.day) ?? Date() },
-            set: { form.endDate = APIDate.dayString($0) }
+            get: { form.endDate.flatMap { APIDate.pickerDate($0) } ?? Date() },
+            set: { form.endDate = APIDate.pickerDay($0) }
         )
     }
 

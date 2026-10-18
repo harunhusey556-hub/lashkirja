@@ -5,6 +5,9 @@ import LashKirjaCore
 /// one page. Everything else (the row sheets, accounts, statement files) opens through routes.
 struct BankHubView: View {
     @Environment(AppModel.self) private var app
+    /// The empty state's buttons: two in one list row need their own taps, so they are buttons that
+    /// push onto the tab's path. Pushed beside it, Tiliotteet opened an imported statement under itself.
+    @Environment(\.openRoute) private var openRoute
     @State private var state = ScreenLoad<[Statement]>()
     @State private var position: BankHubPosition?
     @State private var positionFailed = false
@@ -14,8 +17,6 @@ struct BankHubView: View {
     @State private var monthChosen = false
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
-    /// The empty state's buttons: two in one list row need their own taps, so they push here.
-    @State private var pushed: Route?
     /// The rows come a page at a time from a server that pages (`?cursor=`); the rest load behind.
     @State private var paging = CursorPaging()
     /// The figures of the previous visit are put on screen once, before the first load.
@@ -60,9 +61,6 @@ struct BankHubView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Pankki")
-        .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
-        // Pushed here, not through the tab's path ("Yhdistä pankki"): the wait starts here too.
-        .onChange(of: pushed) { _, route in if let row = route?.perfRow { Perf.beginOpen(row) } }
         .refreshable {
             // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
             gate.mark(version: app.refreshEverything())
@@ -108,9 +106,9 @@ struct BankHubView: View {
         } description: {
             Text("Yhdistä pankki, niin saldot ja tapahtumat tulevat itsestään, tai tuo tiliote tiedostona.")
         } actions: {
-            Button("Yhdistä pankki") { pushed = .bankAccounts }
+            Button("Yhdistä pankki") { openRoute(.bankAccounts) }
                 .buttonStyle(.borderless)
-            Button("Tuo tiliote") { pushed = .statements }
+            Button("Tuo tiliote") { openRoute(.statements) }
                 .buttonStyle(.borderless)
         }
         .listRowBackground(Color.clear)

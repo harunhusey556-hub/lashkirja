@@ -13,7 +13,9 @@ struct InvoiceFormView: View {
     let onCreated: ((String) -> Void)?
 
     @State private var draft = InvoiceDraft(customerId: "", issueDate: APIDate.dayString(Date()), paymentTermDays: 14)
-    @State private var issueDate = Date()
+    /// The picked day as the DatePicker draws it (`APIDate.pickerDate`), in any device zone: Helsinki
+    /// midnight drew as the day before west of Helsinki, and a picked day saved one day late.
+    @State private var issueDate = APIDate.pickerDate(APIDate.dayString(Date())) ?? Date()
     @State private var customers: [Customer] = []
     @State private var showNewCustomer = false
     @State private var showCustomerPicker = false
@@ -56,7 +58,7 @@ struct InvoiceFormView: View {
                                           sellerRegistered: preview.sellerRegistered, kept: preview.kept,
                                           today: APIDate.dayString(Date()))
         _draft = State(initialValue: opening.draft)
-        _issueDate = State(initialValue: APIDate.day(opening.draft.issueDate) ?? Date())
+        _issueDate = State(initialValue: APIDate.pickerDate(opening.draft.issueDate) ?? Date())
         _baseline = State(initialValue: opening.baseline)
         _priceTexts = State(initialValue: opening.priceTexts)
         _restored = State(initialValue: opening.restored)
@@ -176,7 +178,7 @@ struct InvoiceFormView: View {
             }
             // A date moved into 2026 turns old 14 % lines into 13,5 % (as the web form does).
             .onChange(of: issueDate) { _, date in
-                draft.lines.adjustVatRates(issueDate: APIDate.dayString(date))
+                draft.lines.adjustVatRates(issueDate: APIDate.pickerDay(date))
             }
             .onChange(of: snapshot) { _, current in keepDraft(current) }
             .perfReady("laskuUusi", baseline != nil)
@@ -392,7 +394,7 @@ struct InvoiceFormView: View {
 
     // MARK: Bindings
 
-    private var issueDay: String { APIDate.dayString(issueDate) }
+    private var issueDay: String { APIDate.pickerDay(issueDate) }
 
     private var termBinding: Binding<InvoiceForm.TermChoice> {
         Binding(
@@ -413,9 +415,9 @@ struct InvoiceFormView: View {
     /// The due date as a picker value; picking one sets the term the create call sends.
     private var dueBinding: Binding<Date> {
         Binding(
-            get: { APIDate.day(InvoiceForm.dueDate(issueDate: issueDay, termDays: draft.paymentTermDays) ?? "") ?? issueDate },
+            get: { APIDate.pickerDate(InvoiceForm.dueDate(issueDate: issueDay, termDays: draft.paymentTermDays) ?? "") ?? issueDate },
             set: { date in
-                if let days = InvoiceForm.termDays(issueDate: issueDay, dueDate: APIDate.dayString(date)) {
+                if let days = InvoiceForm.termDays(issueDate: issueDay, dueDate: APIDate.pickerDay(date)) {
                     draft.paymentTermDays = days
                 }
             }
@@ -423,8 +425,8 @@ struct InvoiceFormView: View {
     }
 
     private var dueRange: ClosedRange<Date> {
-        let start = APIDate.day(issueDay) ?? Calendar.current.startOfDay(for: issueDate)
-        let end = APIDate.day(InvoiceForm.dueDate(issueDate: issueDay, termDays: InvoiceForm.maxPaymentTermDays) ?? "") ?? start
+        let start = Calendar.current.startOfDay(for: issueDate)
+        let end = APIDate.pickerDate(InvoiceForm.dueDate(issueDate: issueDay, termDays: InvoiceForm.maxPaymentTermDays) ?? "") ?? start
         return start...end
     }
 
@@ -540,7 +542,7 @@ struct InvoiceFormView: View {
     /// The draft with the picked date, as it would be sent.
     private var snapshot: InvoiceDraft {
         var current = draft
-        current.issueDate = APIDate.dayString(issueDate)
+        current.issueDate = APIDate.pickerDay(issueDate)
         return current
     }
 
@@ -584,7 +586,7 @@ struct InvoiceFormView: View {
     private func startOver() {
         guard let baseline else { return }
         draft = baseline
-        issueDate = APIDate.day(baseline.issueDate) ?? Date()
+        issueDate = APIDate.pickerDate(baseline.issueDate) ?? Date()
         priceTexts = [:]
         seedPriceTexts(blankZero: true)
         customTerm = false
@@ -623,7 +625,7 @@ struct InvoiceFormView: View {
             customers = active
             catalog = items
             draft = opening.draft
-            issueDate = APIDate.day(opening.draft.issueDate) ?? Date()
+            issueDate = APIDate.pickerDate(opening.draft.issueDate) ?? Date()
             priceTexts = opening.priceTexts
             restored = opening.restored
             showDetails = !opening.draft.notes.isEmpty
@@ -680,7 +682,7 @@ struct InvoiceFormView: View {
     private func save() async {
         guard !busy else { return }
         focus = nil
-        draft.issueDate = APIDate.dayString(issueDate)
+        draft.issueDate = APIDate.pickerDay(issueDate)
         draft.followSellerVat(registered: sellerRegistered)
         let problems = InvoiceForm.fieldErrors(draft, priceTexts: priceTexts, vatRegistered: sellerRegistered)
         if !problems.isEmpty {

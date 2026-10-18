@@ -67,6 +67,7 @@ struct AssistantView: View {
                 if case .success(let url) = result { prepare { await ChatReceiptPrep.file(url) } }
             }
         }
+        .environment(\.openRoute, OpenRouteAction(stack: "assistant") { path.append($0) })
         .perfReady("chat", model?.historyLoaded == true)
         .task {
             guard model == nil else { return }

@@ -164,8 +164,8 @@ private struct KotiApprovalForm: View {
                 .moneyInput()
             fieldError("totalAmount")
         case .date:
-            DatePicker("Päivä", selection: Binding(get: { APIDate.day(form.date) ?? Date() },
-                                                    set: { form.setDate(APIDate.dayString($0)) }),
+            DatePicker("Päivä", selection: Binding(get: { APIDate.pickerDate(form.date) ?? Date() },
+                                                    set: { form.setDate(APIDate.pickerDay($0)) }),
                        displayedComponents: .date)
             fieldError("date")
         case .category:

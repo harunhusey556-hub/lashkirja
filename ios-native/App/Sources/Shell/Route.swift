@@ -167,8 +167,31 @@ extension View {
     }
 }
 
-/// The screen a route opens; also used by `navigationDestination(item:)` where a sheet hands a
-/// route back to the screen under it (BankRowSheet's "Avaa kuitti").
+/// Opens a route from code (a tile, a created invoice) on the path of the stack the screen is in,
+/// as a NavigationLink would. A screen pushed with `navigationDestination(item:)` sits outside
+/// that path, and whatever it then pushed by value landed under it: the customer opened under
+/// Asiakkaat, and Back skipped the list (M024).
+struct OpenRouteAction: Equatable {
+    /// The stack it pushes onto. Two actions for one stack push the same way, so a container's body
+    /// running again is no change for the screens that read this one.
+    let stack: String
+    let push: @MainActor (Route) -> Void
+
+    @MainActor func callAsFunction(_ route: Route) { push(route) }
+
+    static func == (lhs: OpenRouteAction, rhs: OpenRouteAction) -> Bool { lhs.stack == rhs.stack }
+}
+
+extension EnvironmentValues {
+    /// Set on every stack that has `appDestinations()` and a screen that opens routes from code
+    /// (the tabs, the assistant, Asetukset, the send sheet). Elsewhere (TabPrebuild's offscreen
+    /// copies) nothing is pushed.
+    @Entry var openRoute: OpenRouteAction = OpenRouteAction(stack: "") { _ in }
+}
+
+/// The screen a route opens; also used by the `navigationDestination(item:)` pushes that are still
+/// outside the path (PeriodsView's "Täydennä"). A sheet's hand-off (BankRowSheet's "Avaa kuitti")
+/// goes through `openRoute`.
 struct RouteScreen: View {
     @Environment(AppModel.self) private var app
     let route: Route
