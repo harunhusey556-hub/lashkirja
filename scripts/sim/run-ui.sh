@@ -7,6 +7,7 @@
 # The Mac is shared: the script waits until no other project's xcodebuild runs and the load is low,
 # because two simulator test runs at once on a small Mac time each other out.
 set -u
+zmodload zsh/datetime
 U=${1:?simulator udid}; ONLY=${2:-}; TAG=${3:-walk}
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 APP="$REPO/ios-native/App"
@@ -53,7 +54,14 @@ rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
       rp=$!
       for i in {1..150}; do grep -q "Recording started" "$n.reclog" 2>/dev/null && break; sleep 0.1; done
       python3 -c 'import time; print("%.3f" % time.time())' > "$n.recording"
-      sleep "$(cat "$v")"
+      # A link the step sends opens while it is filmed. A plain sleep held it until the recording
+      # had ended, so the step filmed nothing and iOS asked "Open in LashKirja?" over the next
+      # step, where the default interruption handler cancelled it (motion gate, CI 2026-10-17).
+      end=$(( EPOCHREALTIME + $(cat "$v") ))
+      while (( EPOCHREALTIME < end )); do
+        for o in "$SH"/*.openurl(N); do url=$(cat "$o"); rm -f "$o"; xcrun simctl openurl "$U" "$url" >/dev/null 2>&1 & done
+        sleep 0.1
+      done
       kill -INT $rp 2>/dev/null; wait $rp 2>/dev/null
       python3 -c 'import time; print("%.3f" % time.time())' >> "$n.recording"
       rm -f "$v" "$n.reclog"
