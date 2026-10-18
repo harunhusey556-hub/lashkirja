@@ -105,6 +105,64 @@ class WalkTestCase: XCTestCase {
         app.buttons["Asetukset"].firstMatch.tap(); taps += 1
         _ = app.staticTexts["Sähköpostimallit"].waitForExistence(timeout: 10)
     }
+    /// Kirjanpito → "Kuitit, 28 kuittia" (as StabilityTests.openHubRow).
+    func openKuitit() -> Bool {
+        guard selectTab("Kirjanpito") else { note("MISS tab Kirjanpito not selected"); return false }
+        for _ in 0..<2 where !app.navigationBars["Kuitit"].exists {
+            tapLabel("label BEGINSWITH %@", "Kuitit")
+            _ = app.navigationBars["Kuitit"].waitForExistence(timeout: 10)
+        }
+        return app.navigationBars["Kuitit"].exists
+    }
+    /// One photo kept on the phone, the way a photo taken without a connection waits: the proxy goes
+    /// offline before the capture screen's queue fixture (a launch with `-LKUITest` only) and stays
+    /// offline until `goOnline` (tearDown at the latest), so the photo is still waiting. Ends on Kuitit.
+    func queuePhotoOffline() -> Bool {
+        guard openKuitit() else { note("MISS Kuitit did not open"); return false }
+        goOffline()
+        let camera = app.navigationBars["Kuitit"].buttons["Kuvaa kuitti"]
+        (camera.exists ? camera : app.buttons["Kuvaa kuitti"].firstMatch).tap(); taps += 1
+        let fixture = app.buttons["capture-queue-fixture"].firstMatch
+        guard fixture.waitForExistence(timeout: 10) else {
+            note("MISS no Testikuitti jonoon: is the app a Debug build launched with -LKUITest?"); return false
+        }
+        // A reading kept from an earlier run opens the screen on the queue, with the button lower down.
+        if !fixture.isHittable {
+            app.swipeUp()
+            _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: fixture)], timeout: 5)
+        }
+        fixture.tap(); taps += 1
+        let status = app.descendants(matching: .any).matching(identifier: "capture-queued-status").firstMatch
+        guard status.waitForExistence(timeout: 10) else { note("MISS the queued photo is not shown inside the capture screen"); return false }
+        let screen = app.navigationBars["Uusi kuitti"]
+        let close = screen.buttons.matching(NSPredicate(format: "label IN %@", ["Peruuta", "Sulje"])).firstMatch
+        guard close.exists else { note("MISS the capture screen has no Peruuta or Sulje"); return false }
+        close.tap(); taps += 1
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: screen)
+        return XCTWaiter().wait(for: [gone], timeout: 10) == .completed
+    }
+    /// Asetukset → "Kirjaudu ulos" from Koti: the sign-out question, once it has stopped rising.
+    /// Nil when it did not open.
+    func openSignOutQuestion() -> XCUIElement? {
+        guard selectTab("Koti") else { note("MISS tab Koti not selected"); return nil }
+        openSettings()
+        guard tap("Kirjaudu ulos") else { return nil }
+        let sheet = app.descendants(matching: .any).matching(identifier: "confirm-sheet").firstMatch
+        guard sheet.waitForExistence(timeout: 5) else { note("MISS Kirjaudu ulos did not open the confirm sheet"); return nil }
+        waitStill(app.buttons["confirm-sheet-confirm"].firstMatch)
+        return sheet
+    }
+    /// A sheet slides up: its frames are read once two looks a moment apart agree.
+    func waitStill(_ element: XCUIElement, timeout: TimeInterval = 5) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = element.frame
+        while Date() < deadline {
+            usleep(250_000)
+            let now = element.frame
+            if now == last { return }
+            last = now
+        }
+    }
     func edgeSwipeBack() {
         let w = app.windows.firstMatch
         w.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))

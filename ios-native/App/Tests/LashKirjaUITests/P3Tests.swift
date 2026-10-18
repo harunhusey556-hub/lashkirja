@@ -48,4 +48,45 @@ final class P3Tests: WalkTestCase {
         check("P3 drafts chip read after the relaunch", after != "?")
         check("P3 offline copy created no draft", before == after)
     }
+
+    // X122 (P0): signing out deletes the receipt photos still waiting on the phone. The question says
+    // how many first, and Peruuta keeps both the session and the photo. Asserted, not only noted: a
+    // silent loss of receipts. Last in the class: once the proxy is back, the photo goes to the demo
+    // API's inbox.
+    func testC_SignOutWarnsAboutQueue() {
+        // The capture screen's queue fixture comes only with -LKUITest.
+        app.terminate()
+        app.launchArguments.append("-LKUITest")
+        launchSignedIn()
+        guard queuePhotoOffline() else { shot("p3c-not-queued"); dump(app, "p3c-not-queued"); XCTFail("no photo was kept on the phone"); return }
+        guard let sheet = openSignOutQuestion() else {
+            shot("p3c-no-question"); dump(app, "p3c-no-question"); XCTFail("Asetukset > Kirjaudu ulos did not ask"); return
+        }
+        shot("p3c-signout-question")
+        let message = app.staticTexts["confirm-sheet-message"].firstMatch
+        guard message.exists else { dump(app, "p3c-signout-question"); XCTFail("a photo waits, yet the sign-out question says nothing"); return }
+        note("INFO P3 sign-out message: \(message.label)")
+        XCTAssertTrue(message.label.contains("1 kuitti odottaa lähetystä"), "message: \(message.label)")
+        XCTAssertTrue(message.label.contains("poistetaan tästä laitteesta"), "message: \(message.label)")
+        // U008: the question is as tall as its words, with no blank band above the buttons.
+        let confirm = app.buttons["confirm-sheet-confirm"].firstMatch
+        let gap = confirm.frame.minY - message.frame.maxY
+        note("INFO P3 sign-out gap: \(gap) pt between the message and \(confirm.label); sheet \(sheet.frame)")
+        XCTAssertLessThanOrEqual(gap, 24, "\(gap) pt of empty sheet between the message and the buttons")
+
+        app.buttons["confirm-sheet-cancel"].firstMatch.tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: sheet)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 10), .completed, "Peruuta did not close the question")
+        let settings = app.navigationBars["Asetukset"]
+        XCTAssertTrue(settings.exists, "Peruuta left Asetukset: the session ended")
+        guard settings.exists else { shot("p3c-after-peruuta"); return }
+        settings.buttons["Valmis"].tap(); taps += 1
+        XCTAssertTrue(selectTab("Kirjanpito"), "no tabs after Peruuta: the session ended")
+        // Kuitit is still open under Kirjanpito; its card lists what waits.
+        let queued = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Jonossa 1 kuitti")).firstMatch
+        let kept = queued.waitForExistence(timeout: 10)
+        shot("p3c-after-peruuta")
+        XCTAssertTrue(kept, "Peruuta did not keep the waiting photo")
+        goOnline()
+    }
 }
