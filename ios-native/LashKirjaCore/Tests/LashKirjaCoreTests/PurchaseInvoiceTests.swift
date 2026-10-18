@@ -176,6 +176,22 @@ private func invoice(status: String = "open", display: String = "open", paid: De
     #expect(json["notes"] as? String == "Uusi")
 }
 
+// X166: the ledger books an ostolasku by its category code alone, so the detail shows the label and
+// the form sends the code. A label typed before the picker is not a known code: the form opens on
+// "Muu kategoria…" with it, and picking a category replaces it.
+@Test func purchaseCategoryIsTheReceiptCode() throws {
+    #expect(ReceiptCategory.label(for: "tarvikkeet") == "Tarvikkeet & ostot")
+    let typed = try decode(PurchaseInvoice.self, invoiceJSON.replacingOccurrences(of: #""category":null"#, with: #""category":"Tarvikkeet & ostot""#))
+    var form = PurchaseInvoiceForm(editing: typed)
+    #expect(form.category == "Tarvikkeet & ostot")
+    #expect(!ReceiptCategory.isKnown(form.category))
+    form.category = "tarvikkeet"
+    let patch = PurchaseInvoicePatch(from: try #require(form.validate().input), existing: typed)
+    let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(patch)) as! [String: Any]
+    #expect(json.keys.sorted() == ["category"])
+    #expect(json["category"] as? String == "tarvikkeet")
+}
+
 @Test func purchaseStatusChangeAndPaymentBodies() throws {
     let paid = PurchaseStatusChange(status: .paid, closeReason: "  maksettu käteisellä ")
     var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(paid)) as! [String: Any]
