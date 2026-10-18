@@ -116,10 +116,22 @@ export function receiptToGateCandidate(receipt: MatchReceipt): GateCandidate {
   };
 }
 
+/**
+ * The bank side a receipt's money is on. A credit note (a negative total) turns its type round:
+ * a supplier's credit comes back as a tulo row and a refunded sale leaves as a meno row. Amounts
+ * are compared without their sign, so this is what keeps a payment out off a credit note (X069).
+ */
+export function receiptDirection(receipt: Pick<MatchReceipt, "type" | "totalAmount">): string {
+  if (receipt.totalAmount == null || receipt.totalAmount >= 0) return receipt.type;
+  if (receipt.type === "meno") return "tulo";
+  if (receipt.type === "tulo") return "meno";
+  return receipt.type;
+}
+
 /** Money direction must agree; transfers and salaries never match a receipt. */
 function directionAllowed(tx: MatchTx, receipt: MatchReceipt): boolean {
   if (tx.type !== "tulo" && tx.type !== "meno") return false;
-  return receipt.type === tx.type;
+  return receiptDirection(receipt) === tx.type;
 }
 
 export interface PairScore {
