@@ -6,6 +6,8 @@ import { clearCodeGuard, reserveCodeAttempt } from "@/lib/account-code-guard";
 import { findSenderAccount, platformMailConfig, sendMail, sendPlatformMail } from "@/lib/mailer";
 import { passwordProblem, deviceLabel } from "@/lib/session-policy";
 import { contactSupportPhrase } from "@/lib/account-copy";
+import { SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from "@/lib/session-limits";
+import { sealBearerToken } from "@/lib/auth-credential";
 
 const RESET_TTL_MS = 30 * 60 * 1000;
 const EMAIL_TTL_MS = 24 * 60 * 60 * 1000;
@@ -77,10 +79,30 @@ export function hashesEqual(left: string, right: string): boolean {
 export async function openAuthSession(
   userId: string,
   userAgent: string | null,
-  device?: "ios-app"
+  device?: "ios-app",
+  deviceKey?: string | null
 ) {
   return prisma.authSession.create({
-    data: { userId, label: deviceLabel(userAgent, device) },
+    data: { userId, label: deviceLabel(userAgent, device), deviceKey: deviceKey ?? null },
+  });
+}
+
+/** A bearer sign-in (password, sign-up, passkey): a fresh row and its first token, generation 0,
+ * carrying the row's start for the absolute limit. One place, so every sign-in issues the same token. */
+export async function openBearerSession(
+  user: { id: string; email: string; firstName: string },
+  userAgent: string | null,
+  device?: "ios-app",
+  deviceKey?: string | null
+) {
+  const row = await openAuthSession(user.id, userAgent, device, deviceKey);
+  return sealBearerToken({
+    userId: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    sessionId: row.id,
+    gen: 0,
+    sessionStartedAt: row.createdAt.getTime(),
   });
 }
 
@@ -113,12 +135,21 @@ async function revokeSessionsWithin(
 }
 
 export async function listAuthSessions(userId: string, currentId?: string) {
+  // A row past the idle or absolute limit is revoked only once it is presented again; until then
+  // it is just as dead, so it is not listed as a signed-in device.
+  const now = Date.now();
   const rows = await prisma.authSession.findMany({
-    where: { userId, revokedAt: null },
+    where: {
+      userId,
+      revokedAt: null,
+      lastSeenAt: { gte: new Date(now - SESSION_IDLE_MS) },
+      createdAt: { gte: new Date(now - SESSION_ABSOLUTE_MS) },
+    },
     orderBy: [{ lastSeenAt: "desc" }, { id: "desc" }],
-    select: { id: true, label: true, createdAt: true, lastSeenAt: true },
+    select: { id: true, label: true, createdAt: true, lastSeenAt: true, deviceKey: true },
   });
-  return rows.map((row) => ({ ...row, current: row.id === currentId }));
+  // The key itself never leaves the server; the list only says whether the device is bound.
+  return rows.map(({ deviceKey, ...row }) => ({ ...row, current: row.id === currentId, trusted: deviceKey !== null }));
 }
 
 /** Re-authentication for sensitive actions: throws 401 "Nykyinen salasana on väärä." */

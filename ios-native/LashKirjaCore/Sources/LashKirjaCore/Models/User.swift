@@ -23,11 +23,15 @@ public struct StoredToken: Codable, Equatable, Sendable {
     public var expiresAt: Date
     public var issuedAt: Date
     public var userId: String
+    /// When the password (or passkey) sign-in made this session: the absolute limit counts from
+    /// here, across refreshes. Nil for a token stored before w67 (the server still enforces it).
+    public var sessionStartedAt: Date?
 
-    public init(token: String, expiresAt: Date, issuedAt: Date, userId: String) {
+    public init(token: String, expiresAt: Date, issuedAt: Date, userId: String, sessionStartedAt: Date? = nil) {
         self.token = token
         self.expiresAt = expiresAt
         self.issuedAt = issuedAt
         self.userId = userId
+        self.sessionStartedAt = sessionStartedAt
     }
 }

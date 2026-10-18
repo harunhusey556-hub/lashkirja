@@ -77,6 +77,9 @@ public actor ResourceCache {
     }
 
     /// The cached answer, fresh or not; nil when there is none or it does not decode as `type`.
+    /// The disk behind the cache, for a read before the first frame (AppModel's launch).
+    public nonisolated var disk: ResourceDiskStore? { store }
+
     public func cached<T: Decodable>(_ key: ResourceKey, version: Int, as type: T.Type = T.self) -> ResourceHit<T>? {
         restoreIfNeeded(key.user)
         guard let entry = entries[key.id], let value: T = decode(entry, id: key.id) else { return nil }

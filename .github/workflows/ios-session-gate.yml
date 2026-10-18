@@ -1,0 +1,127 @@
+name: iOS revoked-session launch
+
+# Row 27. w67 (trusted-device sessions): a revoked stored session reaches the sign-in screen within
+# 1 s of the FIRST FRAME (StabilityTests.test10, asserted; process start → sign-in is noted), and a
+# valid one opens on Koti with nothing held (test11: launch → Koti, noted). Three launches per test
+# and variant. "before" is w49's blocking session check (PR #29) on the same native: the tree at
+# BEFORE_REF with this branch's tests and Perf's Koti mark copied in, so both variants are measured
+# the same way against the same demo API.
+# Every variant builds the app as Release-UITest (project.yml: Release plus the launch hooks): a
+# Debug build spends ~2.5 s loading on the CI simulator before the app's own code runs.
+on:
+  push:
+    branches: ["fix/w67-trusted-session"]
+    paths: [".github/workflows/ios-session-gate.yml", "ios-native/**"]
+  workflow_dispatch:
+    inputs:
+      before_ref:
+        description: "The tree measured as before (default: PR #29 merged with native, w67's base)"
+        required: false
+        default: ""
+
+env:
+  # 01dec20: fix/w49-revoked-session (PR #29) with native merged in, where w67 began.
+  BEFORE_REF: ${{ inputs.before_ref || '01dec20' }}
+
+jobs:
+  walk:
+    name: Revoked and valid session (before / after)
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tools
+        run: |
+          brew install xcodegen xcbeautify
+          xcodebuild -version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Demo API
+        working-directory: app
+        env:
+          DATABASE_URL: "file:${{ github.workspace }}/app/session-demo.db"
+          SESSION_SECRET: "ci-only-secret-not-used-anywhere-real-32plus"
+          CLOUD_AI_ENABLED: "false"
+          ENABLEBANKING_ENABLED: "false"
+          MAIL_TRANSPORT: "json"
+        run: |
+          set -euo pipefail
+          npm ci
+          npx prisma generate
+          rm -f session-demo.db
+          npx prisma migrate deploy
+          npx tsx scripts/demo-seed.ts --ci
+          npm run build
+          nohup npx next start -H 127.0.0.1 -p 3999 > api-server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null "http://127.0.0.1:3999/login"; then break; fi
+            sleep 1
+          done
+          curl -s -o /dev/null -w "GET /login -> %{http_code}\n" "http://127.0.0.1:3999/login"
+          # A refused token on a fresh production build (`next start`, as after a deploy): the first
+          # answer shows what a cold server adds to the launch's verdict, before the warm-up below.
+          for i in 1 2 3; do
+            curl -s -o /dev/null -w "GET /api/auth/me (refused token) #$i -> %{http_code} %{time_total}s\n" \
+              -H "authorization: Bearer not-a-session" "http://127.0.0.1:3999/api/auth/me"
+          done
+          # Every route warm before either variant: a cold route's first answer is not the app's time.
+          bash ../scripts/sim/warm-api.sh | tail -3
+      - name: Simulator
+        run: |
+          DEST=$(xcrun simctl list devices available -j | python3 -c 'import sys,json
+          d=json.load(sys.stdin)["devices"]
+          ids=[x["udid"] for k,v in sorted(d.items(), reverse=True) if "iOS" in k for x in v if x["name"].startswith("iPhone")]
+          print(ids[0] if ids else "")')
+          echo "Simulator: $DEST"
+          echo "SIM_UDID=$DEST" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEST" || true
+          xcrun simctl bootstatus "$DEST" -b
+      - name: Walk after and before
+        run: |
+          set -u
+          echo "before = $BEFORE_REF with this branch's StabilityTests.swift and PerfSignposts.swift"
+          git worktree add --detach "$RUNNER_TEMP/before" "$BEFORE_REF"
+          cp ios-native/App/Tests/LashKirjaUITests/StabilityTests.swift "$RUNNER_TEMP/before/ios-native/App/Tests/LashKirjaUITests/"
+          # The launch → Koti moment on the marker's clock (one line: UITestHooks.mark("koti")).
+          cp ios-native/App/Sources/Components/PerfSignposts.swift "$RUNNER_TEMP/before/ios-native/App/Sources/Components/"
+          # A fresh simulator's first walk hangs on its first UI snapshots (WalkTestCase.probe): a
+          # throwaway warm-up pass first, so neither measured variant is the first on this simulator.
+          for variant in warmup before after; do
+            if [ "$variant" = before ]; then src="$RUNNER_TEMP/before"; else src="$GITHUB_WORKSPACE"; fi
+            dd=$([ "$variant" = before ] && echo before || echo after)
+            out="$GITHUB_WORKSPACE/build-session/$variant"
+            mkdir -p "$out"
+            # Every variant starts installed fresh and signed out.
+            xcrun simctl uninstall "$SIM_UDID" fi.tiyouba.lashkirja || true
+            xcrun simctl keychain "$SIM_UDID" reset || true
+            (cd "$src/ios-native/App" && xcodegen generate)
+            (cd "$src/ios-native/App" && set -o pipefail && TEST_RUNNER_LK_SHOT_DIR="$out" xcodebuild test \
+              -project LashKirja.xcodeproj -scheme LashKirja-UITests -configuration Release-UITest -destination "id=$SIM_UDID" \
+              -derivedDataPath "$RUNNER_TEMP/dd-$dd" -only-testing:LashKirjaUITests/StabilityTests/test10_RevokedSessionReachesSignInFast \
+              -only-testing:LashKirjaUITests/StabilityTests/test11_ValidSessionOpensOnKoti \
+              -resultBundlePath "$out/result.xcresult" \
+              CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
+              API_BASE_URL=http://127.0.0.1:3999 | xcbeautify --renderer github-actions) \
+              && echo "PASS" > "$out/status" || echo "FAIL" > "$out/status"
+            echo "== $variant: $(cat "$out/status")"
+            # The app under test must be the optimized one: no Debug products, no debug dylib.
+            app="$RUNNER_TEMP/dd-$dd/Build/Products/Release-UITest-iphonesimulator/LashKirja.app"
+            echo "app: $app; debug dylib: $(ls "$app" | grep -c 'debug.dylib'); Debug products: $(ls -d "$RUNNER_TEMP/dd-$dd/Build/Products/Debug-iphonesimulator" 2>/dev/null | wc -l | tr -d ' ')" \
+              | tee "$out/build.txt"
+            grep MARK "$out/notes.txt" || true
+          done
+          { for v in before after; do echo "## $v ($(cat build-session/$v/status))"; echo '```'; grep MARK "build-session/$v/notes.txt" || true; echo '```'; done; } >> "$GITHUB_STEP_SUMMARY"
+          # The job's verdict is w67's (test10 asserts first frame → sign-in ≤ 1 s).
+          [ "$(cat build-session/after/status)" = PASS ]
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: revoked-session
+          path: |
+            build-session
+            app/api-server.log

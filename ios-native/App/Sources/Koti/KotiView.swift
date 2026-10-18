@@ -21,7 +21,12 @@ struct KotiView: View {
             // Pull-to-refresh asks every screen again (Pankki, Raportit…); Koti's own load
             // stands for the bump here, so the gate does not load it twice.
             gate.mark(version: app.refreshEverything())
-            await model.load()
+            // Not awaited: the system spinner held for the whole load (1–2 s on CI) and then
+            // sprang back, moving the content a second time after it had come to rest (motion
+            // audit koti-refresh, every walk). Returning at once ends the refresh under the
+            // finger, so letting go is the only movement; the figures update in place
+            // (`ScreenLoad.begin` keeps them on screen while refreshing).
+            Task { await model.load() }
         })
         .perfReady("koti", model.state.value != nil)
         .task(id: app.dataVersion) {
@@ -53,6 +58,8 @@ private struct KotiContent: View {
     @State private var remindLoading: String?
     /// Koti is a dashboard: five tasks, the rest on request, so the cards below stay in reach.
     @State private var taskLimit = ShowMore(step: 5)
+    /// A pull-to-refresh waiting for the content to come to rest.
+    @State private var refreshAtRest = RefreshAtRest()
     @Environment(\.dynamicTypeSize) private var typeSize
 
     struct CaptureTarget: Identifiable { let id = UUID(); let transactionId: String? }
@@ -75,7 +82,19 @@ private struct KotiContent: View {
             }
         }
         .background(Theme.canvas)
-        .refreshable { await refresh() }
+        .refreshable {
+            // Started under the finger, the reload's work (every screen asked again, Koti redrawn)
+            // held the spinner 0.3–1.5 s on CI and the content sprang back late, in one jump
+            // (motion gate koti-refresh, w60). The spinner ends at once; the reload starts once
+            // the content has sprung back, and the figures update in place.
+            if refreshAtRest.phase == .idle { await refresh() } else { refreshAtRest.pending = refresh }
+        }
+        .onScrollPhaseChange { _, phase in
+            refreshAtRest.phase = phase
+            guard phase == .idle, let pending = refreshAtRest.pending else { return }
+            refreshAtRest.pending = nil
+            Task { await pending() }
+        }
         // Another month has its own tasks: back to the first five.
         .onChange(of: model.month) { _, _ in taskLimit.reset() }
         .fullScreenCover(item: $captureFor, onDismiss: { Task { await model.load() } }) { target in
@@ -369,6 +388,14 @@ private struct KotiContent: View {
 }
 
 /// The small grey heading over a group of rows.
+/// Not observed: the scroll phase changes on every drag, and redrawing the dashboard for it
+/// is the main-thread work the refresh waits out.
+@MainActor
+private final class RefreshAtRest {
+    var phase: ScrollPhase = .idle
+    var pending: (() async -> Void)?
+}
+
 private struct SectionHeader: View {
     let title: String
     var body: some View {
