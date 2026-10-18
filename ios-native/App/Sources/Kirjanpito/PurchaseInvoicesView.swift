@@ -759,7 +759,7 @@ struct PurchaseInvoiceDetailView: View {
                 LabeledContent("IBAN", value: iban)
             }
             if let category = invoice.category, !category.isEmpty {
-                LabeledContent("Kategoria", value: category)
+                LabeledContent("Kategoria", value: ReceiptCategory.label(for: category))
             }
         }
         Section {
