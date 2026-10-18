@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as saveReceipt } from "@/app/api/receipts/save/route";
-import { PATCH as patchReceipt } from "@/app/api/receipts/[id]/route";
+import { GET as getReceipt, PATCH as patchReceipt } from "@/app/api/receipts/[id]/route";
+import { GET as bankCandidates } from "@/app/api/receipts/[id]/bank-candidates/route";
 import { PATCH as reviewReceipt } from "@/app/api/receipts/[id]/review/route";
 import { POST as inbox } from "@/app/api/receipts/inbox/route";
 import { POST as createPurchase } from "@/app/api/purchase-invoices/route";
@@ -10,9 +11,17 @@ import { parseOCRText, type ExtractedReceipt } from "@/lib/ai";
 import { processDocumentJob, setDocumentExtractorForTests } from "@/lib/document-jobs";
 import { storeEmailDocument } from "@/lib/mail-sync";
 import { loadLedger } from "@/lib/ledger/load";
+import { buildInlineCandidates, runMatching } from "@/lib/matching";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
 import { applyReceiptPatch } from "@/lib/receipt-update";
-import { createReceipt, createUpload, createUser, resetDatabase, type TestUser } from "./helpers/factories";
+import {
+  createReceipt,
+  createStatementWithTransactions,
+  createUpload,
+  createUser,
+  resetDatabase,
+  type TestUser,
+} from "./helpers/factories";
 import { buildFormRequest, buildRequest, readJson, routeContext, sessionCookie } from "./helpers/http";
 
 /**
@@ -371,5 +380,68 @@ describe("the phone inbox and email import", () => {
     expect(receipt.totalAmountCents).toBe(-12_550);
     expect(receipt.reviewStatus).toBe("pending");
     expect(receipt.purchaseInvoice).toMatchObject({ grossCents: -12_550, creditsInvoiceId: original.id });
+  });
+});
+
+// X069: the money a credit note brings back arrives as an incoming row. A payment out to the
+// same supplier for the same sum is never offered as its match, on the receipt or the bank side.
+describe("a credit note's bank rows", () => {
+  async function creditWithRows() {
+    const credit = await createReceipt(user.id, {
+      date: `${PERIOD}-15`,
+      totalAmountCents: -50_00,
+      vatDetails: JSON.stringify([{ rate: 25.5, amount: -10.16 }]),
+      reviewStatus: "pending",
+    });
+    const statement = await createStatementWithTransactions(user.id, {
+      periodMonth: PERIOD,
+      transactions: [
+        { date: `${PERIOD}-16`, amountCents: -50_00, counterparty: "Tukku Oy" },
+        { date: `${PERIOD}-16`, amountCents: 50_00, counterparty: "Tukku Oy" },
+      ],
+    });
+    const out = statement.transactions.find((row) => row.amountCents < 0)!;
+    const back = statement.transactions.find((row) => row.amountCents > 0)!;
+    return { credit, out, back, rows: statement.transactions };
+  }
+
+  it("the receipt's own candidates hold only the incoming row", async () => {
+    const { credit, back } = await creditWithRows();
+    const response = await getReceipt(
+      buildRequest("GET", `/api/receipts/${credit.id}`, undefined, { cookie }),
+      routeContext({ id: credit.id })
+    );
+    expect(response.status).toBe(200);
+    const { match } = (await readJson<Json>(response)).receipt;
+    expect(match.status).toBe("unlinked");
+    expect(match.matchCandidates.map((c: Json) => c.id)).toEqual([back.id]);
+  });
+
+  it("'Valitse muu pankkitapahtuma' lists only incoming rows", async () => {
+    const { credit, back } = await creditWithRows();
+    const response = await bankCandidates(
+      buildRequest("GET", `/api/receipts/${credit.id}/bank-candidates`, undefined, { cookie }),
+      routeContext({ id: credit.id })
+    );
+    expect(response.status).toBe(200);
+    const body = await readJson<Json>(response);
+    expect(body.candidates.map((c: Json) => c.transactionId)).toEqual([back.id]);
+    expect(body.total).toBe(1);
+  });
+
+  it("the payment out never gets the credit note as its suggestion; the refund does", async () => {
+    const { credit, out, back, rows } = await creditWithRows();
+    const inline = await buildInlineCandidates(user.id, rows);
+    expect(inline.get(out.id)?.map((c) => c.receipt.id) ?? []).not.toContain(credit.id);
+    expect(inline.get(back.id)?.map((c) => c.receipt.id)).toEqual([credit.id]);
+
+    await runMatching(user.id);
+    const [outAfter, backAfter] = await Promise.all([
+      prisma.transaction.findUniqueOrThrow({ where: { id: out.id } }),
+      prisma.transaction.findUniqueOrThrow({ where: { id: back.id } }),
+    ]);
+    expect(outAfter).toMatchObject({ suggestedReceiptId: null, receiptId: null, matchStatus: "unmatched" });
+    // Pending, so it waits as a suggestion for the owner instead of posting.
+    expect(backAfter).toMatchObject({ suggestedReceiptId: credit.id, receiptId: null, matchStatus: "suggested" });
   });
 });

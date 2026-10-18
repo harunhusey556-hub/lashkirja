@@ -9,7 +9,7 @@
 import { prisma } from "./db";
 import { NotFoundError } from "./api-errors";
 import { centsToEuros } from "./money";
-import { scorePair, type MatchReceipt } from "./matching";
+import { receiptDirection, scorePair, type MatchReceipt } from "./matching";
 import {
   matchesPurchaseSearch,
   pageOf,
@@ -25,9 +25,9 @@ function isoDay(date: Date | null): string | null {
 
 /**
  * Bank rows that may be this receipt's payment, best first: the same direction
- * (a meno receipt is money out), not documented by another receipt and not a
- * sales or purchase payment - except a payment of this receipt's own ostolasku,
- * which is the same purchase.
+ * (a meno receipt is money out, a credit note money back), not documented by
+ * another receipt and not a sales or purchase payment - except a payment of
+ * this receipt's own ostolasku, which is the same purchase.
  */
 export async function listBankRowsForReceipt(
   userId: string,
@@ -50,10 +50,19 @@ export async function listBankRowsForReceipt(
   if (!receipt) throw new NotFoundError("Kuittia ei löytynyt.");
 
   const ownInvoiceId = receipt.purchaseInvoice?.id ?? null;
+  const model: MatchReceipt = {
+    id: receipt.id,
+    vendor: receipt.vendor,
+    date: receipt.date,
+    totalAmount: receipt.totalAmountCents == null ? null : centsToEuros(receipt.totalAmountCents),
+    type: receipt.type,
+    reference: receipt.reference,
+    invoiceNumber: receipt.invoiceNumber,
+  };
   const rows = await prisma.transaction.findMany({
     where: {
       statement: { userId },
-      amountCents: receipt.type === "tulo" ? { gt: 0 } : { lt: 0 },
+      amountCents: receiptDirection(model) === "tulo" ? { gt: 0 } : { lt: 0 },
       invoicePayment: null,
       OR: [{ receiptId: null }, { receiptId: receipt.id }],
       AND: [
@@ -78,15 +87,6 @@ export async function listBankRowsForReceipt(
     },
   });
 
-  const model: MatchReceipt = {
-    id: receipt.id,
-    vendor: receipt.vendor,
-    date: receipt.date,
-    totalAmount: receipt.totalAmountCents == null ? null : centsToEuros(receipt.totalAmountCents),
-    type: receipt.type,
-    reference: receipt.reference,
-    invoiceNumber: receipt.invoiceNumber,
-  };
   const q = options.q?.trim() ?? "";
   const monthOf = (row: (typeof rows)[number]) => isoDay(row.date)?.slice(0, 7) ?? row.statement.periodMonth ?? "";
   const searched = rows.filter((row) =>
