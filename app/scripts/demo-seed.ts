@@ -7,12 +7,19 @@
  */
 import "dotenv/config";
 import * as bcrypt from "bcryptjs";
+import type { Prisma } from "../src/generated/prisma/client";
 import { prisma } from "../src/lib/db";
 import { createBankAccount, upsertMonthlyBalance } from "../src/lib/bank-accounts";
+import { addMonths } from "../src/lib/bank-balances";
 import { createCustomer } from "../src/lib/customers";
+import { confirmMatch, encodeMatchReasons, scorePair } from "../src/lib/matching";
+import { centsToEuros } from "../src/lib/money";
+import { setLockedThrough } from "../src/lib/period-lock";
 import { createInvoice, recordPayment, setInvoiceStatus } from "../src/lib/sales-invoices";
-import { createPurchaseInvoice } from "../src/lib/purchase-invoices";
+import { createPurchaseInvoice, syncReceiptDocumentKind } from "../src/lib/purchase-invoices";
 import { createRecurringInvoice } from "../src/lib/recurring-invoices";
+import { helsinkiMonthKey } from "../src/lib/validation";
+import { updateVatFiling } from "../src/lib/vat-filing";
 
 function isoDaysAgo(days: number): string {
   const date = new Date();
@@ -234,6 +241,9 @@ async function main() {
   });
 
   if (CI_FLAG) await seedLongLists(user.id, account.id);
+  if (CI_FLAG) await seedWalkTasks(user.id, account.id);
+  // Last: closing the month refuses anything dated inside it afterwards.
+  if (CI_FLAG) await seedFinishedMonth(user.id, account.id);
 
   console.log(`Demo data ready for ${email} / demo123`);
 }
@@ -307,6 +317,164 @@ async function seedLongLists(userId: string, bankAccountId: string) {
       },
     },
   });
+}
+
+const daysAgo = (n: number) => new Date(`${isoDaysAgo(n)}T00:00:00Z`);
+const vat = (eur: number) => JSON.stringify([{ rate: 25.5, amount: eur }]);
+
+/**
+ * Simulator only (`--ci`): one seed for the fix round's walks, so counts move once. A receipt
+ * waiting for Hyväksy, two credit notes, two sure pairs, a bill filed as an ostolasku and a
+ * failed import. The credit notes and sure pairs are the audit walk's (audit-seed.ts on
+ * audit/phase2-walk) under the same file names, checksum and counterparties, so that script
+ * finds them and adds only its own rows.
+ */
+async function seedWalkTasks(userId: string, bankAccountId: string) {
+  const receipt = (fileName: string, data: Omit<Prisma.ReceiptUncheckedCreateInput, "userId" | "fileName" | "filePath">) =>
+    prisma.receipt.create({
+      data: {
+        userId,
+        fileName,
+        // A name the CI picture step replaces with a stored JPEG, as it does for the rows above.
+        filePath: `/tmp/${fileName}`,
+        type: "meno",
+        category: "tarvikkeet",
+        reviewStatus: "approved",
+        ...data,
+      },
+    });
+
+  // P1 test04 ends on its Hyväksy: every receipt above is approved already.
+  await receipt("lumo-kosmetiikka.pdf", { vendor: "Lumo Kosmetiikka Oy", date: daysAgo(1), totalAmountCents: 2_380, vatDetails: vat(4.84), reviewStatus: "pending" });
+
+  // A credit note is a receipt with a negative total and negative VAT (api/receipts/save). The
+  // pending one also carries the long vendor name the Koti task row must show whole.
+  await receipt("audit-hyvitys.pdf", { vendor: "Audit Hyvitys Oy", date: daysAgo(6), totalAmountCents: -5_000, vatDetails: vat(-10.16), invoiceNumber: "HYV-2026-1", notes: "Hyvityslasku" });
+  await receipt("audit-hyvitys-odottaa.pdf", { vendor: "Audit Hyvitys Odottaa Oy", date: daysAgo(2), totalAmountCents: -1_890, vatDetails: vat(-3.84), notes: "Hyvityslasku", reviewStatus: "pending" });
+
+  // Two sure pairs (the plural toasts "2 kuittia kohdistettu." / "2 kohdistusta kumottu."), each
+  // with a rival receipt of the same name and amount that keeps it suggested.
+  const tukku = await receipt("audit-tukku.pdf", { vendor: "Audit Tukku Oy", date: daysAgo(5), totalAmountCents: 8_765, reference: "1234567", vatDetails: vat(17.81) });
+  await receipt("audit-tukku-kopio.pdf", { vendor: "Audit Tukku", date: daysAgo(5), totalAmountCents: 8_765, vatDetails: vat(17.81) });
+  const kahvila = await receipt("audit-kahvila.pdf", { vendor: "Audit Kahvila Oy", date: daysAgo(3), totalAmountCents: 3_450, reference: "7654321", vatDetails: vat(7.01) });
+  await receipt("audit-kahvila-kopio.pdf", { vendor: "Audit Kahvila", date: daysAgo(3), totalAmountCents: 3_450, vatDetails: vat(7.01) });
+  const statement = await prisma.statement.create({
+    data: {
+      userId,
+      bankAccountId,
+      fileName: "tiliote-audit.csv",
+      fileType: "csv",
+      filePath: "/tmp/demo-audit.csv",
+      checksum: "demo-audit-checksum",
+      periodMonth: isoDaysAgo(4).slice(0, 7),
+    },
+  });
+  await seedSurePair(statement.id, tukku, { date: daysAgo(4), counterparty: "Audit Tukku Oy", reference: "1234567", message: "Lasku 1234567" });
+  await seedSurePair(statement.id, kahvila, { date: daysAgo(2), counterparty: "Audit Kahvila Oy", reference: "7654321", message: "Viite 7654321" });
+
+  // Approved and filed as an ostolasku the way "Merkitse ostolaskuksi" files it: Raportit's
+  // Menot counts it, while Kuitit's own list (kind=receipt) leaves it out.
+  const bill = await receipt("vuokra-kauppakatu.pdf", { vendor: "Kiinteistö Oy Kauppakatu 1", date: daysAgo(3), totalAmountCents: 31_000, invoiceNumber: "VL-1048", category: "vuokra", vatDetails: vat(62.99) });
+  const filed = await syncReceiptDocumentKind(userId, bill.id, "invoice");
+  if (filed.action !== "filed") throw new Error(`demo seed: the rent bill was not filed as an ostolasku (${JSON.stringify(filed)})`);
+
+  // Koti's "Tuonnit ja virheet" shows only while an import has failed; stored as withTrackedJob
+  // leaves a mailbox check that threw.
+  const failedAt = Date.now() - 60_000;
+  await prisma.backgroundJob.create({
+    data: {
+      userId,
+      kind: "email_scan",
+      status: "failed",
+      title: "Sähköpostin tarkistus",
+      error: "Kirjautuminen sähköpostipalvelimelle epäonnistui.",
+      progressLabel: "Epäonnistui",
+      createdAt: new Date(failedAt),
+      startedAt: new Date(failedAt),
+      finishedAt: new Date(failedAt + 5_000),
+    },
+  });
+}
+
+/**
+ * A bank row the server lists as a sure pair: viite + exact amount (the gate's `certain`) against
+ * `receipt`, stored as the matcher stores a suggestion. The rival receipt makes the pair
+ * "competing", so a matching run that a receipt save starts keeps it suggested instead of linking
+ * it by itself (autoLinkSureMatches is off for the demo user).
+ */
+async function seedSurePair(
+  statementId: string,
+  receipt: { id: string; vendor: string | null; date: Date | null; totalAmountCents: number | null; type: string; reference: string | null; invoiceNumber: string | null },
+  row: { date: Date; counterparty: string; reference: string; message: string }
+) {
+  const amountCents = -(receipt.totalAmountCents ?? 0);
+  const pair = scorePair(
+    { id: "seed", date: row.date, counterparty: row.counterparty, amount: centsToEuros(amountCents), reference: row.reference, message: row.message, type: "meno" },
+    { ...receipt, totalAmount: receipt.totalAmountCents == null ? null : centsToEuros(receipt.totalAmountCents) }
+  );
+  if (!pair?.certain) {
+    // Said in the job log rather than failing every class: only the sure-pair walks miss it.
+    console.warn(`::warning::demo seed: ${row.counterparty} / ${receipt.vendor} is not a certain pair under today's gate (${JSON.stringify(pair)})`);
+  }
+  await prisma.transaction.create({
+    data: {
+      statementId,
+      counterparty: row.counterparty,
+      type: "meno",
+      date: row.date,
+      amountCents,
+      reference: row.reference,
+      message: row.message,
+      matchStatus: "suggested",
+      suggestedReceiptId: receipt.id,
+      matchScore: pair?.score ?? null,
+      matchReasons: pair ? encodeMatchReasons([...pair.reasons, "competing"], pair.explanation) : null,
+    },
+  });
+}
+
+/**
+ * Simulator only (`--ci`): a finished month three months back, Kuukauden sulku's "… on valmis."
+ * with its package. The month's card sales paid into the account and a supplies receipt paid from
+ * it, each bank row linked to its receipt, the VAT return filed and paid, and the books closed
+ * through the month. Receipts rather than a paid invoice: the work queue still lists a bank row
+ * settled by an invoice payment as missing its receipt. The two rows cancel out, so the account's
+ * later months reconcile exactly as the rows above leave them. Days from the 10th on stay after the
+ * account's opening day (120 days back) in every month.
+ */
+async function seedFinishedMonth(userId: string, bankAccountId: string) {
+  const month = addMonths(helsinkiMonthKey(new Date()), -3);
+  const on = (dayOfMonth: number) => new Date(`${month}-${String(dayOfMonth).padStart(2, "0")}T00:00:00Z`);
+  const receipt = (fileName: string, data: Omit<Prisma.ReceiptUncheckedCreateInput, "userId" | "fileName" | "filePath">) =>
+    prisma.receipt.create({ data: { userId, fileName, filePath: `/tmp/${fileName}`, reviewStatus: "approved", ...data } });
+
+  const supplies = await receipt("helmi-kosmetiikka.pdf", { vendor: "Helmi Kosmetiikka Oy", date: on(12), totalAmountCents: 10_040, category: "tarvikkeet", type: "meno", vatDetails: vat(20.4) });
+  const sales = await receipt("korttimaksut.pdf", { vendor: "Korttimaksut", date: on(20), totalAmountCents: 10_040, category: "myynti", type: "tulo", vatDetails: vat(20.4) });
+  const statement = await prisma.statement.create({
+    data: {
+      userId,
+      bankAccountId,
+      fileName: "tiliote-valmis.csv",
+      fileType: "csv",
+      filePath: "/tmp/demo-valmis.csv",
+      checksum: "demo-finished-month-checksum",
+      periodMonth: month,
+      transactions: {
+        create: [
+          { date: on(12), amountCents: -10_040, counterparty: "Helmi Kosmetiikka Oy", type: "meno" },
+          { date: on(20), amountCents: 10_040, counterparty: "Korttimaksut", type: "tulo" },
+        ],
+      },
+    },
+    include: { transactions: true },
+  });
+  const paidOut = statement.transactions.find((row) => row.type === "meno");
+  const paidIn = statement.transactions.find((row) => row.type === "tulo");
+  if (!paidOut || !paidIn) throw new Error("demo seed: the finished month's bank rows were not stored");
+  await confirmMatch(userId, paidOut.id, supplies.id);
+  await confirmMatch(userId, paidIn.id, sales.id);
+  await updateVatFiling(userId, month, { filed: true, paid: true });
+  await setLockedThrough(userId, month);
 }
 
 main()
