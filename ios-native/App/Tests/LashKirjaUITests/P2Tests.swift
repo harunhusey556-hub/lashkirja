@@ -202,9 +202,11 @@ final class P2Tests: WalkTestCase {
             dump(app, "p2e-calendar"); XCTFail("no \(day.shown) in the Laskun päivä calendar"); return false
         }
         cell.tap(); taps += 1
-        // A date-only calendar may close by itself; otherwise a tap outside it does.
+        // A date-only calendar closes by itself once a day is picked; only if it stays is it closed
+        // with a tap on the title bar. The dismiss region's centre lies over the Maksuaika segments,
+        // and a tap sent there as the calendar closed itself chose "7 pv" (run 39164873388).
         let outside = app.descendants(matching: .any)["PopoverDismissRegion"]
-        if outside.waitForExistence(timeout: 2) { outside.tap() }
+        if !outside.waitForNonExistence(timeout: 3) { app.navigationBars["Uusi lasku"].tap() }
         _ = outside.waitForNonExistence(timeout: 5)
         return true
     }
