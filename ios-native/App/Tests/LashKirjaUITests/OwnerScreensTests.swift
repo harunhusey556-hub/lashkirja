@@ -392,8 +392,10 @@ final class OwnerScreensTests: WalkTestCase {
 
         // Digits only: autocorrect may change a word, and the read-back below finds the bill by them.
         let token = String(Int.random(in: 100_000...999_999))
-        let supplier = field("Toimittaja")
-        guard supplier.waitForExistence(timeout: 5) else { capture("h2-no-supplier"); XCTFail("the form has no Toimittaja field"); return }
+        // Under the section header "Toimittaja" the field exposes its prompt, "Tukku Oy", not a label
+        // (PurchaseInvoiceForms.swift:36; run 39164754863 found no field labelled Toimittaja).
+        let supplier = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Tukku Oy", "Toimittaja")).firstMatch
+        guard supplier.waitForExistence(timeout: 5) else { capture("h2-no-supplier"); tree("h2-no-supplier"); XCTFail("the form has no Toimittaja field"); return }
         type(supplier, "Testitukku \(token)")
         let gross = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label BEGINSWITH %@", "124,00", "Summa")).firstMatch
         guard gross.waitForExistence(timeout: 5) else { capture("h2-no-gross"); tree("h2-no-gross"); XCTFail("the form has no Summa field"); return }
