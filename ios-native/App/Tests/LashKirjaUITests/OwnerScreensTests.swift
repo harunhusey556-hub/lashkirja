@@ -67,16 +67,6 @@ final class OwnerScreensTests: WalkTestCase {
         return !element.exists
     }
 
-    /// Kirjanpito → "Kuitit, 28 kuittia" (as StabilityTests.openHubRow).
-    func openKuitit() -> Bool {
-        guard selectTab("Kirjanpito") else { note("MISS tab Kirjanpito not selected"); return false }
-        for _ in 0..<2 where !app.navigationBars["Kuitit"].exists {
-            tapLabel("label BEGINSWITH %@", "Kuitit")
-            _ = app.navigationBars["Kuitit"].waitForExistence(timeout: 10)
-        }
-        return app.navigationBars["Kuitit"].exists
-    }
-
     /// The count in a chip's label ("Ei kohdistettu, 27"); -1 while the counts have not arrived.
     static func lastNumber(_ label: String) -> Int {
         guard let digits = label.split(whereSeparator: { !$0.isNumber }).last else { return -1 }
@@ -134,6 +124,21 @@ final class OwnerScreensTests: WalkTestCase {
         XCTAssertGreaterThanOrEqual(frame.maxX, window.maxX - 12, "the sheet ends \(window.maxX - frame.maxX) pt from the right edge: a floating bubble")
         XCTAssertGreaterThanOrEqual(frame.width, window.width - 24, "the sheet is \(frame.width) of \(window.width) wide: a floating bubble")
         XCTAssertGreaterThan(confirm.frame.midY, window.height * 0.6, "Poista is at \(confirm.frame.midY): not where the thumb is")
+
+        // U099: the title names the receipt; the line under it adds the amount and day, not the vendor again.
+        let named = sheet.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "ABC Prisma Kotka"))
+        XCTAssertEqual(named.count, 1, "the sheet names the vendor \(named.count) times: \(sheet.staticTexts.allElementsBoundByIndex.map(\.label))")
+        let message = app.staticTexts["confirm-sheet-message"].firstMatch
+        if message.exists {
+            keep("a-message", message.label)
+            XCTAssertTrue(message.label.contains("9,43") && message.label.contains("€"), "the message has no amount: \(message.label)")
+            // U008: no blank band between the words and the buttons (about 52 pt while the inset was counted twice).
+            let gap = confirm.frame.minY - message.frame.maxY
+            keep("a-gap", "\(gap) pt between the message and Poista")
+            XCTAssertLessThanOrEqual(gap, 24, "\(gap) pt of empty sheet between the message and Poista")
+        } else {
+            XCTFail("the sheet has no line under its title")
+        }
 
         app.buttons["confirm-sheet-cancel"].firstMatch.tap()
         XCTAssertTrue(waitGone(sheet, timeout: 5), "Peruuta did not close the sheet")
@@ -315,5 +320,27 @@ final class OwnerScreensTests: WalkTestCase {
         XCTAssertTrue(app.navigationBars["Uusi lasku"].exists, "the sheet is not the new invoice")
         XCTAssertTrue(app.buttons["Luo lasku"].firstMatch.isEnabled, "Luo lasku is still waiting for the form's load")
         app.buttons["Peruuta"].firstMatch.tap()
+    }
+
+    // U008: the sign-out question is as tall as its words. With nothing waiting it is the title alone,
+    // with no blank band above the buttons. The question with a photo waiting is P3Tests.testC: this
+    // class also runs straight against the demo API (ios-native.yml), with no proxy to go offline, so
+    // a queued photo would be sent before the question opens.
+    func testA1_SignOutConfirmFitsItsText() {
+        guard let sheet = openSignOutQuestion() else { capture("f0-no-question"); tree("f0-no-question"); XCTFail("Asetukset > Kirjaudu ulos did not ask"); return }
+        capture("f1-signout-nothing-waiting")
+        let title = app.staticTexts["confirm-sheet-title"].firstMatch
+        let message = app.staticTexts["confirm-sheet-message"].firstMatch
+        let confirm = app.buttons["confirm-sheet-confirm"].firstMatch
+        XCTAssertEqual(title.label, "Kirjaudutaanko ulos?")
+        // A reading left unsaved, or a photo the inbox refused, would count here: named A1 so it runs
+        // before testC's reading and testD's photo exist.
+        XCTAssertFalse(message.exists, "nothing should wait, yet the question has a line (left by an earlier test?): \(message.exists ? message.label : "")")
+        let gap = confirm.frame.minY - title.frame.maxY
+        keep("f-gap", "\(gap) pt between the title and \(confirm.label); sheet \(sheet.frame)")
+        XCTAssertLessThanOrEqual(gap, 24, "\(gap) pt of empty sheet between the title and the buttons")
+        app.buttons["confirm-sheet-cancel"].firstMatch.tap()
+        XCTAssertTrue(waitGone(sheet, timeout: 5), "Peruuta did not close the question")
+        XCTAssertTrue(app.navigationBars["Asetukset"].exists, "Peruuta left Asetukset: the session ended")
     }
 }

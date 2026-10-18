@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var profileAsked = false
     @State private var lockEnabled = AppLock.shared.isEnabled
     @State private var confirmLogout = false
+    @State private var queue = OfflineReceiptQueueModel.shared
     @State private var savingAutoLink = false
     @State private var settingFailure: String?
 
@@ -97,7 +98,9 @@ struct SettingsView: View {
             pos.bind(app)
             if pos.status == nil { await pos.refreshStatus() }
         }
-        .confirmSheet(isPresented: $confirmLogout, title: "Kirjaudutaanko ulos?", confirmTitle: "Kirjaudu ulos") {
+        // Signing out deletes the receipts still on the phone (as the web does): the question says how many.
+        .confirmSheet(isPresented: $confirmLogout, title: "Kirjaudutaanko ulos?", message: queue.signOutWarning ?? "",
+                      confirmTitle: "Kirjaudu ulos") {
             Task { await app.logout() }
         }
     }

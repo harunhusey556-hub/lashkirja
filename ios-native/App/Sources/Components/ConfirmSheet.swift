@@ -120,6 +120,7 @@ private struct ConfirmSheetContent: View {
                             .font(.subheadline)
                             .foregroundStyle(Theme.ink2)
                             .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("confirm-sheet-message")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -186,7 +187,6 @@ private struct ConfirmSheetContent: View {
         let measured = textHeight > 0 && buttonsHeight > 0 ? textHeight + buttonsHeight : 0
         return CGFloat(ConfirmSheetLayout.detentHeight(
             content: Double(measured),
-            bottomInset: Double(window?.safeAreaInsets.bottom ?? 0),
             screenHeight: Double(window?.bounds.height ?? 0)
         ))
     }

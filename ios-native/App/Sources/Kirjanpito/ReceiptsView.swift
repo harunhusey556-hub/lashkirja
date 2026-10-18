@@ -70,6 +70,11 @@ struct ReceiptsView: View {
     private var deleteNote: String {
         let named = deleting
         guard !named.isEmpty else { return "" }
+        // One receipt: the title already names the vendor, so the line under it adds the amount and day.
+        if deleteIds.count == 1, let receipt = named.first {
+            let parts: [String?] = [receipt.totalAmount.map { Money.format($0) }, receipt.date.map { APIDate.displayDay($0) }]
+            return parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        }
         let shown = named.prefix(3).map { receipt -> String in
             guard let amount = receipt.totalAmount else { return receipt.title }
             return "\(receipt.title) \(Money.format(amount))"

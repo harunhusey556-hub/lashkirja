@@ -196,10 +196,11 @@ struct ReceiptDetailView: View {
         return "Poistetaanko kuitti · \(r.title)?"
     }
 
+    /// The title already names the vendor; the line under it adds what tells one of its receipts from another.
     private var deleteNote: String {
         guard let r = state.value else { return "" }
-        guard let amount = r.totalAmount else { return "\(r.title) poistetaan." }
-        return "\(r.title) · \(Money.format(amount)) poistetaan."
+        let parts: [String?] = [r.totalAmount.map { Money.format($0) }, r.date.map { APIDate.displayDay($0) }]
+        return parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     // MARK: Ostolasku
