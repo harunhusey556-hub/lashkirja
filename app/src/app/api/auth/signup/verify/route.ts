@@ -5,10 +5,10 @@ import {
   AccountSecurityError,
   accountLinkBase,
   normalizeLoginEmail,
-  openAuthSession,
+  openBearerSession,
   sendAccountMail,
 } from "@/lib/account-security";
-import { sealBearerToken } from "@/lib/auth-credential";
+import { acceptDeviceKey } from "@/lib/device-key";
 import { rejectSignupRequest, verifySignup, welcomeMail } from "@/lib/signup";
 import { PASSWORD_MAX } from "@/lib/session-policy";
 
@@ -17,6 +17,8 @@ const bodySchema = z.object({
   code: z.string().trim().max(20),
   password: z.string().min(1).max(PASSWORD_MAX),
   device: z.string().max(40).optional(),
+  // Any type parses: a bad key is ignored (acceptDeviceKey) rather than failing the sign-up.
+  deviceKey: z.unknown().optional(),
 });
 
 /** Code in, signed-in app out: the success answer is exactly the one of POST /api/auth/token. */
@@ -42,13 +44,8 @@ export async function POST(req: NextRequest) {
   try {
     const user = await verifySignup(email, parsed.data.code, parsed.data.password);
     const device = parsed.data.device === "ios-app" ? ("ios-app" as const) : undefined;
-    const row = await openAuthSession(user.id, req.headers.get("user-agent"), device);
-    const sealed = await sealBearerToken({
-      userId: user.id,
-      email: user.email,
-      firstName: user.firstName,
-      sessionId: row.id,
-    });
+    const deviceKey = acceptDeviceKey(parsed.data.deviceKey, "POST /api/auth/signup/verify");
+    const sealed = await openBearerSession(user, req.headers.get("user-agent"), device, deviceKey);
     // The account exists now; a welcome that cannot be sent is only logged.
     const linkBase = accountLinkBase(req.nextUrl.origin);
     if (linkBase) {

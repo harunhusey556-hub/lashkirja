@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getIronSession } from "iron-session";
 import { sessionOptions, type SessionData } from "@/lib/session";
-import { openAuthSession } from "@/lib/account-security";
-import { sealBearerToken } from "@/lib/auth-credential";
+import { openAuthSession, openBearerSession } from "@/lib/account-security";
+import { acceptDeviceKey } from "@/lib/device-key";
 import { PasskeyError } from "@/lib/passkey";
 
 type SignedInUser = { id: string; email: string; firstName: string };
@@ -18,16 +18,16 @@ export async function issuePasskeySession(
   req: NextRequest,
   user: SignedInUser,
   transport: "bearer" | "cookie",
-  device?: "ios-app"
+  device?: "ios-app",
+  deviceKey?: unknown
 ): Promise<NextResponse> {
   if (transport === "bearer") {
-    const row = await openAuthSession(user.id, req.headers.get("user-agent"), device);
-    const sealed = await sealBearerToken({
-      userId: user.id,
-      email: user.email,
-      firstName: user.firstName,
-      sessionId: row.id,
-    });
+    const sealed = await openBearerSession(
+      user,
+      req.headers.get("user-agent"),
+      device,
+      acceptDeviceKey(deviceKey, "POST /api/auth/passkey/authenticate/verify")
+    );
     return noStore(
       NextResponse.json({
         token: sealed.token,

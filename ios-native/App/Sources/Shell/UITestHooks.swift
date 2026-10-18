@@ -1,9 +1,11 @@
 import UIKit
+import Observation
 
 /// What the simulator UI tests (LashKirjaUITests/OwnerScreensTests) need from the app, switched on
-/// by the launch argument `-LKUITest`. Debug builds only: a Release build (the IPA) never reads it.
+/// by the launch argument `-LKUITest`. Debug and Release-UITest builds only (LK_UITEST_HOOKS): a
+/// Release build (the IPA) never reads it.
 enum UITestHooks {
-    #if DEBUG
+    #if DEBUG || LK_UITEST_HOOKS
     static let active = ProcessInfo.processInfo.arguments.contains("-LKUITest")
     #else
     static let active = false
@@ -11,10 +13,50 @@ enum UITestHooks {
 
     /// RootView's launch-phase marker for the walks' launch helper (WalkTestCase.launchSignedIn).
     /// Its own argument too: the acceptance walks run without `-LKUITest`'s capture fixture.
-    #if DEBUG
+    #if DEBUG || LK_UITEST_HOOKS
     static let launchPhase = active || ProcessInfo.processInfo.arguments.contains("-LKLaunchPhase")
     #else
     static let launchPhase = false
+    #endif
+
+    #if DEBUG || LK_UITEST_HOOKS
+    /// Milliseconds since this process was started (by the kernel's clock), for launch timings
+    /// that include what happens before `main`.
+    static func processAgeMs() -> Int? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.size
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        guard start.tv_sec > 0 else { return nil }
+        let started = Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
+        return Int((Date().timeIntervalSince1970 - started) * 1000)
+    }
+
+    /// "<moment>=<ms after launch>" for the first time each launch moment came (RootView's marker).
+    /// From any thread: the launch's 401 is marked where it arrives, off the main thread.
+    private static let timelineLock = NSLock()
+    private static var timeline: [String] = []
+    static var launchTimeline: String {
+        timelineLock.withLock { timeline.isEmpty ? "launch phase" : timeline.joined(separator: " ") }
+    }
+    static func mark(_ moment: String) {
+        guard launchPhase else { return }
+        let line: String? = timelineLock.withLock {
+            guard !timeline.contains(where: { $0.hasPrefix(moment + "=") }) else { return nil }
+            timeline.append("\(moment)=\(processAgeMs() ?? -1)")
+            return timeline.last
+        }
+        // For a launch outside XCTest (`simctl launch --console-pty`, ios-session-gate.yml).
+        if let line {
+            print("LKMARK \(line)")
+            // A moment after the last phase change (Koti's figures) still reaches the marker's label.
+            Task { @MainActor in LaunchTimelineVersion.shared.value += 1 }
+        }
+    }
+    #else
+    /// The launch timeline is the UI tests' only: a Release build marks nothing.
+    static func mark(_ moment: String) {}
     #endif
 
     static let fixtureName = "testikuitti.jpg"
@@ -42,3 +84,13 @@ enum UITestHooks {
         }
     }
 }
+
+#if DEBUG || LK_UITEST_HOOKS
+/// Bumped by every new launch moment, so RootView's marker rebuilds its label with it.
+@MainActor
+@Observable
+final class LaunchTimelineVersion {
+    static let shared = LaunchTimelineVersion()
+    var value = 0
+}
+#endif

@@ -288,6 +288,41 @@ describe("refreshTokenIfDue", () => {
     expect(navigated).toEqual([{ path: "/login?error=expired", replace: true }]);
   });
 
+  it("sends one request for refreshes that overlap (the resume triggers fire together)", async () => {
+    await signInAsDemo();
+    const eightDaysLater = Date.now() + 8 * 24 * 60 * 60 * 1000;
+    let answer: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => (answer = resolve)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const all = Promise.all([
+      refreshTokenIfDue(eightDaysLater),
+      refreshTokenIfDue(eightDaysLater),
+      refreshTokenIfDue(eightDaysLater),
+    ]);
+    answer(jsonResponse(200, { token: "tok-2", expiresAt: "2099-02-01T00:00:00.000Z", user: { userId: "user-1" } }));
+    await all;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getAccessToken()).toBe("tok-2");
+  });
+
+  it("refreshes again after an earlier refresh has finished", async () => {
+    await signInAsDemo();
+    const eightDaysLater = Date.now() + 8 * 24 * 60 * 60 * 1000;
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(502, {})));
+    await refreshTokenIfDue(eightDaysLater);
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, { token: "tok-2", expiresAt: "2099-02-01T00:00:00.000Z", user: { userId: "user-1" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await refreshTokenIfDue(eightDaysLater);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getAccessToken()).toBe("tok-2");
+  });
+
   it("keeps the old token on a network error", async () => {
     await signInAsDemo();
     const eightDaysLater = Date.now() + 8 * 24 * 60 * 60 * 1000;

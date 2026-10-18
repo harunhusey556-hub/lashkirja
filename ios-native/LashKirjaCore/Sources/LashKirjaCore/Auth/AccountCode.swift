@@ -46,6 +46,8 @@ public struct SignUpVerifyBody: Encodable, Equatable, Sendable {
     public let code: String
     public let password: String
     public let device: String
+    /// The trusted device's public key (`DeviceKeySigner`), set by AuthService; absent without one.
+    public var deviceKey: String?
     public init(email: String, code: String, password: String, device: String = "ios-app") {
         self.email = AccountCode.address(email)
         self.code = AccountCode.normalize(code) ?? code.trimmingCharacters(in: .whitespacesAndNewlines)

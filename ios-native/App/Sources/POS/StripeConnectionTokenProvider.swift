@@ -1,11 +1,10 @@
 import Foundation
-import StripeTerminal
 import LashKirjaCore
 
-/// Hands Stripe Terminal a connection token made by the LashKirja server on the owner's own
-/// Stripe account. No caching: the SDK asks again whenever it needs one, and a token from an
-/// earlier session must never reach another account.
-final class StripeConnectionTokenProvider: NSObject, ConnectionTokenProvider {
+/// Hands Stripe Terminal (through StripeTerminalDriving) a connection token made by the LashKirja
+/// server on the owner's own Stripe account. No caching: the SDK asks again whenever it needs one,
+/// and a token from an earlier session must never reach another account.
+final class StripeConnectionTokenProvider: @unchecked Sendable {
     private let lock = NSLock()
     private var currentAPI: APIClient?
 
@@ -15,7 +14,7 @@ final class StripeConnectionTokenProvider: NSObject, ConnectionTokenProvider {
         set { lock.withLock { currentAPI = newValue } }
     }
 
-    func fetchConnectionToken(_ completion: @escaping ConnectionTokenCompletionBlock) {
+    func fetchConnectionToken(_ completion: @escaping (String?, Error?) -> Void) {
         guard let api else {
             completion(nil, LKError(status: 401, code: "NO_SESSION", message: "Kirjaudu sisään ennen korttimaksua."))
             return

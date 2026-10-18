@@ -18,3 +18,9 @@ public actor InMemoryTokenStore: TokenStore {
     public func loadPendingRevoke() -> String? { pending }
     public func savePendingRevoke(_ token: String?) { pending = token }
 }
+
+/// A store the launch can read before the first frame, without a suspension (the Keychain is):
+/// a trusted session opens on the cached screens in that frame instead of a blank one.
+public protocol LaunchTokenReading: Sendable {
+    func loadAtLaunch() -> StoredToken?
+}

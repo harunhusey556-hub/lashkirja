@@ -5,7 +5,7 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            switch app.phase {
+            switch app.shownPhase {
             case .launching:
                 Theme.canvas.ignoresSafeArea()
             case .signedOut(let notice):
@@ -15,36 +15,51 @@ struct RootView: View {
                     .background(LockWindowHost(locked: AppLock.shared.isLocked, app: app))
             }
         }
-        .motion(.default, value: app.phase)
+        .motion(.default, value: app.shownPhase)
         .overlay(alignment: .topLeading) {
-            if UITestHooks.launchPhase { LaunchPhaseMarker(phase: app.phase) }
+            #if DEBUG || LK_UITEST_HOOKS
+            if UITestHooks.launchPhase { LaunchPhaseMarker(phase: app.shownPhase) }
+            #endif
         }
     }
 }
 
+#if DEBUG || LK_UITEST_HOOKS
 /// UI tests only: the phase the launch is in, so a walk waits for what the app decided instead of
 /// a fixed window. A token stored by an earlier walk paints the tabs first and drops to the sign-in
-/// screen only once the server refuses it, 7–9 s later on a CI runner (motion gate, 2026-10-15).
+/// screen once the server refuses it (7–9 s later on a CI runner before w49's session check).
+/// The label carries when (ms after the process started) the tabs and then the sign-in screen were
+/// first built, for the revoked-session walk (StabilityTests.test10).
 private struct LaunchPhaseMarker: View {
     let phase: AppModel.Phase
 
     var body: some View {
-        Color.clear
+        let value = value
+        // Read for its observation: a later moment (Koti's figures) rebuilds the label.
+        _ = LaunchTimelineVersion.shared.value
+        return Color.clear
             .frame(width: 1, height: 1)
             .allowsHitTesting(false)
             .accessibilityElement()
             .accessibilityIdentifier("lk.launch-phase")
-            .accessibilityLabel("launch phase")
+            .accessibilityLabel(UITestHooks.launchTimeline)
             .accessibilityValue(value)
     }
 
     private var value: String {
         switch phase {
-        case .launching: "launching"
-        case .signedOut: "signedOut"
+        case .launching:
+            UITestHooks.mark("launching")
+            return "launching"
+        case .signedOut:
+            UITestHooks.mark("signedOut")
+            return "signedOut"
         // AuthService.restore() knows only the user id; /api/auth/me fills in the email once the
         // server has accepted the stored token.
-        case .signedIn(let user): user.email.isEmpty ? "restored" : "signedIn"
+        case .signedIn(let user):
+            UITestHooks.mark("tabs")
+            return user.email.isEmpty ? "restored" : "signedIn"
         }
     }
 }
+#endif

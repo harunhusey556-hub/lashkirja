@@ -1,5 +1,6 @@
 import { sealData, unsealData } from "iron-session";
 import { sessionOptions, type SessionData } from "@/lib/session-options";
+import { SESSION_ABSOLUTE_MS } from "@/lib/session-limits";
 
 /** No DB import here on purpose: proxy.ts reads a credential on every /api/*
  * request and must stay DB-free on that path. */
@@ -15,7 +16,8 @@ export type Credential =
   | { kind: "bearer"; data: SessionData & { userId: string; sessionId: string } }
   | { kind: "cookie"; data: SessionData & { userId: string } };
 
-function bearerTokenFrom(authorizationHeader: string | null): string | null {
+/** The token string exactly as sent: the device signature of a refresh covers it. */
+export function bearerTokenFrom(authorizationHeader: string | null): string | null {
   if (!authorizationHeader) return null;
   const match = /^Bearer\s+(.+)$/i.exec(authorizationHeader.trim());
   return match ? match[1] : null;
@@ -47,6 +49,12 @@ export async function readCredential(
         ttl: TOKEN_TTL_SECONDS,
       });
       if (data.kind !== "bearer" || !data.userId || !data.sessionId) return null;
+      // Tokens from before rotation carry neither field; the row decides for them.
+      if (data.gen !== undefined && !(Number.isInteger(data.gen) && data.gen >= 0)) return null;
+      if (data.sessionStartedAt !== undefined) {
+        if (!Number.isFinite(data.sessionStartedAt)) return null;
+        if (Date.now() - data.sessionStartedAt > SESSION_ABSOLUTE_MS) return null;
+      }
       return { kind: "bearer", data: data as SessionData & { userId: string; sessionId: string } };
     } catch {
       return null;
@@ -78,6 +86,10 @@ export async function sealBearerToken(data: {
   email: string;
   firstName: string;
   sessionId: string;
+  /** Token generation inside the session row; absent = 0 (legacy tokens). */
+  gen?: number;
+  /** Epoch ms of the row's createdAt: lets the DB-free check enforce the absolute cap. */
+  sessionStartedAt?: number;
 }): Promise<{ token: string; expiresAt: Date }> {
   const payload: SessionData = { ...data, kind: "bearer" };
   const token = await sealData(payload, {

@@ -7,10 +7,13 @@ options:
 # Debug and Release stay unsigned (CI, the unsigned IPA). Release-Signed is the owner's own signed
 # build with the Tap to Pay entitlement; only it references the entitlements file, because a
 # free-account re-sign of the unsigned IPA would fail on an entitlement it cannot grant.
+# Release-UITest is Release (optimized, no debug dylib) plus the UI-test launch hooks, so the
+# launch-time gate (ios-session-gate.yml) measures optimized code, not a Debug build.
 configs:
   Debug: debug
   Release: release
   Release-Signed: release
+  Release-UITest: release
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -27,7 +30,7 @@ settings:
 packages:
   LashKirjaCore:
     path: ../LashKirjaCore
-  # Stripe Terminal (Tap to Pay on iPhone), App target only; Core stays plain Foundation.
+  # Stripe Terminal (Tap to Pay on iPhone), LashKirjaStripe only; Core stays plain Foundation.
   StripeTerminal:
     url: https://github.com/stripe/stripe-terminal-ios-spm
     from: 5.8.0
@@ -35,7 +38,7 @@ targets:
   LashKirja:
     type: application
     platform: iOS
-    sources: [Sources, Resources]
+    sources: [Sources, Resources, Shared]
     info:
       path: Config/Info.plist
       properties:
@@ -86,6 +89,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: fi.tiyouba.lashkirja
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       configs:
+        # UITestHooks reads its launch arguments only under DEBUG or LK_UITEST_HOOKS. One arch as
+        # in Debug: the simulator runs one, and the gate measures the optimization, not the slices.
+        Release-UITest:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: LK_UITEST_HOOKS
+          ENABLE_DEBUG_DYLIB: "NO"
+          ONLY_ACTIVE_ARCH: "YES"
         # The owner's signed Tap to Pay build. Needs a paid Apple Developer account with the
         # Tap to Pay on iPhone entitlement granted; set DEVELOPMENT_TEAM here (or pass
         # DEVELOPMENT_TEAM=XXXXXXXXXX to xcodebuild) before building scheme LashKirja-TapToPay.
@@ -99,6 +108,42 @@ targets:
           LK_TAP_TO_PAY_ENTITLEMENT: "YES"
     dependencies:
       - package: LashKirjaCore
+      # Embedded, not linked: StripeTerminalLoader loads it (and the SDK) on the first card
+      # payment, so the SDK's ~3,300 Objective-C classes are not set up before `main` (w56).
+      - target: LashKirjaStripe
+        link: false
+        embed: true
+    # The SDK LashKirjaStripe links goes in the app's Frameworks too (a framework does not embed
+    # its own, and an unlinked package product is embedded under a wrong name), still not linked.
+    postBuildScripts:
+      - name: Embed Stripe Terminal
+        basedOnDependencyAnalysis: false
+        script: |
+          set -eu
+          src="${BUILT_PRODUCTS_DIR}/StripeTerminal.framework"
+          dst="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}"
+          [ -d "$src" ] || { echo "error: $src was not built"; exit 1; }
+          mkdir -p "$dst"
+          rm -rf "$dst/StripeTerminal.framework"
+          cp -R "$src" "$dst/"
+          identity="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:-}}"
+          if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ] && [ -n "$identity" ]; then
+            codesign --force --sign "$identity" --preserve-metadata=identifier,flags --timestamp=none "$dst/StripeTerminal.framework"
+          fi
+  # Stripe Terminal behind StripeTerminalDriving (Shared/), loaded at run time by the app.
+  LashKirjaStripe:
+    type: framework
+    platform: iOS
+    sources: [StripeDriver, Shared]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fi.tiyouba.lashkirja.stripe
+        GENERATE_INFOPLIST_FILE: "YES"
+        SKIP_INSTALL: "YES"
+      configs:
+        Release-UITest:
+          ONLY_ACTIVE_ARCH: "YES"
+    dependencies:
       - package: StripeTerminal
         product: StripeTerminal
   LashKirjaAppTests:

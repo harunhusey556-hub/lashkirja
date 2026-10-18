@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession, sessionOptions } from "@/lib/session";
+import { authenticate, sessionOptions } from "@/lib/session";
 import { isAppClientOrigin } from "@/lib/app-origins";
 
 export async function GET(req: NextRequest) {
-  const session = await requireSession(req);
+  const { session, reason } = await authenticate(req);
   if (!session) {
-    const response = NextResponse.json({ user: null }, { status: 401 });
+    const response = NextResponse.json(
+      { user: null, error: { code: "UNAUTHORIZED", message: "Kirjautuminen vaaditaan", reason } },
+      { status: 401 }
+    );
     // A bearer caller, or an app-origin caller, never sent this cookie in
     // the first place (readCredential ignores cookies from an app origin
     // entirely) - clearing it here is a needless Set-Cookie on every failed

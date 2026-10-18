@@ -31,6 +31,14 @@ public actor APIClient {
     /// Told about every request once it is over (the debugging trail, `EventLog`). Runs
     /// detached; the trail's own uploads (/api/observe…) are not reported.
     public private(set) var onRequestFinished: (@Sendable (RequestTrace) async -> Void)?
+    /// Bumped when a session ends here (its first refusing 401, or `endSessionRequests()`): a
+    /// request that started for an earlier session ends as a cancellation, so no screen shows an
+    /// error for a session that is already gone, and a second 401 signs nobody out again.
+    private var sessionGeneration = 0
+    /// The reads on the wire with a session's token, cancelled when that session ends. A write
+    /// already sent is left to finish: the server may have stored it (a receipt save), and only its
+    /// answer tells the owner whether it did. The generation check keeps an unsent write in.
+    private var sessionRequests: [UUID: Task<HTTPResponse, Error>] = [:]
 
     public init(baseURL: URL, transport: HTTPTransport, tokens: TokenProvider,
                 sleep: @escaping @Sendable (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }) {
@@ -43,6 +51,14 @@ public actor APIClient {
     public func setOnUnauthorized(_ handler: (@Sendable (String) async -> Void)?) { onUnauthorized = handler }
     public func setOnWrite(_ handler: (@Sendable (String) async -> Void)?) { onWrite = handler }
     public func setOnReachability(_ handler: (@Sendable (Bool) async -> Void)?) { onReachability = handler }
+
+    /// The session ended on this device (sign-out, or a 401 seen outside this client): its
+    /// reads still on the wire are cancelled and any request still waiting never goes out.
+    public func endSessionRequests() {
+        sessionGeneration += 1
+        for request in sessionRequests.values { request.cancel() }
+        sessionRequests = [:]
+    }
 
     public func setOnUnexpectedFailure(_ handler: (@Sendable (String, String, Int, Bool) async -> Void)?) { onUnexpectedFailure = handler }
     public func setOnRequestFinished(_ handler: (@Sendable (RequestTrace) async -> Void)?) { onRequestFinished = handler }
@@ -75,6 +91,13 @@ public actor APIClient {
     public func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, query: [String: String] = [:], body: B?, idempotencyKey: String? = nil) async throws -> T {
         let data = try body.map { try JSONEncoder().encode($0) }
         let response = try await perform(method, path, query: query, body: data, contentType: data == nil ? nil : "application/json", idempotencyKey: idempotencyKey)
+        return try decode(response, method: method, path: path)
+    }
+
+    /// A write whose extra headers are made from the token it goes out with (the trusted device's
+    /// signature on a token refresh), so they always match the Authorization header.
+    public func send<T: Decodable>(_ method: String, _ path: String, signedHeaders: @escaping @Sendable (String?) async -> [String: String]) async throws -> T {
+        let response = try await perform(method, path, query: [:], body: nil, contentType: nil, idempotencyKey: nil, signedHeaders: signedHeaders)
         return try decode(response, method: method, path: path)
     }
 
@@ -130,13 +153,16 @@ public actor APIClient {
         return components.url!
     }
 
-    private func perform(_ method: String, _ path: String, query: [String: String], body: Data?, contentType: String?, idempotencyKey: String?) async throws -> HTTPResponse {
+    private func perform(_ method: String, _ path: String, query: [String: String], body: Data?, contentType: String?, idempotencyKey: String?,
+                         signedHeaders: (@Sendable (String?) async -> [String: String])? = nil) async throws -> HTTPResponse {
         // Sent as X-Request-Id: the server logs its errors under the same id.
         let requestId = String(UUID().uuidString.prefix(8)).lowercased()
         let started = Date()
+        let generation = sessionGeneration
         do {
             let response = try await attempt(method, path, query: query, body: body, contentType: contentType,
-                                             idempotencyKey: idempotencyKey, requestId: requestId)
+                                             idempotencyKey: idempotencyKey, requestId: requestId, generation: generation,
+                                             signedHeaders: signedHeaders)
             noteFinished(method, path, status: response.status, started: started, requestId: requestId, error: nil)
             return response
         } catch {
@@ -145,7 +171,8 @@ public actor APIClient {
         }
     }
 
-    private func attempt(_ method: String, _ path: String, query: [String: String], body: Data?, contentType: String?, idempotencyKey: String?, requestId: String) async throws -> HTTPResponse {
+    private func attempt(_ method: String, _ path: String, query: [String: String], body: Data?, contentType: String?, idempotencyKey: String?, requestId: String, generation: Int,
+                         signedHeaders: (@Sendable (String?) async -> [String: String])?) async throws -> HTTPResponse {
         var request = URLRequest(url: url(path, query: query))
         request.httpMethod = method
         request.setValue(requestId, forHTTPHeaderField: "X-Request-Id")
@@ -154,13 +181,18 @@ public actor APIClient {
         if let idempotencyKey { request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key") }
         let sentToken = await tokens.currentToken()
         if let sentToken { request.setValue("Bearer \(sentToken)", forHTTPHeaderField: "Authorization") }
+        if let signedHeaders {
+            for (name, value) in await signedHeaders(sentToken) { request.setValue(value, forHTTPHeaderField: name) }
+        }
         request.httpBody = body
 
         let attempts = RetryPolicy.attempts(method: method)
         var last: HTTPResponse?
         for attempt in 0..<attempts {
+            // The session it was asked for ended while it waited (a retry's backoff): it does not go out, with no token or with the next owner's.
+            guard generation == sessionGeneration else { throw CancellationError() }
             let response: HTTPResponse
-            do { response = try await transport.send(request) }
+            do { response = try await send(request, cancelledWithSession: sentToken != nil && method == "GET") }
             catch let error as LKError { throw error }
             catch {
                 if RetryPolicy.retriesTransport(error) && attempt < attempts - 1 {
@@ -189,13 +221,33 @@ public actor APIClient {
             // previous sign-in must not sign the owner out.
             let failure = APIErrorDecoder.decode(status: response.status, data: response.body)
             if response.status >= 500 { noteUnexpected(method, path, response.status, decodeError: false) }
-            if failure.endsSession, let sentToken, let handler = onUnauthorized,
-               await tokens.currentToken() == sentToken {
-                await handler(sentToken)
+            if failure.endsSession, let sentToken {
+                let current = await tokens.currentToken() == sentToken
+                // Another request's 401 already ended this session: nothing more to sign out, and
+                // nothing to show for a screen that is going away.
+                guard generation == sessionGeneration else { throw CancellationError() }
+                if current {
+                    // The first 401 ends the session at once: the requests still out for it are
+                    // cancelled before the sign-in screen shows, and are not waited for.
+                    endSessionRequests()
+                    if let handler = onUnauthorized { await handler(sentToken) }
+                }
             }
             throw failure
         }
         throw APIErrorDecoder.decode(status: last?.status ?? 0, data: last?.body ?? Data())
+    }
+
+    /// A read with a session's token is kept until it is answered, so the end of that session can
+    /// cancel it.
+    private func send(_ request: URLRequest, cancelledWithSession: Bool) async throws -> HTTPResponse {
+        guard cancelledWithSession else { return try await transport.send(request) }
+        let transport = self.transport
+        let id = UUID()
+        let task = Task { try await transport.send(request) }
+        sessionRequests[id] = task
+        defer { sessionRequests[id] = nil }
+        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
 }
 

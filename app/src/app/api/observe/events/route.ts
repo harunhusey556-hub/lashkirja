@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { writeEvents, type LoggedEvent } from "@/lib/event-log";
+import { isUsageGap } from "@/lib/usage-gap";
 
 /**
  * The app's debugging trail (screens, requests, problem reports), sent in
@@ -50,15 +51,30 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return noStoreJson({ error: "Virheellinen pyyntö" }, { status: 400 });
   const { sessionId, app, events } = parsed.data;
 
-  const rows: LoggedEvent[] = events.map(({ ts, id, ...event }) => ({
-    eventId: id,
-    source: "ios",
-    clientTs: ts,
-    userId: session.userId,
-    sessionId,
-    app: app ? `${app.version ?? "?"}(${app.build ?? "?"}) ios=${app.os ?? "?"}` : undefined,
-    ...event,
-  }));
+  const rows: LoggedEvent[] = [];
+  // The day alone: an exact time (the phone's or the server's) would join a gap to the rows of
+  // the same batch, which carry the user.
+  const day = new Date().toISOString().slice(0, 10);
+  for (const { ts, id, ...event } of events) {
+    if (event.kind === "usage_gap") {
+      // Anonymous on purpose: the bucket, the screen and the phone's random per-event id (a batch
+      // sent again repeats it, so it is counted once), nothing that ties it to a person, device
+      // or request. Anything outside the known buckets is dropped, not logged.
+      if (isUsageGap(event.name, event.screen)) {
+        rows.push({ eventId: id, source: "ios", kind: "usage_gap", ts: day, name: event.name, screen: event.screen });
+      }
+      continue;
+    }
+    rows.push({
+      eventId: id,
+      source: "ios",
+      clientTs: ts,
+      userId: session.userId,
+      sessionId,
+      app: app ? `${app.version ?? "?"}(${app.build ?? "?"}) ios=${app.os ?? "?"}` : undefined,
+      ...event,
+    });
+  }
   for (const event of events) {
     if (event.kind === "report") {
       // Visible in the web log too, so a report is found even without the query tool.
