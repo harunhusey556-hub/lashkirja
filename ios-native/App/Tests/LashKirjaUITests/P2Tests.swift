@@ -122,6 +122,9 @@ final class P2Tests: WalkTestCase {
             sheet.buttons["Peruuta"].tap()
             if app.buttons["Hylkää muutokset"].waitForExistence(timeout: 2) { app.buttons["Hylkää muutokset"].tap() }
             XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Uusi toistuva lasku did not close")
+            // Toistuvat laskut is on Myynti's path now: back to the list the payment part opens from.
+            back("Toistuvat laskut")
+            _ = app.navigationBars["Toistuvat laskut"].waitForNonExistence(timeout: 10)
         } else {
             XCTFail("no Uusi toistuva lasku on Toistuvat laskut")
         }
