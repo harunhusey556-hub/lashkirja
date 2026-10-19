@@ -644,7 +644,7 @@ struct PurchaseInvoiceDetailView: View {
                 ToolbarItem(placement: .topBarTrailing) { actions(invoice) }
             }
         }
-        .safeAreaInset(edge: .bottom) {
+        .bottomBar {
             ZStack {
                 if state.value?.canRecordPayment == true { primaryBar }
             }
@@ -876,9 +876,7 @@ struct PurchaseInvoiceDetailView: View {
         .accessibilityIdentifier("ostolasku-primary")
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        // Canvas from the bar down to the screen's edge: rows scrolling under the bar do not show
-        // through around the button or behind the floating tab bar (X065).
-        .background(Theme.canvas, ignoresSafeAreaEdges: .bottom)
+        .bottomBarBacking()
         .transition(.opacity)
     }
 
