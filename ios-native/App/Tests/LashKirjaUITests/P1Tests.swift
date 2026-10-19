@@ -33,30 +33,38 @@ final class P1Tests: WalkTestCase {
     }
     /// U021: `app.cells.firstMatch` was the Kaikki / Vaatii toimia control's cell, and the step passed
     /// with `reached: true` while the list stayed on screen. Now the first row below the control,
-    /// then the bar of the sheet it opens, which is titled by the row's state.
+    /// then the bar of the sheet it opens, which is titled by the row's state. N2: through Kohdista
+    /// kuitit, which opens Pankki on Vaatii toimia; the hub's own "Vaatii toimia" row was a fourth tap.
     func test05_UnmatchedBankTransaction() {
-        tab("Kirjanpito"); let hub = tap("Pankki"); sleep(3); dump(app, "nav-bankhub")
-        let filtered = tapLabel("label BEGINSWITH %@", "Vaatii toimia"); sleep(3); dump(app, "nav-open-rows")
+        tab("Kirjanpito"); let kohdista = tap("Kohdista kuitit")
         let control = app.segmentedControls.firstMatch
+        let needsAction = control.buttons["Vaatii toimia"]
+        let filtered = kohdista && app.navigationBars["Pankki"].waitForExistence(timeout: 15)
+            && needsAction.waitForExistence(timeout: 10) && needsAction.isSelected
         let row = app.buttons.matching(NSPredicate(format: "label MATCHES %@", Self.openBankRow)).firstMatch
         var sheet: XCUIElement?
         if row.waitForExistence(timeout: 10), control.exists, row.frame.minY >= control.frame.maxY {
             sheet = Self.openBankStates.first { row.label.contains("· \($0), ") }.map { app.navigationBars[$0] }
         }
+        dump(app, "nav-open-rows")
         let opened = sheet != nil && tapLabel("label MATCHES %@", Self.openBankRow)
         let shown = opened && (sheet?.waitForExistence(timeout: 10) ?? false) && (sheet?.buttons["Valmis"].exists ?? false)
-        measure("open unmatched bank transaction", reached: hub && filtered && shown, maxTaps: 4)
+        measure("open unmatched bank transaction", reached: filtered && shown, maxTaps: 3)
     }
     /// The open states BankRow prints after the date, which are also its sheet's title (BankFeed.label).
     static let openBankStates = ["Kuitti puuttuu", "Ehdotus", "Hyväksy myynti"]
     /// A bank row's button: "<title>, <date> · <state>, <amount>".
     static let openBankRow = ".*· (Kuitti puuttuu|Ehdotus|Hyväksy myynti), .*"
+    /// Any bank row's button, whatever its state.
+    static let bankRow = ".*, [0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{4} · .*, .*"
+    /// N2: through Pankki's first row (Saldo yhteensä and the consent), at the top of the rows.
     func test06_BankAccount() {
-        tab("Kirjanpito"); let hub = tap("Pankki"); sleep(2)
-        let opened = tapLabel("label BEGINSWITH %@", "Pankkiyhteys ja tilit")
-        // Its own bar: any label containing "Tili" passed, and the hub has several (U023).
-        let reached = hub && opened && app.navigationBars["Pankkiyhteys ja tilit"].waitForExistence(timeout: 15)
-        measure("open bank account / connection", reached: reached, maxTaps: 3, maxScrolls: 1)
+        tab("Kirjanpito"); let pankki = tap("Pankki"); sleep(2)
+        let opened = pankki && app.navigationBars["Pankki"].waitForExistence(timeout: 15)
+            && tapLabel("label BEGINSWITH %@", "Saldo yhteensä")
+        // Its own bar: any label containing "Tili" passed, and the hub had several (U023).
+        let reached = opened && app.navigationBars["Pankkiyhteys ja tilit"].waitForExistence(timeout: 15)
+        measure("open bank account / connection", reached: reached, maxTaps: 3, maxScrolls: 0)
     }
     func test07_VatStatus() {
         tab("Kirjanpito"); let opened = tap("ALV-ilmoitus")
@@ -148,6 +156,37 @@ final class P1Tests: WalkTestCase {
         back("Lasku 2")
         guard onTop("Myynti", "P1 12") else { return }
         measure("an invoice's customer stays on the path", reached: true)
+    }
+
+    /// N2 (O2, U078): the bank rows are two taps from the Kirjanpito tab. Pankki opens them on
+    /// Kaikki; the hub that stood between them needed a third ("Näytä kaikki").
+    func test12_BankRowsWithinTwoTaps() {
+        tab("Kirjanpito"); let opened = tap("Pankki")
+        let bar = opened && app.navigationBars["Pankki"].waitForExistence(timeout: 15)
+        let control = app.segmentedControls.firstMatch
+        let all = control.buttons["Kaikki"]
+        let onAll = bar && all.waitForExistence(timeout: 10) && all.isSelected
+        let row = app.buttons.matching(NSPredicate(format: "label MATCHES %@", Self.bankRow)).firstMatch
+        let rows = onAll && row.waitForExistence(timeout: 15) && row.frame.minY >= control.frame.maxY
+        if !rows { dump(app, "p1-12-bank-rows") }
+        check("P1 12 Pankki bar \(bar), Kaikki selected \(onAll), a bank row below the control \(rows)", rows)
+        measure("bank rows from Kirjanpito", reached: rows, maxTaps: 2, maxScrolls: 0)
+    }
+
+    /// N2: Koti's Rahatilanne heading (its hint "Avaa pankin") opens Pankki's rows in one tap. The
+    /// heading is found by its label, the title and the balance sentence: a hint is no query key.
+    func test13_BankFromKoti() {
+        let heading = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rahatilanne")).firstMatch
+        let shown = heading.waitForExistence(timeout: 20) && reveal(heading)
+        if shown { heading.tap(); taps += 1 }
+        let bar = app.navigationBars["Pankki"]
+        // The rows' bar (Toiminnot) and control, not only a screen named Pankki: the hub was one too.
+        let opened = shown && bar.waitForExistence(timeout: 15) && bar.buttons["Toiminnot"].waitForExistence(timeout: 10)
+        let all = app.segmentedControls.firstMatch.buttons["Kaikki"]
+        let onAll = opened && all.waitForExistence(timeout: 10) && all.isSelected
+        if !onAll { dump(app, "p1-13-bank-from-koti") }
+        check("P1 13 heading shown \(shown), Pankki with Toiminnot \(opened), Kaikki selected \(onAll)", onAll)
+        measure("bank from Koti", reached: onAll, maxTaps: 1)
     }
 
     /// The screen on top is `title`; recorded under `step` and asserted, and a miss keeps the tree.

@@ -127,3 +127,55 @@ private func list(_ statements: [(month: String?, account: String?, rows: [Strin
     #expect(BankHub.recent(statements, filter: .transfers).map(\.id) == ["own", "salary"])
     #expect(BankHub.Filter.allCases.map(\.title) == ["Kaikki", "Menot", "Tulot", "Siirrot ja palkat"])
 }
+
+/// N2: Pankki's month header reads its "Tulot · Menot" line from `BankFeed.monthLines`, worked out
+/// once when the rows change instead of on every update; it must say what `BankHub.totals` and
+/// `BankFeed.monthComplete` say for that month, on a last page and on a page with more to come.
+@Test func bankFeedMonthLinesAreEachMonthsTotalsAndCompleteness() throws {
+    let statements = try list([
+        ("2026-10", nil, [row("a", "2026-10-01", 100, type: "tulo"), row("b", "2026-10-02", -40.5), row("c", "2026-10-02", -1000, type: "palkka")]),
+        ("2026-09", nil, [row("d", "2026-09-30", -7)]),
+        // Undated statement: a dated row falls to its own month, an undated one to "".
+        (nil, nil, [row("e", "2026-10-03", -2.5), row("f", nil, 9, type: "tulo")]),
+    ])
+    let months = BankFeed.months(statements)
+    #expect(Set(months.map(\.month)) == ["2026-10", "2026-09", ""])
+    for hasMore in [false, true] {
+        let lines = BankFeed.monthLines(statements, months: months, hasMore: hasMore)
+        #expect(Set(lines.keys) == Set(months.map(\.month)))
+        for group in months {
+            #expect(lines[group.month]?.totals == BankHub.totals(statements, month: group.month))
+            #expect(lines[group.month]?.complete == BankFeed.monthComplete(group.month, in: months, hasMore: hasMore))
+        }
+    }
+    let paged = BankFeed.monthLines(statements, months: months, hasMore: true)
+    #expect(paged["2026-10"]?.totals.income == 100)
+    #expect(paged["2026-10"]?.totals.expenses == 43)
+    #expect(paged["2026-10"]?.complete == true)
+    #expect(paged["2026-09"]?.complete == false)
+    #expect(paged[""]?.totals.income == 9)
+    #expect(BankFeed.monthLines([], months: [], hasMore: false).isEmpty)
+}
+
+/// N2: Saldo yhteensä adds up `BankHub.balanceLines`, which does not walk the rows: the same ids
+/// and balances, in the same order, as `accountLines`, so the total is unchanged.
+@Test func bankHubBalanceLinesAreTheAccountLinesWithoutTheRows() throws {
+    let position = try decode(BankHubPosition.self, #"""
+    {"accounts":[
+      {"id":"a1","name":"Käyttötili","bankName":"Nordea","currentBalance":1200.5,"archivedAt":null},
+      {"id":"a2","name":"Vanha","currentBalance":3,"archivedAt":"2026-01-01T00:00:00.000Z"}],
+     "totalBalance":1200.5,"needsAttention":0,
+     "connected":{"accountCount":1,"accounts":[{"id":"c1","connectionId":"x","iban":"FI2112345600000785","label":null,"aspspName":"OP","currency":"EUR","balance":99.9,"balanceAt":"2026-10-02T05:05:00.000Z"}]},
+     "combined":{"state":"connected","accountCount":2,"totalBalance":1300.4,"excludedCurrencies":[],"reconnectBank":null}}
+    """#)
+    let statements = try list([("2026-09", "a1", [row("t1", "2026-09-28", -1)])])
+    let lines = BankHub.accountLines(position, statements: statements)
+    let balances = BankHub.balanceLines(position)
+    #expect(balances.map { $0.id } == ["a1", "connected-c1"])
+    #expect(balances.map { $0.id } == lines.map { $0.id })
+    #expect(balances.map { $0.balance } == lines.map { $0.balance })
+    var fresh = FreshBalances()
+    fresh.take(["connected-c1": 100])
+    #expect(fresh.total(BankHub.total(position), lines: balances)
+        == fresh.total(BankHub.total(position), lines: lines.map { (id: $0.id, balance: $0.balance) }))
+}

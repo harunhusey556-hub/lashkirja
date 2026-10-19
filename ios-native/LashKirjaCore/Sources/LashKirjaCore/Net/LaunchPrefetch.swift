@@ -70,8 +70,8 @@ public enum LaunchPrefetch {
             PrefetchRequest(path: "/api/reports/profit-loss", query: ["from": "\(month.prefix(4))-01", "to": "\(month.prefix(4))-12"], persist: false),
             PrefetchRequest(path: "/api/bank-accounts"),
             PrefetchRequest(path: "/api/statements/counts"),
-            // The hub's rows: the largest answer, so it goes last and is written to disk only
-            // while it stays under `ResourceDiskStore.maxEntryBytes`.
+            // Tiliotteet's files with their rows: the largest answer, so it goes last and is
+            // written to disk only while it stays under `ResourceDiskStore.maxEntryBytes`.
             PrefetchRequest(path: "/api/statements"),
         ]
     }
