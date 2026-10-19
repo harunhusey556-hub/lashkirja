@@ -409,6 +409,8 @@ struct StatementRowEditSheet: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle("Muokkaa tapahtumaa")
             .navigationBarTitleDisplayMode(.inline)

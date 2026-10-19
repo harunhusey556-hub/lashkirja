@@ -862,6 +862,8 @@ struct BankRowSheet: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .appDestinations()
             .navigationTitle(BankFeed.label(BankFeed.state(of: row), income: row.amount > 0))
             .navigationBarTitleDisplayMode(.inline)
@@ -1120,6 +1122,8 @@ private struct ConfirmAllPreviewSheet: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .navigationTitle("Hyväksy ehdotukset")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

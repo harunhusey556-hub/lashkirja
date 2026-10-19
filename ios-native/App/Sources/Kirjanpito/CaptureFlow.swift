@@ -774,6 +774,8 @@ struct ReceiptEditor: View {
                 .listRowBackground(Color.clear)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         // Field errors, the duplicate question, a currency or VAT row coming or going: the rows
         // below ease to their new place.
         .motion(.snappy, value: errors)

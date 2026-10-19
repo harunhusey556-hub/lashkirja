@@ -446,6 +446,8 @@ struct BankAccountFormSheet: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle(account == nil ? "Uusi pankkitili" : "Muokkaa tiliä")
             .navigationBarTitleDisplayMode(.inline)
@@ -591,6 +593,8 @@ struct BankAccountDetailSheet: View {
                     Text("Napauta kuukautta ja kirjaa pankin ilmoittama loppusaldo.")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle(account.name)
             .navigationBarTitleDisplayMode(.inline)
@@ -792,6 +796,8 @@ struct BankPickerSheet: View {
                     ScreenStateView(state: banks, retry: load) { (_: [Aspsp]) in EmptyView() }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .searchable(text: $search, prompt: "Hae pankkia")
             .navigationTitle("Yhdistä pankki")
             .navigationBarTitleDisplayMode(.inline)

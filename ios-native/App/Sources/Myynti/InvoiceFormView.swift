@@ -111,6 +111,8 @@ struct InvoiceFormView: View {
                     linesSection
                     detailsSection
                 }
+                .scrollContentBackground(.hidden)
+                .background(Theme.canvas)
                 .onChange(of: scrollTarget) { _, target in
                     guard let target else { return }
                     withMotion { proxy.scrollTo(rowId(target), anchor: .center) }

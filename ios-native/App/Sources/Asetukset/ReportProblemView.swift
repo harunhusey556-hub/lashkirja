@@ -45,6 +45,8 @@ struct ReportProblemView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         .navigationTitle("Ilmoita ongelmasta")
         .navigationBarTitleDisplayMode(.inline)
     }

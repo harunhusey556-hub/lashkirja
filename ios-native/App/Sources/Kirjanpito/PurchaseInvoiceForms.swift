@@ -238,6 +238,8 @@ struct PurchasePaymentSheet: View {
                     Section { Text(failure).foregroundStyle(Theme.danger) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle("Kirjaa maksu")
             .navigationBarTitleDisplayMode(.inline)
@@ -314,6 +316,8 @@ struct PurchaseMarkPaidSheet: View {
                     Section { Text(failure).foregroundStyle(Theme.danger) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle("Merkitse maksetuksi")
             .navigationBarTitleDisplayMode(.inline)
