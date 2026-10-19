@@ -8,12 +8,15 @@ Per step (docs/quality/SIMULATOR.md §4):
                 start nor the end screen: the owner sees a screen that should not be there. "Neither"
                 is a signature distance over DISTINCT, or more than INTER_AREA of the signature's
                 cells off by CELL_DIFF against both, or a loading page: a LOADING_BAND-tall band
-                flatter than LOADING_STD where the start and end screens both show content.
+                flatter than LOADING_STD where the start and end screens both show content. A hold
+                the probe saw moving all through is the recorder stalling, not a screen.
   flash         a frame whose mean luminance jumps past FLASH_LUMA against both neighbours, or a
                 blank frame (nearly uniform).
-  shift-video   after the step's motion went quiet (QUIET_S without a new frame), the screen
-                changes again over more than SHIFT_AREA of its area: content popping in late, a
-                list jumping, a scroll position reset.
+  shift-video   after the step's motion went quiet (QUIET_S without a new frame, and no move of the
+                step in the probe meanwhile), the screen changes again over more than SHIFT_AREA of
+                its area: content popping in late, a list jumping, a scroll position reset. Not a
+                shift: a cross-fade (late frames that mix the screen before into the one after
+                within BLEND_S), and in a "load" step the answer arriving under unchanged content.
   shift-probe   the app's own MotionProbe saw layers move more than PROBE_MIN_PT after the step's
                 layout settled (its QUIET line: 0.4 s of ticks with nothing moving; after its
                 'MARK presented' line, that QUIET or PRESENTED_S, whichever comes first). Moves made
@@ -24,7 +27,8 @@ Per step (docs/quality/SIMULATOR.md §4):
   settle_ms     from the tap to the last frame that moved.
 A check that saw nothing is never PASS: NO-MOTION (no video, fewer than MIN_FRAMES frames, or no
 frame moved on a step that must move), UNREACHED (the step missed its target), SKIPPED (the walk
-never ran it) and 'n/a (no settle)' (nothing settled inside the window).
+never ran it) and 'n/a (no settle)' (nothing settled inside the window); the time-based checks
+(intermediate, shift-video) read 'n/a (bad timestamps)' when the frame times go backwards.
 The simulator writes a frame only when the screen changes, so frames are read at their own
 timestamps (variable rate), not resampled: a 30 fps resample would make every frame look settled.
 """
@@ -52,6 +56,8 @@ REFRESH = re.compile(r"refresh|online-again")
 GESTURE = re.compile(r"swipe|chat-close|zip-close|^kirjanpito-.*-back$|^pankki-feed-back$")
 QUIET_S = 0.6           # no new frame for this long: the step's motion is over
 SHIFT_AREA = 0.015      # share of the screen that must change after settling to call it a shift
+SHIFT_SEARCH = 400      # vertical moves searched (pt): a refresh rebound lands ~215 pt in one frame (M014)
+BLEND_S = 0.5           # a cross-fade's frames all fall within this long (CaptureFlow's is 0.4 s)
 PROBE_MIN_PT = 3        # probe moves smaller than this are rounding
 # A shift that lands within 0.4 s of a sheet's slide runs into it, and the probe's QUIET after
 # both hides it (M097). In run 39081865005, before the probe read presentation layers, the slide
@@ -61,9 +67,11 @@ MIN_FRAMES = 3          # fewer frames than this: the step's motion was not film
 MOTION_KINDS = ("nav", "sheet", "swap", "scroll")  # steps where no moving frame means not filmed
 CALIBRATION = """Thresholds were set on test00_Calibration: good = tab switch to Kirjanpito, push to
 Kuukauden sulku and its swipe-back; bad = the w32 brief's item 7 (capture upload, the screen moves
-when the reading finishes). Item 9 ("Näytä tarkistettavat", bad-show-review) is not a calibration
-point: its cover now goes down once onto Kuitit, and in run 39081865005 it shows no defect (PASS in
-both PR walks, no baseline step). See the calibration table below for what each check said about
+when the reading finishes). Item 7 is fixed (row 7): the queue now cross-fades into the form in
+0.4 s, one transition by the BLEND_S rule, so bad-capture-upload's shift-video PASSes and the step
+is no calibration point any more. Nor is item 9 ("Näytä tarkistettavat", bad-show-review): its
+cover now goes down once onto Kuitit, and in run 39081865005 it shows no defect (PASS in both PR
+walks, no baseline step). See the calibration table below for what each check said about
 them. INTER_AREA was set the way DISTINCT was, on test00 alone (the contact sheets of run
 39081865005): just under the smallest bad screen's share (0.118, the system prompt over the
 Asetukset sheet in bad-link-over-sheet); no good step holds a screen with a changed cell against
@@ -74,12 +82,23 @@ def ffmpeg():
     return os.environ.get("FFMPEG", "ffmpeg")
 
 
+def monotonic(times):
+    return all(b >= a for a, b in zip(times, times[1:]))
+
+
 def frames(video):
-    """All frames as they were captured: (times_s, gray uint8 [n, h, W], luma, std)."""
-    probe = subprocess.run([ffmpeg(), "-v", "info", "-i", video, "-fps_mode", "passthrough",
-                            "-vf", f"scale={W}:-2,format=gray,showinfo", "-f", "rawvideo", "-"],
-                           capture_output=True)
-    times = [float(m) for m in re.findall(rb"pts_time:\s*([0-9.]+)", probe.stderr)]
+    """All frames as they were captured: (times_s, gray uint8 [n, h, W]). The times are the frames'
+    own pts. ffmpeg stamps a decoded frame with its best_effort_timestamp, which falls back to the
+    DTS once two pts tie, and the simulator's DTS run up to 1.2 s behind (M042, M067): read with
+    the DTS ignored, and only when those pts go backwards fall back to best effort. Times that
+    still go backwards are left for analyze_video to call bad."""
+    for flags in (["-fflags", "+igndts"], []):
+        probe = subprocess.run([ffmpeg(), "-v", "info", *flags, "-i", video, "-fps_mode", "passthrough",
+                                "-vf", f"scale={W}:-2,format=gray,showinfo", "-f", "rawvideo", "-"],
+                               capture_output=True)
+        times = [float(m) for m in re.findall(rb"pts_time:\s*([0-9.]+)", probe.stderr)]
+        if monotonic(times):
+            break
     size = re.search(rb"Stream #0:0.*?, (\d+)x(\d+)", probe.stderr)
     raw = np.frombuffer(probe.stdout, dtype=np.uint8)
     if not times or raw.size == 0:
@@ -112,7 +131,7 @@ def vertical_shift(a, b):
     """Best vertical displacement (pt) of b against a over the changed rows, or 0."""
     rows_a, rows_b = a.mean(axis=1), b.mean(axis=1)
     best, best_err = 0, np.abs(rows_a - rows_b).mean()
-    for dy in range(-80, 81):
+    for dy in range(-SHIFT_SEARCH, SHIFT_SEARCH + 1):
         if dy == 0:
             continue
         x = rows_a[max(0, -dy): len(rows_a) - max(0, dy)]
@@ -123,7 +142,44 @@ def vertical_shift(a, b):
     return best
 
 
-def analyze_video(video, tap_s, hold_s=HOLD_S, quiet_s=QUIET_S):
+def probe_moved(probe, a, b, still_s):
+    """The probe saw the screen move all through (a, b): two or more of its MOVEs inside, none of
+    the stretches between them or to either end as long as still_s. One move is only the change
+    that starts or ends a hold, which the video shows 0.2-0.4 s after the probe."""
+    ts = [t for t, kind in probe if kind == "MOVE" and a < t < b]
+    edges = [a, *ts, b]
+    return len(ts) >= 2 and max(y - x for x, y in zip(edges, edges[1:])) < still_s
+
+
+def cross_fade(before, run):
+    """run (frames, oldest first) fades before into its last frame: each earlier frame is a mix of
+    the two plus a constant, the old screen fading out over the canvas as the new one fades in, with
+    more of the new and less of the old than the frame before, but for under SHIFT_AREA of its pixels."""
+    if len(run) < 2:
+        return False
+    basis = np.stack([run[-1].ravel(), before.ravel(), np.ones(before.size, np.float32)]).astype(np.float64)
+    gram = basis @ basis.T
+    if abs(np.linalg.det(gram)) < 1e-6 * np.prod(np.diag(gram)):  # the same screen twice, or a blank one
+        return False
+    new, old = 0.0, 1.0
+    for f in run[:-1]:
+        mix = np.linalg.solve(gram, basis @ f.ravel())
+        if not (new < mix[0] < 1 and mix[1] < old) or (np.abs(mix @ basis - f.ravel()) > 24).mean() > SHIFT_AREA:
+            return False
+        new, old = mix[0], mix[1]
+    return True
+
+
+def appended(before, after):
+    """after changes before only under rows that are unchanged and show content: an answer
+    arriving below its question, nothing above it touched. analyze_video also wants the change to
+    last into the end screen, so content that comes and goes again is still a pop."""
+    rows = np.nonzero((np.abs(after - before) > 24).mean(axis=1) > SHIFT_AREA)[0]
+    return len(rows) > 0 and rows[0] > 0 and before[:rows[0]].std() >= LOADING_STD
+
+
+def analyze_video(video, tap_s, hold_s=HOLD_S, quiet_s=QUIET_S, probe=()):
+    """probe: the step's own motion as MotionProbe logged it, (video time, 'MOVE' or 'MARK')."""
     times, data = frames(video)
     if not times:
         return {"error": "no frames"}
@@ -136,12 +192,14 @@ def analyze_video(video, tap_s, hold_s=HOLD_S, quiet_s=QUIET_S):
     sigs = [sig(data[i, top:, :]) for i in range(n)]
     tap_i = next((i for i, t in enumerate(times) if t >= tap_s), n - 1)
     moving = [i for i in range(1, n) if diff[i] > STATIC_DIFF and times[i] >= tap_s - 0.05]
-    # The step's own motion: from the first change after the tap until a pause of QUIET_S.
+    # The step's own motion: from the first change after the tap until a pause of QUIET_S. A pause
+    # the probe saw the step move in, or a sheet start its slide in, is the recorder (or the main
+    # thread before a presentation) holding the picture, not the motion ending (M013, M014, M042).
     settle_i = None
     if moving:
         last = moving[0]
         for i in moving[1:]:
-            if times[i] - times[last] > quiet_s:
+            if times[i] - times[last] > quiet_s and not any(times[last] < t < times[i] for t, _ in probe):
                 break
             last = i
         settle_i = last
@@ -166,7 +224,11 @@ def analyze_video(video, tap_s, hold_s=HOLD_S, quiet_s=QUIET_S):
             d_end = float(np.abs(sigs[run] - end_sig).mean())
             a_start = float((np.abs(sigs[run] - start_sig) > CELL_DIFF).mean())
             a_end = float((np.abs(sigs[run] - end_sig) > CELL_DIFF).mean())
-            if held >= hold_s and i < n:
+            # Time the recorder wrote nothing while the probe saw the screen move is the recorder
+            # stalling, not the screen holding (M093: one frame twice, then 0.37 s mid-fling).
+            stalled = sum(times[j + 1] - times[j] for j in range(run, min(i, n - 1))
+                          if probe_moved(probe, times[j], times[j + 1], hold_s))
+            if held - stalled >= hold_s and i < n:
                 loading = loading_page(body[run], body[start_i], body[-1])
                 if (d_start > DISTINCT and d_end > DISTINCT) or (a_start > INTER_AREA and a_end > INTER_AREA) or loading:
                     inter.append({"frame": run, "t": round(times[run] - tap_s, 2), "held_s": round(held, 2),
@@ -183,14 +245,28 @@ def analyze_video(video, tap_s, hold_s=HOLD_S, quiet_s=QUIET_S):
             flags.add(i)
     if std[-1] < BLANK_STD or std[0] < BLANK_STD:
         flash.append((n - 1 if std[-1] < BLANK_STD else 0, "blank"))
-    # Late change after settling, big enough to see.
+    # Late change after settling, big enough to see. Late frames that blend into the last of them
+    # within BLEND_S, with nothing changing for BLEND_S after it, are one cross-fade: the calm
+    # change the owner rules allow. Split over 2-4 frames at ~4 fps, each used to read as a pop (M002).
     shifts = []
-    for i in late:
-        changed = (np.abs(body[i] - body[i - 1]) > 24).mean()
+    fade = set()
+    for k, i in enumerate(late):
+        if i in fade:
+            continue
+        burst = [j for j in late[k:] if times[j] - times[i] <= BLEND_S]
+        rest = late[k + len(burst):]
+        if (not rest or times[rest[0]] - times[burst[-1]] > BLEND_S) \
+                and cross_fade(body[i - 1], [body[j] for j in burst]):
+            fade.update(burst)
+            continue
+        mask = np.abs(body[i] - body[i - 1]) > 24
+        changed = mask.mean()
         if changed > SHIFT_AREA:
             dy = vertical_shift(body[i - 1], body[i])
+            stays = (mask & (np.abs(body[i] - body[-1]) > 24)).mean() <= SHIFT_AREA
+            what = "move" if abs(dy) > 2 else "append" if stays and appended(body[i - 1], body[i]) else "pop"
             shifts.append({"t": round(times[i] - tap_s, 2), "area": round(float(changed), 3),
-                           "dy_pt": int(dy), "what": "move" if abs(dy) > 2 else "pop"})
+                           "dy_pt": int(dy), "what": what})
             flags.add(i)
     # Jank estimate against 60 fps while moving (reported only).
     jank = None
@@ -201,17 +277,22 @@ def analyze_video(video, tap_s, hold_s=HOLD_S, quiet_s=QUIET_S):
     settle_ms = int((times[settle_i] - tap_s) * 1000) if settle_i is not None else None
     return {"frames": n, "times": times, "tap_i": tap_i, "settle_i": settle_i, "intermediate": inter,
             "flash": flash, "shift": shifts, "jank_dropped": jank, "settle_ms": settle_ms,
-            "flags": sorted(flags), "data": data}
+            "bad_times": not monotonic(times), "flags": sorted(flags), "data": data}
+
+
+def sheet_frames(res):
+    """The frames a contact sheet shows: every flagged frame, the first, the tap, the settle and the
+    last, then evenly spread ones up to 32. A cut at 40 used to drop the tail of 41-57-frame videos,
+    settle and last frame included (M021)."""
+    n = len(res["times"])
+    keep = set(res["flags"]) | ({res["settle_i"]} if res["settle_i"] is not None else set()) | {0, n - 1, res["tap_i"]}
+    spare = max(0, 32 - len(keep))
+    return sorted(keep | ({int(i) for i in np.linspace(0, n - 1, spare).round()} if spare else set()))
 
 
 def contact_sheet(path, res, tap_s):
     data, times = res["data"], res["times"]
-    n = len(times)
-    step = max(1, n // 24)
-    keep = set(res["flags"]) | ({res["settle_i"]} if res["settle_i"] is not None else set()) | {0, n - 1, res["tap_i"]}
-    spare = max(0, 32 - len(keep))
-    keep |= set(range(0, n, max(1, n // max(1, spare)))) if spare else set()
-    idx = sorted(keep)[:40]
+    idx = sheet_frames(res)
     tw, th = 134, int(134 * data.shape[1] / data.shape[2])
     cols = 10
     rows = (len(idx) + cols - 1) // cols
@@ -289,7 +370,7 @@ def probe_shift(events, start, end):
 
 
 KS = ("intermediate", "flash", "shift_video", "shift_probe")
-MISSES = ("NO-MOTION", "UNREACHED", "SKIPPED", "n/a (no settle)")
+MISSES = ("NO-MOTION", "UNREACHED", "SKIPPED", "n/a (no settle)", "n/a (bad timestamps)")
 
 
 def checks(row, probe_seen, late):
@@ -302,17 +383,20 @@ def checks(row, probe_seen, late):
         return dict.fromkeys(KS, "UNREACHED")
     filmed = "error" not in row and row["frames"] >= MIN_FRAMES
 
-    def video(judged, found):
+    def video(judged, found, timed=True):
         if not judged:
             return "n/a"
         if not filmed or (row["settle_ms"] is None and kind in MOTION_KINDS):
             return "NO-MOTION"
+        if timed and row.get("bad_times"):
+            return "n/a (bad timestamps)"
         if row["settle_ms"] is None:
             return "n/a (no settle)"
         return "FAIL" if found else "PASS"
     return {
         "intermediate": video(kind != "load", row.get("intermediate")),
-        "flash": video(True, row.get("flash")),
+        # Frame order alone finds a flash, so wrong frame times leave it judged.
+        "flash": video(True, row.get("flash"), timed=False),
         "shift_video": video(kind != "scroll", row.get("shift")),
         # A scroll step's late moves were never judged, so its old PASS said nothing.
         "shift_probe": "n/a" if not probe_seen or kind == "scroll" else (
@@ -347,25 +431,35 @@ def main():
             row = {"suite": s.get("suite") or suite, "id": s["id"], "from": s["from"], "to": s["to"], "kind": s["kind"],
                    "expect": s["expect"], "reached": s["reached"], "skipped": s["skipped"],
                    "crashed": bool(s.get("crashed"))}
+            end = s.get("recEnd") or (s["doneAt"] + 4)
+            late, probe_settle = probe_shift(events, s["tapAt"], end)
             if s.get("video") and s.get("recStart") and os.path.exists(os.path.join(d, s["video"])):
                 tap_s = s["tapAt"] - s["recStart"]
+                # The step's own motion in the probe, on the video's clock: what moved before the
+                # probe settled, and a sheet's slide starting. Later moves are shifts, not motion.
+                own = [] if probe_settle is None else [
+                    (e["t"] - s["recStart"], e["kind"]) for e in events
+                    if s["tapAt"] <= e["t"] <= s["tapAt"] + probe_settle / 1000
+                    and ((e["kind"] == "MOVE" and e["max"] >= PROBE_MIN_PT) or (e["kind"] == "MARK" and e["screen"] == "presented"))]
                 res = analyze_video(os.path.join(d, s["video"]), tap_s,
-                                    *((GESTURE_HOLD_S, GESTURE_HOLD_S + 0.4) if GESTURE.search(s["id"]) else (HOLD_S, QUIET_S)))
+                                    *((GESTURE_HOLD_S, GESTURE_HOLD_S + 0.4) if GESTURE.search(s["id"]) else (HOLD_S, QUIET_S)),
+                                    probe=own)
                 if "error" not in res:
                     sheet = f"{suite}/sheet-{s['id']}.png"  # the run's directory
                     contact_sheet(os.path.join(out, sheet), res, tap_s)
-                    row.update({k: res[k] for k in ("intermediate", "flash", "shift", "jank_dropped", "settle_ms", "frames")})
+                    row.update({k: res[k] for k in ("intermediate", "flash", "shift", "jank_dropped", "settle_ms", "frames", "bad_times")})
                     # Pull-to-refresh: the list sliding back up when the refresh ends is the
                     # system's rebound, not a shift; content popping in still counts.
                     if REFRESH.search(s["id"]):
                         row["shift"] = [x for x in row["shift"] if not (x["what"] == "move" and x["dy_pt"] < 0)]
+                    # A load step's answer arriving under what was already there is its end (M065).
+                    if s["kind"] == "load":
+                        row["shift"] = [x for x in row["shift"] if x["what"] != "append"]
                     row["sheet"] = sheet
                 else:
                     row["error"] = res["error"]
             else:
                 row["error"] = "no video"
-            end = s.get("recEnd") or (s["doneAt"] + 4)
-            late, probe_settle = probe_shift(events, s["tapAt"], end)
             # The same rebound as above, seen by the probe as the offset going back up. Only the
             # jumps that counting them anywhere newly adds: one after the settle was late before H1.
             if REFRESH.search(s["id"]):
