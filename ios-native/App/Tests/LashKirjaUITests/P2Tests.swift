@@ -224,7 +224,13 @@ final class P2Tests: WalkTestCase {
         _ = picker.waitForNonExistence(timeout: 10)
         let description = app.textViews["Rivin 1 kuvaus"].exists ? app.textViews["Rivin 1 kuvaus"] : app.textFields["Rivin 1 kuvaus"]
         type(description, "Ripsienpidennys")
-        type(app.textFields["Rivin 1 à-hinta euroina"], "10")
+        // The keyboard's bar lies over the price field under the description, so a tap on it never
+        // focused it (run 39175542996): the keyboard goes first and the field is brought into view.
+        if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap() }
+        let price = app.textFields["Rivin 1 à-hinta euroina"]
+        if !price.isHittable { app.swipeUp() }
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: price)], timeout: 5)
+        type(price, "10")
         if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap() }
         let create = app.buttons["Luo lasku"].firstMatch
         guard create.waitForExistence(timeout: 5) else { XCTFail("no Luo lasku"); return false }
