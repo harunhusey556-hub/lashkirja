@@ -19,17 +19,46 @@ final class P1Tests: WalkTestCase {
         measure("open overdue invoice (Koti)", reached: opened && exists("label BEGINSWITH %@", "Myöhässä "))
     }
     /// U023: the seed had no pending receipt, so this opened an approved one and passed on any detail.
-    /// The task ends on the pending receipt's Hyväksy, on screen; tapping it would approve the seed's
-    /// receipt for every test after this one.
+    /// N3 (O3, U098): the task is done, not only reached. Hyväksy is the screen's one primary, held at
+    /// the bottom, so it is tapped without a scroll and Tila then reads Hyväksytty; the rest is in
+    /// Toiminnot. Nothing reseeds between tests, so the seed's receipt stays approved for the rest of
+    /// the run; StabilityTests test15 opens the seed's other pending one, Audit Hyvitys Odottaa Oy.
     func test04_ReviewReceipt() {
         tab("Kirjanpito"); let kuitit = tap("Kuitit"); sleep(3); dump(app, "nav-receipts")
         // Rows are buttons labelled "<vendor>, <date · category>, <amount>"; demo-seed.ts --ci has
         // Lumo Kosmetiikka Oy waiting in "Odottaa hyväksyntää".
         let opened = tapLabel("label BEGINSWITH %@", "Lumo Kosmetiikka Oy,")
         // Toiminnot comes with the loaded receipt; the row's preview has neither it nor the actions.
-        let loaded = app.navigationBars["Kuitti"].buttons["Toiminnot"].waitForExistence(timeout: 15)
+        let actions = app.navigationBars["Kuitti"].buttons["Toiminnot"]
+        let loaded = actions.waitForExistence(timeout: 15)
         let approve = app.buttons.matching(NSPredicate(format: "label == %@", "Hyväksy")).firstMatch
-        measure("review receipt", reached: kuitit && opened && loaded && reveal(approve), maxTaps: 4, maxScrolls: 2)
+        let shown = approve.waitForExistence(timeout: 10) && approve.isHittable
+        check("P1 04 Hyväksy is on screen without a scroll", shown)
+        XCTAssertTrue(shown, "Hyväksy is not on screen without a scroll")
+        // A look into Toiminnot, not a step of the task: its taps are not counted.
+        if loaded {
+            actions.firstMatch.tap()
+            for item in ["Hylkää", "Lue uudelleen"] {
+                let inMenu = app.buttons[item].firstMatch.waitForExistence(timeout: 5)
+                check("P1 04 Toiminnot has \(item)", inMenu)
+                XCTAssertTrue(inMenu, "Toiminnot has no \(item)")
+            }
+            shot("p1-04-toiminnot")
+            // Closed by a tap on the bar between Back and the title, clear of the menu, which opens
+            // under the trailing button; the bar does nothing with it.
+            app.navigationBars["Kuitti"].coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
+            XCTAssertTrue(app.buttons["Hylkää"].firstMatch.waitForNonExistence(timeout: 5), "Toiminnot did not close")
+        }
+        var approved = false
+        if shown {
+            approve.tap(); taps += 1
+            let state = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == %@ OR value == %@ OR label == %@", "Hyväksytty", "Hyväksytty", "Tila, Hyväksytty")).firstMatch
+            approved = state.waitForExistence(timeout: 15)
+            if !approved { dump(app, "p1-04-after-hyvaksy") }
+            XCTAssertTrue(approved, "Tila does not read Hyväksytty after Hyväksy")
+        }
+        measure("review receipt", reached: kuitit && opened && loaded && approved, maxTaps: 4, maxScrolls: 0)
     }
     /// U021: `app.cells.firstMatch` was the Kaikki / Vaatii toimia control's cell, and the step passed
     /// with `reached: true` while the list stayed on screen. Now the first row below the control,

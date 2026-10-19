@@ -262,7 +262,7 @@ struct BankFeedView: View {
                 let rows = selectedRows
                 let pairs = BankBulk.pairs(rows).count
                 let ignorable = BankBulk.ignorable(rows).count
-                BulkBar(count: rows.count, busy: bulkBusy, onCancel: { selection.end() }) {
+                BulkBar(count: rows.count, busy: bulkBusy) {
                     if pairs > 0 {
                         BulkBarButton(title: BankBulk.acceptLabel(pairs)) {
                             previewForSelection = true
