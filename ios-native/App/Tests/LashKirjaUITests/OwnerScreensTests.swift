@@ -248,19 +248,24 @@ final class OwnerScreensTests: WalkTestCase {
         let toast = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Tallennettu · ")).firstMatch
         let screen = app.navigationBars["Uusi kuitti"]
         var outcome = ""
+        // The toast lives 5 s (CaptureQueueModel.say): its words and place are read in the same
+        // snapshot that finds it. Read again after the screenshot, it had gone on a loaded host
+        // ("Failed to get matching snapshot", audit row U089, runs 39081858267 and 39156227591).
+        var toastLabel = ""
+        var toastFrame = CGRect.zero
         for _ in 0..<30 {
-            if toast.exists { outcome = "toast"; break }
+            if let seen = try? toast.snapshot() { outcome = "toast"; toastLabel = seen.label; toastFrame = seen.frame; break }
             if !screen.exists { outcome = "closed"; break }
             sleep(1)
         }
         capture("c5-after-save")
         if outcome.isEmpty { tree("c5-after-save") }
-        keep("c-save-outcome", outcome.isEmpty ? "none" : (outcome == "toast" ? toast.label : outcome))
+        keep("c-save-outcome", outcome.isEmpty ? "none" : (outcome == "toast" ? toastLabel : outcome))
         XCTAssertFalse(outcome.isEmpty, "Tallenna kuitti neither saved (screen still up, no toast)")
         if outcome == "toast" {
             let window = app.windows.firstMatch.frame
-            XCTAssertTrue(toast.label.contains("lasku"), "toast: \(toast.label)")
-            XCTAssertGreaterThan(toast.frame.minY, window.height * 0.6, "the toast is at \(toast.frame.minY): not at the bottom")
+            XCTAssertTrue(toastLabel.contains("lasku"), "toast: \(toastLabel)")
+            XCTAssertGreaterThan(toastFrame.minY, window.height * 0.6, "the toast is at \(toastFrame.minY): not at the bottom")
         } else if ProcessInfo.processInfo.environment["LK_READER_STUB"] == "1" {
             // The UI suite's OwnerScreensTests job reads uploads through scripts/sim/reader-stub.py,
             // which calls every file a "lasku": this save had to file an ostolasku and say so.
@@ -342,5 +347,118 @@ final class OwnerScreensTests: WalkTestCase {
         app.buttons["confirm-sheet-cancel"].firstMatch.tap()
         XCTAssertTrue(waitGone(sheet, timeout: 5), "Peruuta did not close the question")
         XCTAssertTrue(app.navigationBars["Asetukset"].exists, "Peruuta left Asetukset: the session ended")
+    }
+
+    // X166: an ostolasku's category was free text and its detail showed the stored code. Typing the
+    // label an owner knows ("Tarvikkeet & ostot") booked the cost to Muut kulut, because the ledger
+    // maps the code alone. The detail must show the label, and the form must pick the code.
+    func testH_PurchaseCategoryPicker() {
+        guard selectTab("Kirjanpito") else { capture("h0-no-tab"); XCTFail("Kirjanpito did not open"); return }
+        let list = app.navigationBars["Ostolaskut"]
+        for _ in 0..<2 where !list.exists {
+            tapLabel("label BEGINSWITH %@", "Ostolaskut")
+            _ = list.waitForExistence(timeout: 10)
+        }
+        guard list.exists else { capture("h0-no-ostolaskut"); tree("h0-no-ostolaskut"); XCTFail("Ostolaskut did not open"); return }
+
+        // The seed's bill (demo-seed.ts) is stored with the code "tarvikkeet".
+        guard tapLabel("label CONTAINS %@", "Ripsitukku Oy") else {
+            capture("h0-no-row"); XCTFail("seed ostolasku Ripsitukku Oy is not listed"); return
+        }
+        guard app.navigationBars["Ripsitukku Oy"].waitForExistence(timeout: 20) else {
+            capture("h1-no-detail"); tree("h1-no-detail"); XCTFail("the Ripsitukku Oy ostolasku did not load"); return
+        }
+        // A LabeledContent row reads as its two texts or as one "Kategoria, …" element, by iOS version.
+        let rowPredicate = "label == %@ OR value == %@ OR label ENDSWITH %@"
+        let label = app.descendants(matching: .any)
+            .matching(NSPredicate(format: rowPredicate, "Tarvikkeet & ostot", "Tarvikkeet & ostot", ", Tarvikkeet & ostot")).firstMatch
+        let code = app.descendants(matching: .any)
+            .matching(NSPredicate(format: rowPredicate, "tarvikkeet", "tarvikkeet", ", tarvikkeet")).firstMatch
+        if !label.waitForExistence(timeout: 10) && !code.exists { app.swipeUp(); _ = label.waitForExistence(timeout: 5) }
+        capture("h1-detail")
+        if !label.exists { tree("h1-detail") }
+        XCTAssertTrue(label.exists, "the detail's Kategoria does not read Tarvikkeet & ostot")
+        XCTAssertFalse(code.exists, "the detail shows the stored code: \(code.exists ? code.label : "")")
+
+        edgeSwipeBack()
+        if !list.waitForExistence(timeout: 5) { app.navigationBars["Ripsitukku Oy"].buttons.firstMatch.tap() }
+        let new = app.buttons["Uusi ostolasku"].firstMatch
+        guard list.waitForExistence(timeout: 5), new.waitForExistence(timeout: 10) else {
+            capture("h2-no-list"); XCTFail("back on Ostolaskut, no Uusi ostolasku"); return
+        }
+        new.tap()
+        let sheet = app.navigationBars["Uusi ostolasku"]
+        guard sheet.waitForExistence(timeout: 10) else { capture("h2-no-form"); XCTFail("Uusi ostolasku did not open"); return }
+
+        // Digits only: autocorrect may change a word, and the read-back below finds the bill by them.
+        let token = String(Int.random(in: 100_000...999_999))
+        // Under the section header "Toimittaja" the field exposes its prompt, "Tukku Oy", not a label
+        // (PurchaseInvoiceForms.swift:36; run 39164754863 found no field labelled Toimittaja).
+        let supplier = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Tukku Oy", "Toimittaja")).firstMatch
+        guard supplier.waitForExistence(timeout: 5) else { capture("h2-no-supplier"); tree("h2-no-supplier"); XCTFail("the form has no Toimittaja field"); return }
+        type(supplier, "Testitukku \(token)")
+        let gross = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label BEGINSWITH %@", "124,00", "Summa")).firstMatch
+        guard gross.waitForExistence(timeout: 5) else { capture("h2-no-gross"); tree("h2-no-gross"); XCTFail("the form has no Summa field"); return }
+        // Whole euros: the decimal key follows the simulator's region, not the app's Finnish.
+        type(gross, "12")
+        let keyboardDone = app.buttons["Valmis"].firstMatch
+        if keyboardDone.exists { keyboardDone.tap() }
+
+        // A menu picker is a button (a pop-up button on some iOS versions); the old row was a text field.
+        let pickerTypes = [XCUIElement.ElementType.button.rawValue, XCUIElement.ElementType.popUpButton.rawValue]
+        let category = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "elementType IN %@ AND label BEGINSWITH %@", argumentArray: [pickerTypes, "Kategoria"])).firstMatch
+        if !category.waitForExistence(timeout: 5) { app.swipeUp(); _ = category.waitForExistence(timeout: 5) }
+        capture("h2-new-form")
+        guard category.exists else { tree("h2-new-form"); XCTFail("Kategoria in Uusi ostolasku is not a menu picker"); return }
+        if !category.isHittable { app.swipeUp(); _ = category.waitForExistence(timeout: 2) }
+        category.tap()
+        let choice = app.buttons["Tarvikkeet & ostot"].firstMatch
+        guard choice.waitForExistence(timeout: 5) else { capture("h3-no-menu"); tree("h3-no-menu"); XCTFail("the Kategoria menu has no Tarvikkeet & ostot"); return }
+        choice.tap()
+        func shown() -> String { "\(category.label) \((category.value as? String) ?? "")" }
+        for _ in 0..<10 where !shown().contains("Tarvikkeet & ostot") { usleep(500_000) }
+        capture("h3-category-picked")
+        XCTAssertTrue(shown().contains("Tarvikkeet & ostot"), "the picker does not show the choice: \(shown())")
+
+        let add = sheet.buttons["Lisää"]
+        guard add.exists else { tree("h3-no-add"); XCTFail("the form has no Lisää"); return }
+        add.tap()
+        let closed = waitGone(sheet, timeout: 20)
+        capture("h4-after-save")
+        guard closed else { tree("h4-after-save"); XCTFail("Lisää did not save the ostolasku"); return }
+
+        // Read back from the demo API the app uses (the runner shares the Mac's loopback). Test values
+        // from app/scripts/demo-seed.ts; only ever against the throwaway demo API.
+        func call(_ path: String, _ body: [String: String]?, _ bearer: String?) -> [String: Any]? {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:3999\(path)")!)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            if let body {
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "content-type")
+                request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            }
+            if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "authorization") }
+            var result: [String: Any]?
+            let done = DispatchSemaphore(value: 0)
+            URLSession.shared.dataTask(with: request) { data, _, _ in
+                result = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                done.signal()
+            }.resume()
+            _ = done.wait(timeout: .now() + 30)
+            return result
+        }
+        guard let bearer = call("/api/auth/token", ["email": "demo@lashkirja.fi", "password": "demo123"], nil)?["token"] as? String else {
+            XCTFail("the demo API gave no token"); return
+        }
+        var saved: [String: Any]?
+        for _ in 0..<10 where saved == nil {
+            let invoices = call("/api/purchase-invoices", nil, bearer)?["invoices"] as? [[String: Any]] ?? []
+            saved = invoices.first { ($0["supplierName"] as? String)?.contains(token) == true }
+            if saved == nil { sleep(1) }
+        }
+        keep("h-saved", saved.map { "\(($0["supplierName"] as? String) ?? "") · \(($0["category"] as? String) ?? "nil")" } ?? "not found")
+        guard let found = saved else { XCTFail("the demo API lists no ostolasku for Testitukku \(token)"); return }
+        XCTAssertEqual(found["category"] as? String, "tarvikkeet", "the picked category was not stored as its code")
     }
 }
