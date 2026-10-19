@@ -10,14 +10,34 @@ extension XCTestCase {
     /// The file name keeps only [A-Za-z0-9-]: a '/' in a step title made the request a path into a
     /// folder that does not exist, and the shot went missing without a word (U022).
     func shot(_ name: String) {
+        awaitShot(requestShot(name), since: Date())
+    }
+    /// `shot`'s first half, for a caller with work to do while the host takes the picture: the
+    /// request is written at once, so the picture shows the screen of this moment (U094). Returns
+    /// the PNG's path, nil when no request could be written. A PNG left by an earlier request of the
+    /// same name goes first, so the one found later is this request's.
+    func requestShot(_ name: String) -> String? {
         try? FileManager.default.createDirectory(atPath: shotDir, withIntermediateDirectories: true)
         let file = String(name.map { (c: Character) -> Character in c.isASCII && (c.isLetter || c.isNumber) || c == "-" ? c : "-" })
         let png = "\(shotDir)/\(file).png"
+        try? FileManager.default.removeItem(atPath: png)
         guard FileManager.default.createFile(atPath: "\(shotDir)/\(file).req", contents: nil) else {
-            (self as? WalkTestCase)?.note("MISS shot \(file)"); return
+            (self as? WalkTestCase)?.note("MISS shot \(file)"); return nil
         }
-        for _ in 0..<40 where !FileManager.default.fileExists(atPath: png) { usleep(250_000) }
-        if !FileManager.default.fileExists(atPath: png) { (self as? WalkTestCase)?.note("MISS shot \(file)") }
+        return png
+    }
+    /// `shot`'s second half: waits up to 10 s for the host's PNG. Returns the milliseconds from
+    /// `asked` to the PNG's writing, nil when none came.
+    @discardableResult
+    func awaitShot(_ png: String?, since asked: Date) -> Int? {
+        guard let png else { return nil }
+        for _ in 0..<100 where !FileManager.default.fileExists(atPath: png) { usleep(100_000) }
+        guard FileManager.default.fileExists(atPath: png) else {
+            (self as? WalkTestCase)?.note("MISS shot \(((png as NSString).lastPathComponent as NSString).deletingPathExtension)")
+            return nil
+        }
+        let written = (try? FileManager.default.attributesOfItem(atPath: png)[.modificationDate] as? Date) ?? Date()
+        return Int(written.timeIntervalSince(asked) * 1000)
     }
     func dump(_ app: XCUIApplication, _ name: String) {
         try? FileManager.default.createDirectory(atPath: shotDir, withIntermediateDirectories: true)

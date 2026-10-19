@@ -647,7 +647,12 @@ struct ReceiptEditSheet: View {
                     .listRowInsets(EdgeInsets())
                 }
                 Section {
-                    TextField("Myyjä", text: $form.vendor).textContentType(.organizationName)
+                    // A label beside the field, as the capture form: a placeholder vanished once filled (U095).
+                    LabeledContent("Myyjä") {
+                        TextField("", text: $form.vendor)
+                            .textContentType(.organizationName)
+                            .multilineTextAlignment(.trailing)
+                    }
                     fieldError("vendor")
                     DatePicker("Päivä", selection: dateBinding, displayedComponents: .date)
                     fieldError("date")
@@ -675,20 +680,25 @@ struct ReceiptEditSheet: View {
                 } footer: {
                     if fromReread { Text("Tiedot luettiin tiedostosta uudelleen. Tarkista ja tallenna.") }
                 }
+                // No "Kategoria" header: the picker names itself, and the word stood twice (M009).
                 Section {
                     ReceiptCategoryField(category: $form.category, custom: $customCategory)
                     fieldError("category")
-                } header: {
-                    Text("Kategoria")
                 }
                 if form.type == "meno" { foreignPurchaseSection }
                 vatSection
                 Section {
-                    TextField("Viitenumero", text: $form.reference)
+                    LabeledContent("Viitenumero") {
+                        TextField("", text: $form.reference).multilineTextAlignment(.trailing)
+                    }
                     fieldError("reference")
-                    TextField("Laskun numero", text: $form.invoiceNumber)
+                    LabeledContent("Laskun numero") {
+                        TextField("", text: $form.invoiceNumber).multilineTextAlignment(.trailing)
+                    }
                     fieldError("invoiceNumber")
-                    TextField("Selite", text: $form.notes, axis: .vertical)
+                    LabeledContent("Selite") {
+                        TextField("", text: $form.notes, axis: .vertical).multilineTextAlignment(.trailing)
+                    }
                     fieldError("notes")
                 } header: {
                     Text("Lisätiedot")

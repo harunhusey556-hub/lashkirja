@@ -33,14 +33,24 @@ final class OwnerScreensTests: WalkTestCase {
     }
 
     /// A screenshot in the result bundle (kept even when the test passes) and, where a host watcher
-    /// runs (CI, scripts/sim/run-ui.sh), a PNG in the shot directory.
+    /// runs (CI, scripts/sim/run-ui.sh), a PNG in the shot directory. The host's picture is asked for
+    /// first: asked after the in-process one, it came 1.2–4.4 s after the step, and c5's showed the
+    /// toast already gone (audit row U094). How long the host took is noted and kept in `shotLag`.
     func capture(_ name: String) {
+        let asked = Date()
+        let png = requestShot("owner-" + name)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
-        shot("owner-" + name)
+        if let lag = awaitShot(png, since: asked) {
+            shotLag[name] = lag
+            note("shot \(name) lag \(lag)")
+        }
     }
+
+    /// Milliseconds from a step's `capture` to the host's PNG, by step name; none without a watcher.
+    var shotLag: [String: Int] = [:]
 
     func keep(_ name: String, _ text: String) {
         let attachment = XCTAttachment(string: text)
@@ -178,7 +188,9 @@ final class OwnerScreensTests: WalkTestCase {
     }
 
     // (b) the capture form shows the picked file above the fields, (c) "Takaisin" keeps the queue's
-    // row, (e) the ostolasku toast after saving a bill where the server can read one.
+    // row, (e) the ostolasku toast after saving a bill where the server can read one. N4 (owner,
+    // 2026-10-18, O1): the form's save in reach, labels that stay, and after the save a queue with one
+    // action, quiet row words and nothing that moves.
     func testC_CaptureFormPreviewQueueAndSave() throws {
         guard openKuitit() else { capture("c0-no-kuitit"); XCTFail("Kuitit did not open"); return }
         let camera = app.navigationBars["Kuitit"].buttons["Kuvaa kuitti"]
@@ -190,6 +202,22 @@ final class OwnerScreensTests: WalkTestCase {
         // A reading kept from an earlier run opens the screen on the queue, with the button lower down.
         if !fixture.isHittable { app.swipeUp(); sleep(1) }
         fixture.tap()
+        // X051: the row while its file is read, and the primary under it, before any outcome is in.
+        // Only a queue of this one file: a row kept from an earlier run would be measured instead.
+        // The read is quick (w64's c1 shot already showed the form), so each frame is one snapshot: a
+        // row gone to the form leaves nothing measured instead of a failed query. The row is taken
+        // after the primary; with no "Käytä lomakkeessa" yet (a read row is taller by it), it was
+        // still being read when the primary was.
+        let rows = app.cells.containing(queueRow)
+        func isRead(_ element: XCUIElementSnapshot) -> Bool {
+            (element.elementType == .button && element.label == "Käytä lomakkeessa") || element.children.contains { isRead($0) }
+        }
+        var reading: (row: CGRect, primary: CGRect)?
+        if rows.firstMatch.waitForExistence(timeout: 5), queuePrimary.waitForExistence(timeout: 2), rows.count == 1,
+           let primary = try? queuePrimary.snapshot(), let row = try? rows.firstMatch.snapshot(), !isRead(row) {
+            reading = (row.frame, primary.frame)
+        }
+        keep("c-reading-geometry", reading.map { "row \($0.row), primary \($0.primary)" } ?? "not measured: \(rows.count) rows")
         capture("c1-uploading")
 
         // Uploaded, read by the server (an empty reading, or CI's reader stub: a bill with no date),
@@ -206,6 +234,14 @@ final class OwnerScreensTests: WalkTestCase {
         if vendor.exists {
             keep("c-geometry", "preview \(preview.frame), Myyjä \(vendor.frame)")
             XCTAssertLessThan(preview.frame.minY, vendor.frame.minY, "the picture is not above the fields")
+        }
+        // M009: the form's one action is in reach on its first screen, with no scroll.
+        let save = app.buttons["Tallenna kuitti"].firstMatch
+        let window = app.windows.firstMatch.frame
+        XCTAssertTrue(save.waitForExistence(timeout: 5) && save.isHittable, "Tallenna kuitti is not on the form's first screen")
+        if save.exists {
+            keep("c-save-geometry", "Tallenna kuitti \(save.frame), window \(window)")
+            XCTAssertLessThanOrEqual(save.frame.maxY, window.maxY - 20, "Tallenna kuitti ends at \(save.frame.maxY) of \(window.maxY)")
         }
 
         let back = app.buttons["Takaisin"].firstMatch
@@ -224,15 +260,24 @@ final class OwnerScreensTests: WalkTestCase {
         XCTAssertTrue(reopen.exists, "the read row offers no Käytä lomakkeessa after Takaisin")
         XCTAssertTrue(app.navigationBars["Uusi kuitti"].exists, "Takaisin closed the capture screen")
         capture("c3-queue-after-takaisin")
+        // U097: the read row says what it waits for, once; "Valmis" is only the button that closes.
+        let waiting = app.staticTexts.matching(NSPredicate(format: "label == %@", "Odottaa tarkistusta"))
+        keep("c-read-row", "Valmis texts \(app.staticTexts.matching(NSPredicate(format: "label == %@", "Valmis")).count), Odottaa tarkistusta \(waiting.count)")
+        XCTAssertFalse(app.staticTexts["Valmis"].exists, "the read row still says Valmis beside the Valmis button")
+        XCTAssertEqual(waiting.count, 1, "'Odottaa tarkistusta' is said \(waiting.count) times on a queue of one read file")
         guard reopen.exists else { return }
 
         reopen.tap()
         guard vendor.waitForExistence(timeout: 10) else { capture("c4-no-form"); XCTFail("Käytä lomakkeessa did not open the form"); return }
         if isBlank(vendor, "Myyjä") { type(vendor, "Testikauppa Oy") }
-        let total = field("Summa €")
+        // "Summa" beside the field, "0,00" in it while empty; the field is named "Summa euroina".
+        let total = app.textFields.matching(NSPredicate(format: "label BEGINSWITH %@ OR placeholderValue == %@", "Summa", "0,00")).firstMatch
         // Whole euros: the decimal key follows the simulator's region, not the app's Finnish.
-        if total.exists && isBlank(total, "Summa €") { type(total, "12") }
+        if total.exists && isBlank(total, "0,00") { type(total, "12") }
         if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap(); sleep(1) }
+        // U095: the filled rows keep their names (they read "Testikauppa Oy" and "12,40" alone).
+        XCTAssertTrue(onTop("label == %@", "Myyjä"), "the filled vendor row has no Myyjä label")
+        XCTAssertTrue(onTop("label BEGINSWITH %@", "Summa"), "the filled amount row has no Summa label")
         // Category is required and only the cloud AI suggests one: the owner picks it from the menu.
         let category = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kategoria, ")).firstMatch
         if category.waitForExistence(timeout: 5), category.label.hasSuffix("Valitse") {
@@ -242,8 +287,12 @@ final class OwnerScreensTests: WalkTestCase {
             if choice.waitForExistence(timeout: 5) { choice.tap() }
             XCTAssertTrue(category.label.hasSuffix("Tarvikkeet & ostot"), "category not chosen: \(category.label)")
         }
+        // M009: "Kategoria" once, on the picker; a section header over it said it a second time.
+        assertKategoriaOnce("the capture form")
         capture("c4-form-filled")
-        guard tap("Tallenna kuitti") else { XCTFail("no Tallenna kuitti"); return }
+        // Pinned under the form: tapped where it is (`tap` scrolls for anything near the bottom edge).
+        guard save.waitForExistence(timeout: 5) else { XCTFail("no Tallenna kuitti"); return }
+        save.tap()
 
         let toast = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Tallennettu · ")).firstMatch
         let screen = app.navigationBars["Uusi kuitti"]
@@ -262,10 +311,14 @@ final class OwnerScreensTests: WalkTestCase {
         if outcome.isEmpty { tree("c5-after-save") }
         keep("c-save-outcome", outcome.isEmpty ? "none" : (outcome == "toast" ? toastLabel : outcome))
         XCTAssertFalse(outcome.isEmpty, "Tallenna kuitti neither saved (screen still up, no toast)")
+        // U094: the host's picture is asked for at the step, so it shows the toast that was seen.
+        if let lag = shotLag["c5-after-save"] {
+            XCTAssertLessThan(lag, 2000, "the host's c5 picture came \(lag) ms after the step")
+        }
         if outcome == "toast" {
-            let window = app.windows.firstMatch.frame
             XCTAssertTrue(toastLabel.contains("lasku"), "toast: \(toastLabel)")
             XCTAssertGreaterThan(toastFrame.minY, window.height * 0.6, "the toast is at \(toastFrame.minY): not at the bottom")
+            assertMinimalQueue(reading: reading)
         } else if ProcessInfo.processInfo.environment["LK_READER_STUB"] == "1" {
             // The UI suite's OwnerScreensTests job reads uploads through scripts/sim/reader-stub.py,
             // which calls every file a "lasku": this save had to file an ostolasku and say so.
@@ -275,6 +328,140 @@ final class OwnerScreensTests: WalkTestCase {
             // cloud AI reads the document type; without it (or the CI stub) a plain receipt is saved.
             throw XCTSkip("(e) ostolasku toast: this demo API has no reader for a bill (CI runs scripts/sim/reader-stub.py); (b) and (c) passed, the save closed the screen")
         }
+    }
+
+    /// The queue's primary: "Valmis", or "Näytä tarkistettavat (n)" once a saved receipt waits there.
+    var queuePrimary: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Valmis", "Näytä tarkistettavat")).firstMatch
+    }
+
+    /// The fixture's queue row: the row (a button once saved, named by the file first) or its texts.
+    var queueRow: NSPredicate {
+        NSPredicate(format: "identifier == %@ OR label BEGINSWITH %@", "capture-queue-row", "testikuitti.jpg")
+    }
+
+    /// A label on the screen on top: one under a sheet or cover is in the tree too, but cannot be hit.
+    func onTop(_ format: String, _ label: String) -> Bool {
+        app.descendants(matching: .any).matching(NSPredicate(format: format, label)).allElementsBoundByIndex.contains { $0.isHittable }
+    }
+
+    /// M009: "Kategoria" said once on the form on top, by its picker ("Kategoria, Valitse"). The
+    /// picker is brought on screen first; a header over it would come with it.
+    func assertKategoriaOnce(_ form: String, file: StaticString = #filePath, line: UInt = #line) {
+        let picker = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Kategoria, ")).firstMatch
+        if picker.exists && !picker.isHittable { app.swipeUp(); waitStill(picker) }
+        let named = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label ==[c] %@ OR label BEGINSWITH %@", "Kategoria", "Kategoria, "))
+            .allElementsBoundByIndex.filter { $0.isHittable }
+        keep("kategoria", "\(form): \(named.map(\.label))")
+        XCTAssertEqual(named.count, 1, "\(form) says Kategoria \(named.count) times: \(named.map(\.label))", file: file, line: line)
+    }
+
+    /// O1 and X051 after a bill was saved from the form: "Valmis" is the queue's one action, adding
+    /// files is in Toiminnot, the row's kind is quiet text changed from the row's own menu, and
+    /// neither that change nor the save moves the row or the button.
+    func assertMinimalQueue(reading: (row: CGRect, primary: CGRect)?) {
+        // The queue's list, not Kuitit's under the cover.
+        let list = app.collectionViews.containing(queueRow).firstMatch
+        guard list.waitForExistence(timeout: 5) else { tree("c5-no-queue"); XCTFail("the queue is not on the screen after the save"); return }
+        let notActions = ["capture-fixture", "capture-queue-fixture", "capture-queue-row"]
+        let actions = list.buttons.allElementsBoundByIndex
+            .filter { !notActions.contains($0.identifier) && !$0.label.hasPrefix("testikuitti.jpg") }
+            .map(\.label)
+        keep("c-queue-actions", actions.joined(separator: " | "))
+        XCTAssertEqual(actions.count, 1, "the queue shows more than its primary: \(actions)")
+        XCTAssertTrue(actions.first == "Valmis" || actions.first?.hasPrefix("Näytä tarkistettavat") == true, "the queue's action: \(actions)")
+        XCTAssertEqual(list.images.matching(identifier: "arrow.left.arrow.right").count, 0, "the row still shows the ⇄ icon")
+        XCTAssertEqual(list.buttons.matching(NSPredicate(format: "label IN %@", ["Ostolasku", "Kuitti"])).count, 0,
+                       "the row still has its accent kind switch")
+        // X052: a lone row says its own outcome; the owner saved it by hand, nothing was automatic.
+        let automatic = list.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "Hyväksyttiin automaattisesti", "Hyväksytty automaattisesti"))
+        XCTAssertEqual(automatic.count, 0, "a hand-saved lone row is called automatic: \(automatic.allElementsBoundByIndex.map(\.label))")
+
+        let bar = app.navigationBars["Uusi kuitti"]
+        let more = bar.buttons["Toiminnot"]
+        if more.waitForExistence(timeout: 5) {
+            more.tap()
+            let photos = app.buttons["Valitse kuvista"].firstMatch
+            XCTAssertTrue(photos.waitForExistence(timeout: 5), "Toiminnot has no Valitse kuvista")
+            XCTAssertTrue(app.buttons["Valitse tiedosto"].firstMatch.exists, "Toiminnot has no Valitse tiedosto")
+            capture("c6-queue-menu")
+            // Closed without a choice: low on the screen, under the queue's buttons and away from the menu.
+            app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92)).tap()
+            XCTAssertTrue(waitGone(photos, timeout: 5), "Toiminnot did not close")
+        } else {
+            XCTFail("the queue has no Toiminnot")
+        }
+
+        // The saved row is one element, its menu (a button or a pop-up button by iOS version), in its
+        // list cell; the cell is what moves the rows and the button under it.
+        let cell = list.cells.containing(queueRow).firstMatch
+        let row = list.descendants(matching: .any).matching(queueRow).firstMatch
+        guard cell.waitForExistence(timeout: 5), queuePrimary.exists else { tree("c6-no-row"); XCTFail("no saved row or primary on the queue"); return }
+        let saved = (row: cell.frame, primary: queuePrimary.frame)
+        keep("c-saved-geometry", "row \(saved.row), primary \(saved.primary), label \(row.exists ? row.label : "none")")
+        if let reading {
+            XCTAssertEqual(saved.row.height, reading.row.height, accuracy: 1, "the saved row is \(saved.row.height) pt, \(reading.row.height) pt while read")
+            XCTAssertEqual(saved.primary.minY, reading.primary.minY, accuracy: 1, "the save moved the primary from \(reading.primary.minY) to \(saved.primary.minY)")
+        }
+        guard row.exists else { tree("c6-no-row-menu"); XCTFail("the saved row has no menu to change its kind"); return }
+        // The file name is set aside: only the words after it name the kind.
+        func names(_ kind: String) -> Bool { row.label.replacingOccurrences(of: "testikuitti.jpg", with: "").contains(kind) }
+        // The kind is turned around and back from the row's menu, a tap on the row.
+        for (title, kind) in [("Muuta kuitiksi", "Kuitti"), ("Muuta ostolaskuksi", "Ostolasku")] {
+            row.tap()
+            let change = app.buttons[title].firstMatch
+            guard change.waitForExistence(timeout: 5) else {
+                capture("c7-no-\(kind)"); tree("c7-no-\(kind)"); XCTFail("a tap on the saved row offers no \(title)"); return
+            }
+            change.tap()
+            let deadline = Date().addingTimeInterval(20)
+            while Date() < deadline && !names(kind) { usleep(250_000) }
+            waitStill(cell)
+            let now = (row: cell.frame, primary: queuePrimary.frame)
+            keep("c-\(kind)-geometry", "row \(now.row), primary \(now.primary), label \(row.label)")
+            XCTAssertTrue(names(kind), "after \(title) the row reads \(row.label)")
+            XCTAssertEqual(now.row.height, saved.row.height, accuracy: 1, "\(title) made the row \(now.row.height) pt, \(saved.row.height) before")
+            XCTAssertEqual(now.primary.minY, saved.primary.minY, accuracy: 1, "\(title) moved the primary from \(saved.primary.minY) to \(now.primary.minY)")
+        }
+        capture("c7-kind-back")
+    }
+
+    // U095 and M009 on Kuitti > Muokkaa, as testC checks the capture form: the fields keep their
+    // names, "Kategoria" is said once, and Lisätiedot's fields are named.
+    func testC1_ReceiptEditLabels() {
+        guard openKuitit() else { capture("g0-no-kuitit"); XCTFail("Kuitit did not open"); return }
+        guard tapLabel("label CONTAINS %@", "ABC Prisma Kotka") else {
+            capture("g0-no-row"); XCTFail("seed receipt ABC Prisma Kotka is not listed"); return
+        }
+        let actions = app.buttons["Toiminnot"].firstMatch
+        guard actions.waitForExistence(timeout: 20) else { capture("g0-no-detail"); XCTFail("the receipt did not load"); return }
+        actions.tap()
+        let edit = app.buttons["Muokkaa"].firstMatch
+        guard edit.waitForExistence(timeout: 5) else { capture("g1-menu"); XCTFail("Toiminnot has no Muokkaa"); return }
+        edit.tap()
+        let sheet = app.navigationBars["Muokkaa kuittia"]
+        guard sheet.waitForExistence(timeout: 10) else { capture("g1-no-sheet"); tree("g1-no-sheet"); XCTFail("Muokkaa did not open Muokkaa kuittia"); return }
+        waitStill(sheet)
+        capture("g1-edit-sheet")
+        XCTAssertTrue(onTop("label == %@", "Myyjä"), "the vendor row has no Myyjä label")
+        XCTAssertFalse(isBlank(field("Myyjä"), "Myyjä"), "the seed receipt's vendor is not in the form")
+        XCTAssertTrue(onTop("label BEGINSWITH %@", "Summa"), "the amount row has no Summa label")
+        assertKategoriaOnce("Muokkaa kuittia")
+        // Lisätiedot is under the VAT rows. Waited for on top: the receipt under the sheet can have a
+        // "Selite" of its own, which is in the tree from the start.
+        for _ in 0..<3 where !onTop("label == %@", "Selite") {
+            app.swipeUp()
+            let deadline = Date().addingTimeInterval(2)
+            while Date() < deadline && !onTop("label == %@", "Selite") { usleep(250_000) }
+        }
+        capture("g2-edit-sheet-lisatiedot")
+        for label in ["Viitenumero", "Laskun numero", "Selite"] {
+            XCTAssertTrue(onTop("label == %@", label), "Lisätiedot: \(label) has no label")
+        }
+        sheet.buttons["Peruuta"].tap()
+        XCTAssertTrue(waitGone(sheet, timeout: 5), "Peruuta did not close Muokkaa kuittia")
     }
 
     // M073: with no mailbox connected, Kirjanpito > Sähköposti's headline ended mid-word in an
