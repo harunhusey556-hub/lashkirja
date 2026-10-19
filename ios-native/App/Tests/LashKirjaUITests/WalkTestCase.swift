@@ -196,6 +196,33 @@ class WalkTestCase: XCTestCase {
         note("MISS could not find \(arg)"); return false
     }
     func tap(_ label: String) -> Bool { tapLabel("label == %@", label) }
+    /// The overdue invoice from Koti's "Tarvitaan sinulta". Koti shows five tasks; with more waiting
+    /// (the CI seed puts documents and matches before it) the overdue row is behind "Näytä enemmän",
+    /// which is then tapped first, as the owner would.
+    func openOverdueFromKoti() -> Bool {
+        if tapLabel("label CONTAINS %@", "· myöhässä") { return true }
+        // The search above scrolled past the task list and left "Näytä enemmän" under the floating
+        // bar, which took the tap (N1 run 39187969883): back up until the button is clear of it.
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä enemmän")).firstMatch
+        for _ in 0..<8 where !(more.exists && more.isHittable && more.frame.minY > 160) {
+            app.windows.firstMatch.swipeDown(velocity: .slow); scrolls += 1
+        }
+        guard more.exists, more.isHittable else { note("MISS Näytä enemmän on Koti"); return false }
+        more.tap(); taps += 1
+        _ = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä vähemmän")).firstMatch.waitForExistence(timeout: 5)
+        return tapLabel("label CONTAINS %@", "· myöhässä")
+    }
+    /// Scrolls the screen (each swipe counted) until `element` sits inside the window, as tapLabel
+    /// does before it taps, and taps nothing: a task can end on the button that does it.
+    func reveal(_ element: XCUIElement, scrolls maxScrolls: Int = 6) -> Bool {
+        let window = app.windows.firstMatch
+        for attempt in 0...maxScrolls {
+            if element.waitForExistence(timeout: attempt == 0 ? 3 : 1), element.isHittable,
+               element.frame.minY > 30, element.frame.maxY < window.frame.maxY - 60 { return true }
+            if attempt < maxScrolls { window.swipeUp(velocity: .slow); scrolls += 1 }
+        }
+        return false
+    }
     /// Opens a link through the host (`simctl openurl`), the way a quick action or Siri would.
     func openURL(_ url: String) {
         let name = "\(shotDir)/\(UUID().uuidString).openurl"
@@ -239,10 +266,20 @@ class WalkTestCase: XCTestCase {
         }
         return button.isSelected
     }
-    /// One measured task from a fresh launch: records "TAPS <name>: n taps, m scrolls" and a screenshot.
-    func measure(_ name: String, reached: Bool) {
+    /// One measured task from a fresh launch: records "TAPS <name>: n taps, m scrolls" and a screenshot,
+    /// then fails when the task's screen was not reached or the path took more taps or scrolls than
+    /// its budget. Only noted, a walk that stopped short still read as passed (U021, U023).
+    func measure(_ name: String, reached: Bool, maxTaps: Int? = nil, maxScrolls: Int? = nil,
+                 file: StaticString = #filePath, line: UInt = #line) {
         note("\(reached ? "TAPS" : "FAIL-NAV") \(name): \(taps) taps, \(scrolls) scrolls")
-        shot("nav-" + name.replacingOccurrences(of: " ", with: "-"))
+        shot("nav-" + name)
+        XCTAssertTrue(reached, "\(name): the task's screen was not reached", file: file, line: line)
+        if let maxTaps {
+            XCTAssertLessThanOrEqual(taps, maxTaps, "\(name): \(taps) taps, the path's budget is \(maxTaps)", file: file, line: line)
+        }
+        if let maxScrolls {
+            XCTAssertLessThanOrEqual(scrolls, maxScrolls, "\(name): \(scrolls) scrolls, the path's budget is \(maxScrolls)", file: file, line: line)
+        }
     }
     var discardDialog: XCUIElement { app.staticTexts["Hylätäänkö muutokset?"].firstMatch }
 

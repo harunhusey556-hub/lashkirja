@@ -7,11 +7,17 @@ let shotDir = ProcessInfo.processInfo.environment["LK_SHOT_DIR"] ?? NSTemporaryD
 
 extension XCTestCase {
     /// Screenshot via the host: writes a request file, a host-side watcher runs `simctl io screenshot`.
+    /// The file name keeps only [A-Za-z0-9-]: a '/' in a step title made the request a path into a
+    /// folder that does not exist, and the shot went missing without a word (U022).
     func shot(_ name: String) {
         try? FileManager.default.createDirectory(atPath: shotDir, withIntermediateDirectories: true)
-        let png = "\(shotDir)/\(name).png"
-        FileManager.default.createFile(atPath: "\(shotDir)/\(name).req", contents: nil)
+        let file = String(name.map { (c: Character) -> Character in c.isASCII && (c.isLetter || c.isNumber) || c == "-" ? c : "-" })
+        let png = "\(shotDir)/\(file).png"
+        guard FileManager.default.createFile(atPath: "\(shotDir)/\(file).req", contents: nil) else {
+            (self as? WalkTestCase)?.note("MISS shot \(file)"); return
+        }
         for _ in 0..<40 where !FileManager.default.fileExists(atPath: png) { usleep(250_000) }
+        if !FileManager.default.fileExists(atPath: png) { (self as? WalkTestCase)?.note("MISS shot \(file)") }
     }
     func dump(_ app: XCUIApplication, _ name: String) {
         try? FileManager.default.createDirectory(atPath: shotDir, withIntermediateDirectories: true)

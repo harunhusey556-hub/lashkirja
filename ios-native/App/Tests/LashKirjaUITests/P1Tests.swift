@@ -7,47 +7,71 @@ final class P1Tests: WalkTestCase {
     }
 
     func test01_CreateInvoiceFromMyynti() {
-        tab("Myynti"); tap("Uusi lasku")
-        measure("create invoice (Myynti)", reached: app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15))
+        tab("Myynti"); let opened = tap("Uusi lasku")
+        measure("create invoice (Myynti)", reached: opened && app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15))
     }
     func test02_CreateInvoiceFromAdd() {
-        tab("Lisää"); sleep(1); tap("Uusi myyntilasku")
-        measure("create invoice (Lisää)", reached: app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15))
+        tab("Lisää"); sleep(1); let opened = tap("Uusi myyntilasku")
+        measure("create invoice (Lisää)", reached: opened && app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15))
     }
     func test03_OpenOverdueInvoice() {
-        tapLabel("label CONTAINS %@", "· myöhässä")
-        measure("open overdue invoice (Koti)", reached: exists("label BEGINSWITH %@", "Myöhässä "))
+        let opened = openOverdueFromKoti()
+        measure("open overdue invoice (Koti)", reached: opened && exists("label BEGINSWITH %@", "Myöhässä "))
     }
+    /// U023: the seed had no pending receipt, so this opened an approved one and passed on any detail.
+    /// The task ends on the pending receipt's Hyväksy, on screen; tapping it would approve the seed's
+    /// receipt for every test after this one.
     func test04_ReviewReceipt() {
-        tab("Kirjanpito"); tap("Kuitit"); sleep(3); dump(app, "nav-receipts")
-        // Rows are buttons labelled "<vendor>, <date · category>, <amount>"; the demo seed has Sähköyhtiö.
-        tapLabel("label BEGINSWITH %@", "Sähköyhtiö,")
-        sleep(3)
-        measure("review receipt", reached: !app.navigationBars["Kuitit"].exists)
+        tab("Kirjanpito"); let kuitit = tap("Kuitit"); sleep(3); dump(app, "nav-receipts")
+        // Rows are buttons labelled "<vendor>, <date · category>, <amount>"; demo-seed.ts --ci has
+        // Lumo Kosmetiikka Oy waiting in "Odottaa hyväksyntää".
+        let opened = tapLabel("label BEGINSWITH %@", "Lumo Kosmetiikka Oy,")
+        // Toiminnot comes with the loaded receipt; the row's preview has neither it nor the actions.
+        let loaded = app.navigationBars["Kuitti"].buttons["Toiminnot"].waitForExistence(timeout: 15)
+        let approve = app.buttons.matching(NSPredicate(format: "label == %@", "Hyväksy")).firstMatch
+        measure("review receipt", reached: kuitit && opened && loaded && reveal(approve), maxTaps: 4, maxScrolls: 2)
     }
+    /// U021: `app.cells.firstMatch` was the Kaikki / Vaatii toimia control's cell, and the step passed
+    /// with `reached: true` while the list stayed on screen. Now the first row below the control,
+    /// then the bar of the sheet it opens, which is titled by the row's state.
     func test05_UnmatchedBankTransaction() {
-        tab("Kirjanpito"); tap("Pankki"); sleep(3); dump(app, "nav-bankhub")
-        tapLabel("label BEGINSWITH %@", "Vaatii toimia"); sleep(3); dump(app, "nav-open-rows")
-        let first = app.cells.firstMatch
-        if first.waitForExistence(timeout: 10) { first.tap(); taps += 1 }
-        sleep(2)
-        measure("open unmatched bank transaction", reached: true)
+        tab("Kirjanpito"); let hub = tap("Pankki"); sleep(3); dump(app, "nav-bankhub")
+        let filtered = tapLabel("label BEGINSWITH %@", "Vaatii toimia"); sleep(3); dump(app, "nav-open-rows")
+        let control = app.segmentedControls.firstMatch
+        let row = app.buttons.matching(NSPredicate(format: "label MATCHES %@", Self.openBankRow)).firstMatch
+        var sheet: XCUIElement?
+        if row.waitForExistence(timeout: 10), control.exists, row.frame.minY >= control.frame.maxY {
+            sheet = Self.openBankStates.first { row.label.contains("· \($0), ") }.map { app.navigationBars[$0] }
+        }
+        let opened = sheet != nil && tapLabel("label MATCHES %@", Self.openBankRow)
+        let shown = opened && (sheet?.waitForExistence(timeout: 10) ?? false) && (sheet?.buttons["Valmis"].exists ?? false)
+        measure("open unmatched bank transaction", reached: hub && filtered && shown, maxTaps: 4)
     }
+    /// The open states BankRow prints after the date, which are also its sheet's title (BankFeed.label).
+    static let openBankStates = ["Kuitti puuttuu", "Ehdotus", "Hyväksy myynti"]
+    /// A bank row's button: "<title>, <date> · <state>, <amount>".
+    static let openBankRow = ".*· (Kuitti puuttuu|Ehdotus|Hyväksy myynti), .*"
     func test06_BankAccount() {
-        tab("Kirjanpito"); tap("Pankki"); sleep(2); tapLabel("label BEGINSWITH %@", "Pankkiyhteys ja tilit")
-        measure("open bank account / connection", reached: exists("label CONTAINS %@", "Tili"))
+        tab("Kirjanpito"); let hub = tap("Pankki"); sleep(2)
+        let opened = tapLabel("label BEGINSWITH %@", "Pankkiyhteys ja tilit")
+        // Its own bar: any label containing "Tili" passed, and the hub has several (U023).
+        let reached = hub && opened && app.navigationBars["Pankkiyhteys ja tilit"].waitForExistence(timeout: 15)
+        measure("open bank account / connection", reached: reached, maxTaps: 3, maxScrolls: 1)
     }
     func test07_VatStatus() {
-        tab("Kirjanpito"); tap("ALV-ilmoitus")
-        measure("open VAT status", reached: exists("label CONTAINS %@", "ALV"))
+        tab("Kirjanpito"); let opened = tap("ALV-ilmoitus")
+        measure("open VAT status", reached: opened && exists("label CONTAINS %@", "ALV"))
     }
     func test08_CompanyProfile() {
-        openSettings(); tap("Yritysmuoto ja ALV")
-        measure("change company/profile info", reached: app.textFields.firstMatch.waitForExistence(timeout: 10) || app.switches.firstMatch.exists)
+        openSettings(); let opened = tap("Yritysmuoto ja ALV")
+        // The pushed screen's bar: any text field or switch passed, Asetukset's own toggle among them (U023).
+        measure("change company/profile info", reached: opened && app.navigationBars["Yritysmuoto ja ALV"].waitForExistence(timeout: 10))
     }
     func test09_Assistant() {
-        app.buttons["Avustaja"].firstMatch.tap(); taps += 1; sleep(2)
-        measure("open AI assistant", reached: app.textFields.firstMatch.exists || app.textViews.firstMatch.exists)
+        app.buttons["Avustaja"].firstMatch.tap(); taps += 1
+        // The composer by its placeholder: any text field or text view passed (U023).
+        let composer = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Kirjoita viesti…")).firstMatch
+        measure("open AI assistant", reached: composer.waitForExistence(timeout: 10))
     }
     /// P1 01's flake (OPEN-ISSUES row 20b): the tap on "Uusi lasku" landing while Myynti is still
     /// painting its first list. No settling time after the tab, and the form opened a second time
