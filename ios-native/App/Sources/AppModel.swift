@@ -22,10 +22,9 @@ final class AppModel {
         get { versions.version }
         set { versions.bump() }
     }
-    /// The last Pankki figures, kept across visits: coming back shows them at once while they
-    /// refresh behind (the hub is a pushed screen, so its own state goes with it).
-    var bankHubMemory: BankHubMemory?
-    /// The last loaded Pankkitapahtumat per month filter ("" = every month), for the same reason.
+    /// The last loaded Pankki rows per month filter ("" = every month), kept across visits: coming
+    /// back shows them at once while they refresh behind (Pankki is a pushed screen, so its own
+    /// state goes with it).
     var bankFeedMemory: [String: BankFeedMemory] = [:]
     /// Every screen's GET answers: a screen paints the cached answer at once and asks the server
     /// only when it is stale (`dataVersion` moved or older than 60 s). The main lists are kept on
@@ -517,7 +516,7 @@ final class AppModel {
     }
 
     /// After sign-in and on coming back after a while: Koti, Kuitit page 1 with its counts and
-    /// queues, and the Pankki hub load side by side with exactly the screens' queries, so the tab
+    /// queues, and Pankki's balances load side by side with exactly the screens' queries, so the tab
     /// the owner opens paints from the cache. `/api/bootstrap` first, where the server has it.
     func prefetch() {
         guard case .signedIn = phase else { return }
@@ -777,7 +776,6 @@ final class AppModel {
         lastPainted = [:]
         versions.endSession()
         // This owner's figures must not show to the next one.
-        bankHubMemory = nil
         bankFeedMemory = [:]
         chat?.shutdown()
         chat = nil

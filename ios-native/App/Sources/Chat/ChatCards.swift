@@ -280,7 +280,7 @@ struct ChatDestinationCards: View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(cards) { card in
                 if card.isBank {
-                    NavigationLink(value: Route.bankHub) { ChatBankCard(card: card, model: model) }
+                    NavigationLink(value: Route.bankFeed) { ChatBankCard(card: card, model: model) }
                         .buttonStyle(.pressable)
                 } else if let route = Route.fromHref(card.href) {
                     NavigationLink(value: route) { ChatDestinationCard(card: card) }
@@ -314,7 +314,7 @@ private struct ChatDestinationCard: View {
     }
 }
 
-/// Pankki with the live total and number of accounts, read the way the Pankki hub reads them.
+/// Pankki with the live total and number of accounts, read the way Pankki's first row reads them.
 private struct ChatBankCard: View {
     @Environment(AppModel.self) private var app
     let card: ChatDestination

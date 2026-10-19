@@ -402,27 +402,24 @@ final class MotionAuditTests: WalkTestCase {
     func test07_Bank() {
         suite = "pankki"
         tabStep("pankki-kirjanpito-tab", from: "Koti", "Kirjanpito")
-        guard let hub = find("label BEGINSWITH %@", "Pankki") else { note("SKIP pankki: no hub row"); return }
-        step("pankki-hub-open", from: "Kirjanpito", to: "Pankki", seconds: 5, reached: navBar("Pankki")) { press(hub) }
+        guard let pankki = find("label BEGINSWITH %@", "Pankki") else { note("SKIP pankki: no Pankki row"); return }
+        // One push to the rows (N2): the hub's open and its "Näytä kaikki" push were two.
+        step("pankki-open", from: "Kirjanpito", to: "Pankki", seconds: 5, reached: navBar("Pankki")) { press(pankki) }
         sleep(2)
-        if let all = find("label BEGINSWITH %@", "Näytä kaikki", scrolls: 4) {
-            step("pankki-feed-open", from: "Pankki", to: "Pankkitapahtumat", seconds: 5) { press(all) }
-            sleep(2)
-            step("pankki-feed-scroll", from: "Pankkitapahtumat", to: "Pankkitapahtumat", kind: "scroll", expect: "nothing pops in") {
-                app.windows.firstMatch.swipeUp(velocity: .fast); return true
-            }
-            if let more = find("label BEGINSWITH %@", "Näytä enemmän", scrolls: 8) {
-                step("pankki-feed-more", from: "Pankkitapahtumat", to: "Pankkitapahtumat (more)", kind: "load",
-                     expect: "rows grow below, nothing above moves", seconds: 5) { press(more) }
-            }
-            step("pankki-feed-back", from: "Pankkitapahtumat", to: "Pankki") { edgeSwipeBack(); return true }
-        }
-        if let accounts = find("label BEGINSWITH %@", "Pankkiyhteys ja tilit", scrolls: 4) {
+        // The first row, while it is at the top: Saldo yhteensä opens Pankkiyhteys ja tilit.
+        if let accounts = find("label BEGINSWITH %@", "Saldo yhteensä", scrolls: 4) {
             step("pankki-accounts-open", from: "Pankki", to: "Pankkiyhteys ja tilit", seconds: 5) { press(accounts) }
             sleep(2)
             step("pankki-accounts-back", from: "Pankkiyhteys ja tilit", to: "Pankki") { press(backButton()) }
         }
-        step("pankki-hub-back", from: "Pankki", to: "Kirjanpito") { press(backButton()) }
+        step("pankki-feed-scroll", from: "Pankki", to: "Pankki", kind: "scroll", expect: "nothing pops in") {
+            app.windows.firstMatch.swipeUp(velocity: .fast); return true
+        }
+        if let more = find("label BEGINSWITH %@", "Näytä enemmän", scrolls: 8) {
+            step("pankki-feed-more", from: "Pankki", to: "Pankki (more)", kind: "load",
+                 expect: "rows grow below, nothing above moves", seconds: 5) { press(more) }
+        }
+        step("pankki-back", from: "Pankki", to: "Kirjanpito") { press(backButton()) }
         for (id, label) in [("email", "Sähköposti"), ("purchases", "Ostolaskut"), ("match", "Kohdista ostolaskujen maksut"),
                             ("periods", "Kuukauden sulku"), ("alv", "ALV-ilmoitus"), ("ledger", "Kirjanpito, Tuloslaskelma")] {
             guard let row = find("label BEGINSWITH %@", label) else { note("SKIP pankki/\(id): no \(label)"); continue }

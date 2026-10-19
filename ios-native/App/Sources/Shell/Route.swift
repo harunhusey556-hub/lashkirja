@@ -67,7 +67,8 @@ enum Route: Hashable {
     case receiptsMissingVat(period: String)
     /// Sähköposti: what mail sync brought in, the bills and the archived non-bills.
     case emailInbox
-    /// Pankki: balances, the month's money in and out, and the bank rows in one place.
+    /// Pankki by its old link name (`/pankki`, the hub that stood before the rows): opens the bank
+    /// rows, as `bankFeed` does, so older links and replies keep working.
     case bankHub
     /// Myynti opened on a period ("YYYY" / "YYYY-MM", "" = any), a status chip ("" = Kaikki) or one customer.
     case invoicesFiltered(month: String, status: String, customerId: String)
@@ -112,7 +113,7 @@ extension Route {
         case .privacy: return .privacy
         case .help: return .help
         case .emailImport: return .emailImport
-        case .bankHub: return .bankHub
+        case .bankHub: return .bankFeed
         case .statements: return .statements
         case .emailInbox: return .emailInbox
         }
@@ -204,7 +205,7 @@ struct RouteScreen: View {
         case .customer(let id): CustomerDetailView(customerId: id)
         case .receipts: ReceiptsView()
         case .receipt(let id): ReceiptDetailView(receiptId: id)
-        case .bankFeed: BankFeedView()
+        case .bankFeed, .bankHub: BankFeedView()
         case .bankAccounts: BankAccountsView()
         case .alv(let period): AlvView(period: period)
         case .settings: SettingsView()
@@ -239,7 +240,6 @@ struct RouteScreen: View {
         case .receiptsMissingVat(let period):
             ReceiptsView(month: period, missingVat: true, drilled: true, preview: app.receiptsPreview(.drilled(month: period, missingVat: true)))
         case .emailInbox: EmailInboxView()
-        case .bankHub: BankHubView()
         case .invoicesFiltered(let month, let status, let customerId):
             let scope = InvoiceScope(month: month, customerId: customerId), filter = SalesFilter(rawValue: status) ?? .all
             MyyntiView(scope: scope, status: filter, preview: app.salesPreview(scope: scope, filter: filter))
