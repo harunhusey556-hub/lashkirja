@@ -407,10 +407,23 @@ final class OwnerScreensTests: WalkTestCase {
         let list = app.collectionViews.containing(queueRow).firstMatch
         guard list.waitForExistence(timeout: 5) else { tree("c5-no-queue"); XCTFail("the queue is not on the screen after the save"); return }
         let notActions = ["capture-fixture", "capture-queue-fixture", "capture-queue-row"]
-        let actions = list.buttons.allElementsBoundByIndex
-            .filter { !notActions.contains($0.identifier) && !$0.label.hasPrefix("testikuitti.jpg") }
-            .map(\.label)
-        keep("c-queue-actions", actions.joined(separator: " | "))
+        func buttonsIn(_ element: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
+            (element.elementType == .button ? [element] : []) + element.children.flatMap(buttonsIn)
+        }
+        func readActions() -> [XCUIElementSnapshot] {
+            ((try? list.snapshot())?.children ?? []).flatMap(buttonsIn)
+                .filter { !notActions.contains($0.identifier) && !$0.label.hasPrefix("testikuitti.jpg") }
+        }
+        // Read until it holds still: a run had one more, unnamed, button while the saved row became
+        // its kind menu (UI suite 39306520926, ["Valmis", ""]); whether it stays is what is asserted.
+        var seen = readActions()
+        for _ in 0..<12 where seen.count != 1 {
+            usleep(250_000)
+            seen = readActions()
+        }
+        let actions = seen.map(\.label)
+        keep("c-queue-actions", seen.map { "\($0.label) [\($0.identifier)] \($0.frame)" }.joined(separator: " | "))
+        if actions.count != 1 { tree("c5-queue-actions") }
         XCTAssertEqual(actions.count, 1, "the queue shows more than its primary: \(actions)")
         XCTAssertTrue(actions.first == "Valmis" || actions.first?.hasPrefix("Näytä tarkistettavat") == true, "the queue's action: \(actions)")
         XCTAssertEqual(list.images.matching(identifier: "arrow.left.arrow.right").count, 0, "the row still shows the ⇄ icon")
