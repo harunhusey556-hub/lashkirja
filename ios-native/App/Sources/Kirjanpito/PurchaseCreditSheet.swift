@@ -58,6 +58,8 @@ struct PurchaseCreditSheet: View {
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle("Hyvitä ostolasku")
             .navigationBarTitleDisplayMode(.inline)

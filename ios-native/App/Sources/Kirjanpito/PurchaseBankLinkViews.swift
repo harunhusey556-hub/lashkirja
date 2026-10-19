@@ -104,6 +104,8 @@ struct PurchaseLinkConfirmView: View {
                 .listRowInsets(EdgeInsets())
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         // The failure and the outcome line under the amount come and go without a jump.
         .motion(.snappy, value: failure)
         .motion(.snappy, value: (Money.parse(amountText) ?? 0) > 0)
@@ -447,6 +449,8 @@ struct PurchaseRowLinkView: View {
                 BankRowSkeleton()
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         .searchable(text: $search, prompt: "Toimittaja, numero tai summa")
         .navigationTitle("Kohdista ostolaskuun")
         .navigationBarTitleDisplayMode(.inline)
