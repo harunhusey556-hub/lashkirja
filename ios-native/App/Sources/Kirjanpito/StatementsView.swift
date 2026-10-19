@@ -6,6 +6,9 @@ import LashKirjaCore
 /// files, newest first. Pankkitapahtumat lists the rows; this lists the files.
 struct StatementsView: View {
     @Environment(AppModel.self) private var app
+    /// An imported statement opens on the stack's path, as its row's link does: the row sheet's
+    /// hand-off from it pushes onto that path too, and lands under a screen pushed beside it.
+    @Environment(\.openRoute) private var openRoute
     @State private var statements = ScreenLoad<[Statement]>()
     @State private var accounts: [BankAccount] = []
     @State private var limit = ShowMore()
@@ -16,7 +19,6 @@ struct StatementsView: View {
     /// "" = Tunnista automaattisesti.
     @State private var targetAccountId = ""
     @State private var targetChosen = false
-    @State private var openedStatement: String?
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
 
@@ -84,7 +86,6 @@ struct StatementsView: View {
         .fileImporter(isPresented: $importing, allowedContentTypes: [.commaSeparatedText, .plainText, .xml, .pdf, .spreadsheet, .data]) { result in
             if case .success(let url) = result { Task { await upload(url) } }
         }
-        .navigationDestination(item: $openedStatement) { id in StatementDetailView(statementId: id) }
         .refreshable {
             // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
             gate.mark(version: app.refreshEverything())
@@ -156,7 +157,7 @@ struct StatementsView: View {
             uploadMessage = result?.message ?? "Tiliote tuotiin."
             Haptics.success()
             await load()
-            if let id = result?.statementId { openedStatement = id }
+            if let id = result?.statementId { openRoute(.statement(id)) }
         } catch is CancellationError {
             uploadMessage = nil
         } catch {

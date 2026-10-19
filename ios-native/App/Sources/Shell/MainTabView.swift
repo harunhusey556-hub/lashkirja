@@ -28,6 +28,7 @@ struct MainTabView: View {
                             }
                             .appDestinations()
                     }
+                    .environment(\.openRoute, openRoute(item))
                 }
             }
             // "+" is a plain tab item that opens the Lisää sheet; selecting it never switches tab
@@ -155,6 +156,14 @@ struct MainTabView: View {
             if next.count > (paths[item] ?? []).count, let row = next.last?.perfRow { Perf.beginOpen(row) }
             paths[item] = NavigationStackRule.collapse(next)
         })
+    }
+
+    /// A screen of this tab opening a route from code: onto the tab's path, by a link's rules.
+    private func openRoute(_ item: AppTab) -> OpenRouteAction {
+        OpenRouteAction(stack: "tab.\(item)") { route in
+            let tabPath = path(item)
+            tabPath.wrappedValue += [route]
+        }
     }
 
     /// "Lisää" is an action, not a place: it opens the add sheet and stays on the current tab.

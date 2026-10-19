@@ -4,6 +4,8 @@ import LashKirjaCore
 struct InvoiceDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    /// The customer, a copy and a credit note open on the stack's path (G005, as M024).
+    @Environment(\.openRoute) private var openRoute
     let invoiceId: String
     @State private var state = ScreenLoad<Invoice>()
     @State private var sheet: SheetKind?
@@ -12,7 +14,6 @@ struct InvoiceDetailView: View {
     @State private var submit = SubmitGuard()
     private var busy: Bool { submit.inFlight }
     @State private var failure: String?
-    @State private var pushedId: String?
     @State private var duplicates: [PaymentDuplicate] = []
     @State private var duplicateBusy: String?
     @State private var reminder: ReminderPreview?
@@ -32,7 +33,6 @@ struct InvoiceDetailView: View {
     /// One group at a time instead of rows, payments, reminder and history stacked down the screen.
     @State private var tab: InvoiceDetailLayout.Tab = .lines
     @State private var tabChosen = false
-    @State private var customerRoute: Route?
     /// Whether this server takes card payments at all (Stripe configured); nil until asked.
     @State private var posStatus: POSStatus?
     /// Card details and refund state of the card payments, by `posPaymentId`.
@@ -99,7 +99,6 @@ struct InvoiceDetailView: View {
             }
         }
         .onDisappear { toastTask?.cancel() }
-        .navigationDestination(item: $customerRoute) { route in RouteScreen(route: route) }
         .refreshable { await load(force: true) }
         .task { await load() }
         // An overdue invoice opens on its reminder, until the owner picks a tab.
@@ -110,7 +109,7 @@ struct InvoiceDetailView: View {
         .sheet(item: $sheet, onDismiss: {
             if let id = creditedId {
                 creditedId = nil
-                pushedId = id
+                openRoute(.invoice(id))
             }
             Task { await load() }
         }) { kind in
@@ -141,7 +140,6 @@ struct InvoiceDetailView: View {
             }
         }
         .confirmSheet(presenting: $confirm) { kind in confirmRequest(kind) }
-        .navigationDestination(item: $pushedId) { id in InvoiceDetailView(invoiceId: id, preview: app.invoicePreview(id)) }
     }
 
     private func confirmRequest(_ kind: ConfirmKind) -> ConfirmRequest {
@@ -179,7 +177,9 @@ struct InvoiceDetailView: View {
             VStack(alignment: .leading, spacing: 2) {
                 MoneyText(amount: invoice.gross).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero()
                 // A button, not a NavigationLink: a link would make the whole card one tap target.
-                Button { customerRoute = .customer(invoice.customer.id) } label: {
+                // It pushes onto the path as a link does: pushed beside it, the customer's own invoice
+                // rows opened under the customer (G005).
+                Button { openRoute(.customer(invoice.customer.id)) } label: {
                     HStack(spacing: 4) {
                         Text(invoice.customer.name).font(.headline).foregroundStyle(Theme.ink)
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2).accessibilityHidden(true)
@@ -573,7 +573,7 @@ struct InvoiceDetailView: View {
     private func duplicate() async {
         await runKeyed(notDone: "Kopiota ei luotu.", maybeDone: "Kopio on voinut tallentua luonnoksiin.") { key in
             let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/duplicate", body: EmptyBody(), idempotencyKey: key)
-            pushedId = r.invoice.id
+            openRoute(.invoice(r.invoice.id))
         }
     }
 
@@ -741,7 +741,9 @@ struct PaymentSheet: View {
     @Environment(\.dismiss) private var dismiss
     let invoice: Invoice
     @State private var amountText = ""
-    @State private var date = Date()
+    /// The Helsinki day as the picker draws it: `Date()` drew the device's own day, which off Helsinki
+    /// time can be another day than the Helsinki one it saved.
+    @State private var date = APIDate.pickerDate(APIDate.dayString(Date())) ?? Date()
     @State private var note = ""
     /// One key until the payment is booked: a retry after a lost answer is replayed, never booked twice.
     @State private var submit = SubmitGuard()
@@ -759,7 +761,8 @@ struct PaymentSheet: View {
             Form {
                 Section {
                     TextField("Summa", text: $amountText).moneyInput()
-                    DatePicker("Maksupäivä", selection: $date, in: ...Date(), displayedComponents: .date)
+                    DatePicker("Maksupäivä", selection: $date, in: ...(APIDate.pickerDate(APIDate.dayString(Date())) ?? Date()),
+                               displayedComponents: .date)
                     TextField("Lisätieto (valinnainen)", text: $note)
                 } footer: {
                     Text("Avoinna \(Money.format(invoice.open))")
@@ -805,7 +808,7 @@ struct PaymentSheet: View {
         .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 
-    private var candidateKey: String { "\(amountText)|\(APIDate.dayString(date))" }
+    private var candidateKey: String { "\(amountText)|\(APIDate.pickerDay(date))" }
 
     /// Offers the incoming bank row with this amount and a nearby date, so the
     /// money is not counted a second time through an income receipt drafted from it.
@@ -814,7 +817,7 @@ struct PaymentSheet: View {
         do {
             try await Task.sleep(nanoseconds: 300_000_000)
             let list: PaymentCandidates = try await app.api.get("/api/invoices/\(invoice.id)/payments/candidates",
-                query: PaymentCandidates.query(amount: amount, paidDate: APIDate.dayString(date)))
+                query: PaymentCandidates.query(amount: amount, paidDate: APIDate.pickerDay(date)))
             if list.candidates.first?.transactionId != bankRow?.transactionId { useBankRow = true }
             bankRow = list.candidates.first
         } catch is CancellationError {
@@ -837,7 +840,7 @@ struct PaymentSheet: View {
         var succeeded = false
         defer { submit.finish(succeeded: succeeded) }
         do {
-            let body = PaymentEntry(amount: amount, paidDate: APIDate.dayString(date),
+            let body = PaymentEntry(amount: amount, paidDate: APIDate.pickerDay(date),
                                     transactionId: carriesRow ? bankRow?.transactionId : nil, note: note)
             let _: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoice.id)/payments", body: body, idempotencyKey: key)
             succeeded = true
@@ -936,9 +939,10 @@ struct SendInvoiceSheet: View {
     @State private var templateName = ""
     @State private var askConvert = false
     @State private var templateNotice: String?
+    @State private var path: [Route] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Form {
                 if let preview = check.value {
                     if let banner = check.banner {
@@ -1024,6 +1028,8 @@ struct SendInvoiceSheet: View {
                 Task { await saveTemplate(convert: true) }
             }
         }
+        // A fix's screen (the customer) and what it opens stay within this sheet, not under it.
+        .environment(\.openRoute, OpenRouteAction(stack: "send") { path.append($0) })
     }
 
     /// To, template, subject and message. A server without the text fields gets the old fixed recipient row.

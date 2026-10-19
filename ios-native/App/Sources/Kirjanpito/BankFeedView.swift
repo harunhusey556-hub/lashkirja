@@ -4,6 +4,7 @@ import LashKirjaCore
 
 struct BankFeedView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openRoute) private var openRoute
     @State private var state = ScreenLoad<[BankFeed.Month]>()
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
@@ -21,7 +22,8 @@ struct BankFeedView: View {
     /// "Hyväksy kuittiehdotukset" shows what it links before it does (count, money, mismatches).
     @State private var confirmPreview: BankFeed.ConfirmPreview?
     /// A screen the row sheet asked for ("Avaa kuitti"): pushed here once the sheet has closed,
-    /// so it lands on this tab's stack and Back returns to the feed.
+    /// so it lands on this tab's stack and Back returns to the feed. On the stack's path: an invoice
+    /// pushed beside it opened its customer under itself (G005).
     @State private var openAfterSheet: Route?
     @State private var pushed: Route?
     /// The month group on screen (one at a time); nil follows `GroupChoice` (the newest month).
@@ -280,7 +282,7 @@ struct BankFeedView: View {
         .sheet(item: $selected, onDismiss: {
             if let route = openAfterSheet {
                 openAfterSheet = nil
-                pushed = route
+                openRoute(route)
             }
             Task { await load() }
         }) { row in

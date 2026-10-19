@@ -3,6 +3,8 @@ import LashKirjaCore
 
 struct MyyntiView: View {
     @Environment(AppModel.self) private var app
+    /// Asiakkaat, Toistuvat laskut and a created invoice open on the stack's path (M024).
+    @Environment(\.openRoute) private var openRoute
     /// Opens the new-invoice form once on appear (the assistant's "/laskut/uusi" link).
     var openNewInvoice = false
     /// A report link's period or customer (`/laskut?month=…`); empty for the Myynti tab itself.
@@ -24,12 +26,7 @@ struct MyyntiView: View {
     @State private var openedNew = false
     /// A just-created invoice, opened when the form's sheet has closed.
     @State private var createdId: String?
-    @State private var openedInvoiceId: String?
-    @State private var shortcut: Shortcut?
     @State private var limit = ShowMore()
-
-    /// Asiakkaat and Toistuvat laskut, one compact line under the summary.
-    enum Shortcut: Hashable { case customers, recurring }
 
     /// A link opens exactly the list it names: its status chip, or Kaikki when it names none.
     /// `preview` (the app's `salesPreview` for the same scope and chip) is on screen in the first
@@ -155,13 +152,6 @@ struct MyyntiView: View {
         .sheet(isPresented: $showMatch) {
             BankMatchSheet { message in notice = message }
         }
-        .navigationDestination(item: $openedInvoiceId) { id in InvoiceDetailView(invoiceId: id, preview: app.invoicePreview(id)) }
-        .navigationDestination(item: $shortcut) { target in
-            switch target {
-            case .customers: CustomersView()
-            case .recurring: RecurringInvoicesView(preview: app.lastPainted("/api/recurring-invoices"))
-            }
-        }
         .onAppear {
             guard openNewInvoice, !openedNew else { return }
             openedNew = true
@@ -196,19 +186,22 @@ struct MyyntiView: View {
     private func openCreated() {
         guard let id = createdId else { return }
         createdId = nil
-        openedInvoiceId = id
+        openRoute(.invoice(id))
     }
 
     /// Two tiles as wide as the cards around them, so they read as places to go, not filters.
     private var shortcuts: some View {
         HStack(spacing: 10) {
-            shortcutTile("Asiakkaat", symbol: "person.2", target: .customers)
-            shortcutTile("Toistuvat laskut", symbol: "repeat", target: .recurring)
+            shortcutTile("Asiakkaat", symbol: "person.2", route: .customers)
+            shortcutTile("Toistuvat laskut", symbol: "repeat", route: .recurringInvoices)
         }
     }
 
-    private func shortcutTile(_ title: String, symbol: String, target: Shortcut) -> some View {
-        Button { shortcut = target } label: {
+    /// A button that pushes its route, not a NavigationLink: two links in one List row make the
+    /// row one tap target (as InvoiceDetailView's customer). The route goes through
+    /// `appDestinations`, so the screen has the inline title of every pushed screen (M033).
+    private func shortcutTile(_ title: String, symbol: String, route: Route) -> some View {
+        Button { openRoute(route) } label: {
             HStack(spacing: 10) {
                 Image(systemName: symbol)
                     .font(.body.weight(.semibold))

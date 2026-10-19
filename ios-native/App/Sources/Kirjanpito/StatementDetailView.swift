@@ -5,6 +5,7 @@ import LashKirjaCore
 struct StatementDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openRoute) private var openRoute
     let statementId: String
     @State private var state = ScreenLoad<Statement>()
     @State private var onlyOpen = false
@@ -17,9 +18,9 @@ struct StatementDetailView: View {
     @State private var failure: String?
     @State private var locked = false
     @State private var status: String?
-    /// A screen the row sheet asked for, pushed once the sheet has closed.
+    /// A screen the row sheet asked for, pushed onto the stack's path once the sheet has closed: an
+    /// invoice pushed beside it opened its customer under itself (G005).
     @State private var openAfterSheet: Route?
-    @State private var pushed: Route?
     /// The version a pull-to-refresh bumped to: its own load already covers it.
     @State private var refreshedVersion: Int?
 
@@ -76,13 +77,12 @@ struct StatementDetailView: View {
             // "Avaa kuitti/lasku" in the sheet: pushed here once it has closed, so Back returns to the tiliote.
             if let route = openAfterSheet {
                 openAfterSheet = nil
-                pushed = route
+                openRoute(route)
             }
             Task { await load() }
         }) { row in
             BankRowSheet(row: row, showStatementLink: false, onOpen: { openAfterSheet = $0 })
         }
-        .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
         .sheet(item: $editing) { row in
             StatementRowEditSheet(statementId: statementId, row: row) { Task { await changed() } }
         }
@@ -363,7 +363,8 @@ struct StatementRowEditSheet: View {
     let onSaved: () -> Void
     @State private var counterparty = ""
     @State private var hasDate = true
-    @State private var date = Date()
+    /// The row's day as the DatePicker draws it (`APIDate.pickerDate`), read back the same way.
+    @State private var date = APIDate.pickerDate(APIDate.dayString(Date())) ?? Date()
     @State private var amount = ""
     @State private var type = "meno"
     @State private var message = ""
@@ -383,7 +384,7 @@ struct StatementRowEditSheet: View {
     }
 
     private var current: Fields {
-        Fields(counterparty: counterparty, hasDate: hasDate, day: hasDate ? APIDate.dayString(date) : "", amount: amount, type: type, message: message)
+        Fields(counterparty: counterparty, hasDate: hasDate, day: hasDate ? APIDate.pickerDay(date) : "", amount: amount, type: type, message: message)
     }
 
     private var dirty: Bool { opened.map { $0 != current } ?? false }
@@ -429,7 +430,7 @@ struct StatementRowEditSheet: View {
         guard opened == nil else { return }
         defer { opened = current }
         counterparty = row.counterparty ?? ""
-        if let day = row.date.flatMap({ APIDate.day(String($0.prefix(10))) }) { date = day } else { hasDate = false }
+        if let day = row.date.flatMap({ APIDate.pickerDate(String($0.prefix(10))) }) { date = day } else { hasDate = false }
         amount = Money.format(row.amount).replacingOccurrences(of: "\u{00A0}€", with: "")
         type = StatementRowPatch.types.contains(row.type) ? row.type : (row.amount > 0 ? "tulo" : "meno")
         message = row.message ?? ""
@@ -444,7 +445,7 @@ struct StatementRowEditSheet: View {
             let patch = try StatementRowPatch.make(
                 transactionId: row.id,
                 counterparty: counterparty,
-                date: hasDate ? APIDate.dayString(date) : nil,
+                date: hasDate ? APIDate.pickerDay(date) : nil,
                 amount: amount,
                 type: type,
                 message: message
