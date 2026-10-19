@@ -130,8 +130,10 @@ final class P2Tests: WalkTestCase {
         // before it one at Etc/GMT+12 on the day before, so the device's own day is never Helsinki's.
         let zone = HelsinkiDay.hour() >= 13 ? "Pacific/Kiritimati" : "Etc/GMT+12"
         if zone != "Etc/GMT+12" { relaunch(zone: zone) }
-        XCTAssertTrue(selectTab("Koti"), "Koti is not selected")
-        guard tapLabel("label CONTAINS %@", "· myöhässä") else { XCTFail("no overdue invoice on Koti"); return }
+        // From Myynti, not Koti: the draft this test just created joins Koti's first five tasks and
+        // pushes the overdue row under "Näytä enemmän" (run 39180204687).
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        guard tapLabel("label CONTAINS %@", "myöhässä") else { XCTFail("no overdue invoice on Myynti"); return }
         let invoiceBar = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
         let pay = app.buttons["Maksu"].firstMatch
         guard invoiceBar.waitForExistence(timeout: 20), pay.waitForExistence(timeout: 30) else {
