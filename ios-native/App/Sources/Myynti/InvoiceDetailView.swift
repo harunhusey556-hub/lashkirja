@@ -83,6 +83,7 @@ struct InvoiceDetailView: View {
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
+                .chipRowSection()
                 tabContent(invoice, tab: tabs.contains { $0.tab == tab } ? tab : .lines)
             } else {
                 ScreenStateView(state: state, retry: load) { (_: Invoice) in EmptyView() }.listRowBackground(Color.clear)
@@ -337,7 +338,10 @@ struct InvoiceDetailView: View {
                     }
                 }
             }
+            .padding(.horizontal, ChipRow.inset)
         }
+        .accessibilityIdentifier("invoice-tabs")
+        .chipRowScroll()
     }
 
     @ViewBuilder private func tabContent(_ invoice: Invoice, tab: InvoiceDetailLayout.Tab) -> some View {

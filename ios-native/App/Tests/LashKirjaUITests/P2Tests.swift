@@ -59,6 +59,8 @@ final class P2Tests: WalkTestCase {
         shot("p2-receipts"); dump(app, "p2-receipts")
         check("P2 Kuitit list shows image thumbnails (\(pictures.count))", pictures.count > 0)
         XCTAssertGreaterThan(pictures.count, 0, "no Kuitit row shows its picture")
+        // U031 (B11): the chips reach the screen's edges; the fourth was cut at the card's ('Kohdistet').
+        assertChipRowEdge("receipt-chips", "P2 C Kuitit")
 
         // U030, U032 (N3): one primary in the bar, the camera, and Toiminnot for the rest. The
         // filter and "Valitse kuitteja" were circled icons of the camera's weight, and "Valitse
@@ -81,6 +83,33 @@ final class P2Tests: WalkTestCase {
         let done = bar.buttons["Valmis"].firstMatch.exists
         check("P2 C Valitse kuitteja shows Valitse kaikki and Valmis", all && done)
         XCTAssertTrue(all && done, "Valitse kuitteja did not start picking: Valitse kaikki \(all), Valmis \(done)")
+
+        // X132 X147 (B11): Ostolaskut's, Myynti's and the template editor's chip rows reach the
+        // screen's edges too. They ended in a chip cut at the card's edge ('Od', '{era').
+        if done {
+            bar.buttons["Valmis"].firstMatch.tap()
+            _ = app.buttons["Valitse kaikki"].firstMatch.waitForNonExistence(timeout: 5)
+        }
+        bar.buttons["BackButton"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Kirjanpito"].waitForExistence(timeout: 10), "Back from Kuitit did not reach Kirjanpito")
+        tapLabel("label BEGINSWITH %@", "Ostolaskut")
+        if app.navigationBars["Ostolaskut"].waitForExistence(timeout: 10) {
+            assertChipRowEdge("purchase-chips", "P2 C Ostolaskut")
+        } else { XCTFail("Ostolaskut did not open") }
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        assertChipRowEdge("sales-chips", "P2 C Myynti")
+        XCTAssertTrue(selectTab("Koti"), "Koti is not selected")
+        openSettings()
+        guard tap("Sähköpostimallit"), tap("Uusi malli") else { XCTFail("Sähköpostimallit > Uusi malli did not open"); return }
+        assertChipRowEdge("template-placeholders", "P2 C Uusi malli")
+        // The section gives up its side margins for the row and gives them back to its header: read
+        // beside the header above it, for the review.
+        let viesti = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Viesti")).firstMatch
+        let placeholders = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Paikkamerkit")).firstMatch
+        if viesti.exists && placeholders.exists {
+            note("INFO P2 C Uusi malli headers: Viesti x \(viesti.frame.minX), Paikkamerkit x \(placeholders.frame.minX)")
+        }
+        shot("p2-template-placeholders")
     }
 
     /// U038: the caption is the server's next number, and the form opens on the Helsinki day with the

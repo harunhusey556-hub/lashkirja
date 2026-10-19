@@ -148,7 +148,7 @@ struct SectionChip: View {
                     Text("\(count)").monospacedDigit().foregroundStyle(selected ? Theme.onInk.opacity(0.8) : Theme.ink2)
                 }
             }
-            .font(.subheadline.weight(selected ? .semibold : .regular))
+            .chipFont(selected: selected)
             .foregroundStyle(selected ? Theme.onInk : Theme.ink)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)

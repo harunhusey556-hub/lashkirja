@@ -71,17 +71,18 @@ struct MyyntiView: View {
                 }
                 Section {
                     // A drilled list is about its rows; the registers stay on the Myynti tab.
+                    // The section runs to the screen's edges for the chips: these rows keep the cards' margin.
                     if let title = scope.title {
                         Label(title, systemImage: "line.3.horizontal.decrease.circle")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.ink)
                             .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 0))
+                            .listRowInsets(EdgeInsets(top: 0, leading: 4 + ChipRow.inset, bottom: 0, trailing: ChipRow.inset))
                             .listRowSeparator(.hidden)
                     } else {
                         shortcuts
                             .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets())
+                            .listRowInsets(EdgeInsets(top: 0, leading: ChipRow.inset, bottom: 0, trailing: ChipRow.inset))
                             .listRowSeparator(.hidden)
                     }
                     chips
@@ -89,6 +90,7 @@ struct MyyntiView: View {
                         .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 0, trailing: 0))
                         .listRowSeparator(.hidden)
                 }
+                .chipRowSection()
                 let rows = visible(list.invoices)
                 Section {
                     if rows.isEmpty {
@@ -241,7 +243,7 @@ struct MyyntiView: View {
                                 Text("\(count)").monospacedDigit().foregroundStyle(selected ? Theme.onInk.opacity(0.8) : Theme.ink2)
                             }
                         }
-                        .font(.subheadline.weight(selected ? .semibold : .regular))
+                        .chipFont(selected: selected)
                         .foregroundStyle(selected ? Theme.onInk : Theme.ink)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
@@ -253,7 +255,10 @@ struct MyyntiView: View {
                 }
             }
             .padding(.vertical, 4)
+            .padding(.horizontal, ChipRow.inset)
         }
+        .accessibilityIdentifier("sales-chips")
+        .chipRowScroll()
         // A chip whose status vanished (credited after a refresh) falls back to "Kaikki".
         .onChange(of: counts) { _, _ in
             if !SalesFilter.chips(counts).contains(where: { $0.filter == filter }) { filter = .all }
