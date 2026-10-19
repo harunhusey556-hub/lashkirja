@@ -301,9 +301,10 @@ private struct MotionModifier<Value: Equatable>: ViewModifier {
 
 private struct LineLimitUnlessLargeModifier: ViewModifier {
     @Environment(\.dynamicTypeSize) private var typeSize
+    let lines: Int?
 
     func body(content: Content) -> some View {
-        content.lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+        content.lineLimit(typeSize.isAccessibilitySize ? nil : lines)
     }
 }
 
@@ -340,9 +341,10 @@ extension View {
         frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
     }
 
-    /// One line of a list row, but free to wrap at accessibility text sizes so names are not cut.
-    func lineLimitUnlessLarge() -> some View {
-        modifier(LineLimitUnlessLargeModifier())
+    /// One line of a list row (or `lines`; nil leaves it free), but free to wrap at accessibility
+    /// text sizes so names are not cut.
+    func lineLimitUnlessLarge(_ lines: Int? = 1) -> some View {
+        modifier(LineLimitUnlessLargeModifier(lines: lines))
     }
 
     /// A headline figure: one line, shrinking only as a last resort at the largest text sizes.
