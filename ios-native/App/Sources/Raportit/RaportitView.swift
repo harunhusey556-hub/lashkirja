@@ -195,7 +195,8 @@ struct RaportitView: View {
             NavigationLink(value: Route.forDrill(ReportDrill.target(kind: kind, category: row.category, year: String(year)))) {
                 LabeledContent { MoneyText(amount: row.net) } label: {
                     VStack(alignment: .leading) {
-                        Text(row.category)
+                        // The label Kuitit shows ("Tarvikkeet & ostot", X081); the drill above keeps the id.
+                        Text(ReceiptCategory.label(for: row.category))
                         Text("\(row.count) kpl").font(.caption).foregroundStyle(Theme.ink2)
                     }
                 }

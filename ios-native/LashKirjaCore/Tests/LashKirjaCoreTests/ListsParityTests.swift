@@ -129,6 +129,21 @@ private func listsView(_ json: String) throws -> ReceiptPurchaseInvoiceView {
     #expect(ReceiptOstolaskuNotice.make(view: cancelled, receiptType: "meno") == .offer(text: "Ostolasku on peruttu, tämä on kuitti."))
 }
 
+// X072: a credit note is not asked whether it is a bill to be paid later.
+@Test func noticeOffersACreditNoteAsAnOstolaskusCredit() throws {
+    let none = try listsView(#"{"documentType":null,"purchaseInvoice":null}"#)
+    #expect(ReceiptOstolaskuNotice.make(view: none, receiptType: "meno", total: -50)
+        == .offer(text: "Onko tämä ostolaskun hyvitys?", action: "Merkitse ostolaskun hyvitykseksi"))
+    #expect(ReceiptOstolaskuNotice.make(view: none, receiptType: "meno", total: 50) == .offer(text: "Onko tämä lasku, joka maksetaan myöhemmin?"))
+    #expect(ReceiptOstolaskuNotice.make(view: none, receiptType: "meno", total: 50) == .offer(text: "Onko tämä lasku, joka maksetaan myöhemmin?", action: "Merkitse ostolaskuksi"))
+    let cancelled = try listsView(#"{"documentType":"invoice","purchaseInvoice":{"id":"pi1","status":"cancelled","displayStatus":"cancelled","dueDate":"2026-10-24","dueDateAssumed":false}}"#)
+    #expect(ReceiptOstolaskuNotice.make(view: cancelled, receiptType: "meno", total: -50)
+        == .offer(text: "Ostolasku on peruttu, tämä on kuitti.", action: "Merkitse ostolaskun hyvitykseksi"))
+    let filed = try listsDecode(ReceiptDocumentKindResult.self, #"{"purchaseInvoiceAction":"filed","purchaseInvoiceSkipped":null}"#)
+    #expect(filed.message(for: .invoice, credit: true) == "Tallennettu ostolaskun hyvitykseksi")
+    #expect(filed.message(for: .receipt, credit: true) == "Merkitty kuitiksi, ostolasku peruttiin")
+}
+
 @Test func noticeStaysSilentUntilKnownAndForSales() throws {
     #expect(ReceiptOstolaskuNotice.make(view: nil, receiptType: "meno") == nil)
     let none = try listsView(#"{"documentType":null,"purchaseInvoice":null}"#)

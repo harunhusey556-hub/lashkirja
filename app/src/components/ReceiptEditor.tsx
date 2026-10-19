@@ -216,6 +216,8 @@ export default function ReceiptEditor({ receiptId, seed }: ReceiptEditorProps) {
   const [conflict, setConflict] = useState(false);
   const [useCustomCategory, setUseCustomCategory] = useState(false);
   const [linkedTx, setLinkedTx] = useState<LinkedBankTx | null>(null);
+  // The stored total is negative: a credit note, which is filed as an ostolasku's credit (X072).
+  const [savedCredit, setSavedCredit] = useState(false);
   const [matchData, setMatchData] = useState<ReceiptMatchData>({
     status: "unlinked",
     matchCandidates: [],
@@ -578,6 +580,7 @@ export default function ReceiptEditor({ receiptId, seed }: ReceiptEditorProps) {
     setConflict(false);
     setUseCustomCategory(!knownCategory && Boolean(r.category));
     setLinkedTx(r.linkedTransaction || null);
+    setSavedCredit((r.totalAmount ?? 0) < 0);
     setMatchData(
       r.match ?? {
         status: r.linkedTransaction ? "linked" : "unlinked",
@@ -1231,7 +1234,9 @@ export default function ReceiptEditor({ receiptId, seed }: ReceiptEditorProps) {
 
                     {originalName && <p className="text-caption text-ink-2">{originalName}</p>}
 
-                    {isEdit && receiptId ? <OstolaskuNotice receiptId={receiptId} receiptType={formData.type} /> : null}
+                    {isEdit && receiptId ? (
+                      <OstolaskuNotice receiptId={receiptId} receiptType={formData.type} credit={savedCredit} />
+                    ) : null}
 
                     <div>
                       <label htmlFor="receipt-vendor" className={LABEL_CLASS}>Myyjä</label>

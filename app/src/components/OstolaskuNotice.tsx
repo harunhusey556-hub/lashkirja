@@ -33,16 +33,20 @@ const SKIP_TEXT: Record<string, string> = {
  * One document, one home: a receipt filed as an ostolasku says so and links
  * there, with its due date ("oletus" when the bill printed none). The owner
  * can also say what the document is - "Ei ole lasku" cancels the ostolasku
- * (kept, with its history), "Merkitse ostolaskuksi" files or reopens it.
+ * (kept, with its history), "Merkitse ostolaskuksi" files or reopens it. A
+ * credit note (`credit`, a negative total) is filed as an ostolasku's credit
+ * and is never asked whether it is a bill to be paid later (X072).
  */
 export function OstolaskuNoticeView({
   view,
   busy,
   onSetKind,
+  credit = false,
 }: {
   view: OstolaskuView;
   busy: boolean;
   onSetKind: (kind: "invoice" | "receipt") => void;
+  credit?: boolean;
 }) {
   const invoice = view.purchaseInvoice;
   if (invoice && invoice.status !== "cancelled") {
@@ -69,15 +73,27 @@ export function OstolaskuNoticeView({
   }
   return (
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-ink-2">
-      {invoice ? "Ostolasku on peruttu, tämä on kuitti." : "Onko tämä lasku, joka maksetaan myöhemmin?"}
+      {invoice
+        ? "Ostolasku on peruttu, tämä on kuitti."
+        : credit
+          ? "Onko tämä ostolaskun hyvitys?"
+          : "Onko tämä lasku, joka maksetaan myöhemmin?"}
       <button type="button" disabled={busy} onClick={() => onSetKind("invoice")} className={tintedButtonClass("accent")}>
-        Merkitse ostolaskuksi
+        {credit ? "Merkitse ostolaskun hyvitykseksi" : "Merkitse ostolaskuksi"}
       </button>
     </p>
   );
 }
 
-export default function OstolaskuNotice({ receiptId, receiptType }: { receiptId: string; receiptType: string }) {
+export default function OstolaskuNotice({
+  receiptId,
+  receiptType,
+  credit = false,
+}: {
+  receiptId: string;
+  receiptType: string;
+  credit?: boolean;
+}) {
   const [view, setView] = useState<OstolaskuView | null>(null);
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -118,7 +134,12 @@ export default function OstolaskuNotice({ receiptId, receiptType }: { receiptId:
       } else {
         showToast({
           tone: "success",
-          text: kind === "invoice" ? "Tallennettu ostolaskuksi" : "Merkitty kuitiksi, ostolasku peruttiin",
+          text:
+            kind === "invoice"
+              ? credit
+                ? "Tallennettu ostolaskun hyvitykseksi"
+                : "Tallennettu ostolaskuksi"
+              : "Merkitty kuitiksi, ostolasku peruttiin",
         });
       }
       setAttempt((value) => value + 1);
@@ -135,5 +156,5 @@ export default function OstolaskuNotice({ receiptId, receiptType }: { receiptId:
 
   // A sales document is never an ostolasku; nothing to say until the view is known.
   if (!view || (receiptType === "tulo" && !view.purchaseInvoice)) return null;
-  return <OstolaskuNoticeView view={view} busy={busy} onSetKind={(kind) => void setKind(kind)} />;
+  return <OstolaskuNoticeView view={view} busy={busy} credit={credit} onSetKind={(kind) => void setKind(kind)} />;
 }

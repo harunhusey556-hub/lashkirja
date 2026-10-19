@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// The screens the owner complained about (2026-10-12), proven on a simulator against the demo API
 /// (`demo-seed.ts --ci`, receipts given real picture files by the workflow): the delete confirmation
@@ -487,5 +488,67 @@ final class OwnerScreensTests: WalkTestCase {
         keep("h-saved", saved.map { "\(($0["supplierName"] as? String) ?? "") · \(($0["category"] as? String) ?? "nil")" } ?? "not found")
         guard let found = saved else { XCTFail("the demo API lists no ostolasku for Testitukku \(token)"); return }
         XCTAssertEqual(found["category"] as? String, "tarvikkeet", "the picked category was not stored as its code")
+    }
+
+    // X007 X109 X114 X125 X155: Koti's first task row cut the seed's long vendor name to 'Audit
+    // Hyvitys Odottaa…' while the amount column left room. The name reads whole, on at most two
+    // lines, and its amount and Hyväksy stay whole. Measured, not audited: the .textClipped audit
+    // flags text that wraps whole too (B2, run 39207976615).
+    func testI_KotiTaskNameNotClipped() {
+        guard selectTab("Koti") else { capture("i0-no-tab"); XCTFail("Koti did not open"); return }
+        let name = "Audit Hyvitys Odottaa Oy"
+        let party = app.staticTexts[name].firstMatch
+        guard party.waitForExistence(timeout: 20) else {
+            capture("i0-no-row"); tree("i0-no-row"); XCTFail("Koti lists no task for \(name)"); return
+        }
+        waitStill(party)
+        capture("i1-koti-tasks")
+        // The row's body text, at the size the simulator is set to (the runner shares it).
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        let whole = ceil((name as NSString).size(withAttributes: [.font: font]).width)
+        let lines = Int((party.frame.height / font.lineHeight).rounded())
+        keep("i-party", "\(party.frame), whole name \(whole) pt, one line \(font.lineHeight) pt")
+        // As wide as the whole name on one line, or wrapped onto a second: either way nothing is cut.
+        XCTAssertTrue(party.frame.width >= whole - 2 || lines == 2,
+                      "the name is cut: \(party.frame.width) of \(whole) pt on \(lines) line(s)")
+        XCTAssertLessThanOrEqual(lines, 2, "the name takes \(lines) lines")
+
+        // Not at the cost of the amount and the pill beside it: given the row first, the name and its
+        // long subtitle once left them about 32 pt, which cut both to an ellipsis.
+        let figure = "18,90\u{00A0}€"
+        let amounts = app.staticTexts.matching(NSPredicate(format: "label == %@", figure)).allElementsBoundByIndex
+        let pill = app.buttons["Hyväksy: \(name)"].firstMatch
+        guard let amount = amounts.first(where: { abs($0.frame.midY - party.frame.midY) < 40 }), pill.exists else {
+            tree("i1-no-trailing"); XCTFail("the row shows no \(figure) or no Hyväksy"); return
+        }
+        // MoneyText's digits are monospaced; the pill's text has TaskRow.pillLabel's 12 pt on each side.
+        let amountFont = UIFont.monospacedDigitSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize,
+                                                          weight: .semibold)
+        let pillFont = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .bold)
+        let amountWhole = ceil((figure as NSString).size(withAttributes: [.font: amountFont]).width)
+        let pillWhole = ceil(("Hyväksy" as NSString).size(withAttributes: [.font: pillFont]).width) + 24
+        keep("i-trailing", "amount \(amount.frame), whole \(amountWhole) pt; pill \(pill.frame), whole \(pillWhole) pt")
+        XCTAssertGreaterThanOrEqual(amount.frame.width, amountWhole - 2, "the amount is cut: \(amount.frame.width) of \(amountWhole) pt")
+        XCTAssertGreaterThanOrEqual(pill.frame.width, pillWhole - 2, "the Hyväksy pill is cut: \(pill.frame.width) of \(pillWhole) pt")
+    }
+
+    // X072: a credit note was asked 'Onko tämä lasku, joka maksetaan myöhemmin?' with 'Merkitse
+    // ostolaskuksi'. The seed's approved credit note 'Audit Hyvitys Oy' (−50,00 €) is offered as an
+    // ostolasku's credit instead.
+    func testJ_CreditNoteIsNotABillPaidLater() {
+        guard openKuitit() else { capture("j0-no-kuitit"); XCTFail("Kuitit did not open"); return }
+        guard tapLabel("label CONTAINS %@", "Audit Hyvitys Oy,") else {
+            capture("j0-no-row"); XCTFail("Kuitit lists no Audit Hyvitys Oy"); return
+        }
+        let offer = app.staticTexts["Onko tämä ostolaskun hyvitys?"].firstMatch
+        let bill = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "maksetaan myöhemmin")).firstMatch
+        // The notice comes with its own request, after the receipt.
+        let deadline = Date().addingTimeInterval(20)
+        while !offer.exists && !bill.exists && Date() < deadline { usleep(250_000) }
+        capture("j1-credit-note")
+        if !offer.exists { tree("j1-credit-note") }
+        XCTAssertFalse(bill.exists, "the credit note is asked whether it is a bill paid later")
+        XCTAssertTrue(offer.exists, "the credit note is not offered as an ostolasku's credit")
+        XCTAssertTrue(app.buttons["Merkitse ostolaskun hyvitykseksi"].exists, "no 'Merkitse ostolaskun hyvitykseksi'")
     }
 }

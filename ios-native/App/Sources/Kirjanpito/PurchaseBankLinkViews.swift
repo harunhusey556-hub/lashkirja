@@ -162,7 +162,9 @@ struct PurchaseBankLinkSheet: View {
         NavigationStack {
             BankRowPickerList(
                 path: "/api/purchase-invoices/\(invoice.id)/payments/candidates",
-                emptyText: "Lähteviä maksuja, joita ei ole vielä kohdistettu, ei löytynyt laskun ajalta. Hae nimellä tai summalla."
+                emptyText: "Lähteviä maksuja, joita ei ole vielä kohdistettu, ei löytynyt laskun ajalta. Hae nimellä tai summalla.",
+                // An ostolasku's payments are money out.
+                moneyIn: false
             ) {
                 LabeledContent(invoice.supplierName) { MoneyText(amount: invoice.open).fontWeight(.semibold) }
             } footer: {
@@ -194,6 +196,9 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
     @Environment(AppModel.self) private var app
     let path: String
     let emptyText: String
+    /// Which way the listed rows moved money: the API sends them unsigned, and each row shows its
+    /// cash sign as every other bank row does (C2).
+    let moneyIn: Bool
     @ViewBuilder let header: () -> Header
     @ViewBuilder let footer: () -> Footer
     let pick: (PurchaseBankCandidate) -> Void
@@ -267,7 +272,7 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
             Section {
                 ForEach(list.candidates.prefix(limit.visible(list.candidates.count))) { candidate in
                     Button { pick(candidate) } label: {
-                        PurchaseBankCandidateRow(candidate: candidate)
+                        PurchaseBankCandidateRow(candidate: candidate, moneyIn: moneyIn)
                     }
                     .buttonStyle(.pressable)
                     .accessibilityHint("Avaa vahvistus")
@@ -366,6 +371,7 @@ private struct BankRowSkeleton: View {
 
 struct PurchaseBankCandidateRow: View {
     let candidate: PurchaseBankCandidate
+    let moneyIn: Bool
 
     var body: some View {
         HStack(alignment: .top) {
@@ -379,7 +385,7 @@ struct PurchaseBankCandidateRow: View {
                 }
             }
             Spacer()
-            MoneyText(amount: candidate.amount).font(.subheadline.weight(.semibold))
+            MoneyText(amount: MoneyDirection.rowAmount(candidate.amount, moneyIn: moneyIn)).font(.subheadline.weight(.semibold))
         }
         .contentShape(Rectangle())
     }
@@ -659,10 +665,12 @@ struct ReceiptBankPickerSheet: View {
         NavigationStack {
             BankRowPickerList(
                 path: "/api/receipts/\(receipt.id)/bank-candidates",
-                emptyText: "Vapaita pankkitapahtumia ei löytynyt. Hae nimellä tai summalla."
+                emptyText: "Vapaita pankkitapahtumia ei löytynyt. Hae nimellä tai summalla.",
+                moneyIn: receipt.bankMoneyIn
             ) {
+                // As on the receipt and its rows: an expense −9,43 €, a credit note's refund 50,00 € (X038).
                 LabeledContent(receipt.title) {
-                    if let amount = receipt.totalAmount { MoneyText(amount: amount).fontWeight(.semibold) }
+                    if let amount = receipt.shownAmount { MoneyText(amount: amount).fontWeight(.semibold) }
                 }
                 if let failure { Text(failure).font(.subheadline).foregroundStyle(Theme.danger).transition(.opacity) }
             } footer: {
@@ -679,7 +687,8 @@ struct ReceiptBankPickerSheet: View {
             .confirmSheet(presenting: $picked) { candidate in
                 ConfirmRequest(
                     title: "Kohdistetaanko · \(candidate.title)?",
-                    message: [candidate.detail, Money.format(candidate.amount)].filter { !$0.isEmpty }.joined(separator: " · "),
+                    message: [candidate.detail, Money.format(MoneyDirection.rowAmount(candidate.amount, moneyIn: receipt.bankMoneyIn))]
+                        .filter { !$0.isEmpty }.joined(separator: " · "),
                     confirmTitle: "Kohdista",
                     isDestructive: false,
                     onConfirm: { Task { await link(candidate) } }

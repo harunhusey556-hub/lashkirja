@@ -40,7 +40,8 @@ struct ReceiptDetailView: View {
                 }
                 Section {
                     VStack(spacing: 6) {
-                        if let amount = r.totalAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
+                        // The sign the list and the bank row show: money out −9,43 €, a credit note's refund 50,00 € (C2).
+                        if let amount = r.shownAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
                         // The euro total above is what the books count; the document's own figure says its currency.
                         if let original = ReceiptCurrency.originalLine(currency: r.currency, originalAmount: r.originalAmount) {
                             Text("Alkuperäinen summa \(original)").font(.subheadline).foregroundStyle(Theme.ink2)
@@ -50,7 +51,7 @@ struct ReceiptDetailView: View {
                             Text(rateLine).font(.caption).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
                         }
                         Text(r.title).font(.headline)
-                        // A credit note is said in words too, not only by the minus sign.
+                        // A credit note is said in words: its refund reads as money back, without a sign.
                         Text([r.creditNoteLabel, r.isIncome ? "Tulo" : "Meno"].compactMap { $0 }.joined(separator: " · "))
                             .font(.caption).foregroundStyle(Theme.ink2)
                     }
@@ -176,7 +177,7 @@ struct ReceiptDetailView: View {
     @ViewBuilder private func previewSections(_ r: Receipt) -> some View {
         Section {
             VStack(spacing: 6) {
-                if let amount = r.totalAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
+                if let amount = r.shownAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
                 Text(r.title).font(.headline)
                 Text(r.isIncome ? "Tulo" : "Meno").font(.caption).foregroundStyle(Theme.ink2)
             }
@@ -208,7 +209,7 @@ struct ReceiptDetailView: View {
     /// One document, one home: a receipt filed as an ostolasku says so and links there; the owner can
     /// also say what the document is ("Ei ole lasku" cancels the ostolasku, "Merkitse ostolaskuksi" files it).
     @ViewBuilder private func ostolaskuSection(_ r: Receipt) -> some View {
-        if let notice = ReceiptOstolaskuNotice.make(view: ostolasku, receiptType: r.type) {
+        if let notice = ReceiptOstolaskuNotice.make(view: ostolasku, receiptType: r.type, total: r.totalAmount) {
             switch notice {
             case .filed(let invoiceId, let headline, let canMarkAsReceipt):
                 Section {
@@ -222,10 +223,10 @@ struct ReceiptDetailView: View {
                     }
                 }
                 .listRowBackground(Theme.accentSoft)
-            case .offer(let text):
+            case .offer(let text, let action):
                 Section {
                     Text(text).font(.subheadline).foregroundStyle(Theme.ink2)
-                    Button { Task { await setKind(.invoice) } } label: { Label("Merkitse ostolaskuksi", systemImage: "tray.and.arrow.down") }
+                    Button { Task { await setKind(.invoice) } } label: { Label(action, systemImage: "tray.and.arrow.down") }
                         .disabled(kindBusy)
                 }
             }
@@ -247,7 +248,7 @@ struct ReceiptDetailView: View {
                 "PATCH", "/api/receipts/\(receiptId)", body: ReceiptDocumentKindBody(kind)
             )
             Haptics.success()
-            showToast(result.message(for: kind), action: nil, run: nil)
+            showToast(result.message(for: kind, credit: state.value?.isCreditNote == true), action: nil, run: nil)
             app.dataVersion += 1
             let view = await fetchOstolasku()
             withMotion(.snappy) { ostolasku = view }
@@ -399,9 +400,7 @@ struct ReceiptDetailView: View {
     }
 
     @ViewBuilder private func matchDetail(_ tx: Receipt.LinkedTransaction) -> some View {
-        let reasons = ReceiptMatchText.reasons(tx.bestReasons)
-        let percent = ReceiptMatchText.percent(tx.bestScore)
-        Text(reasons.isEmpty ? percent : "\(reasons) · \(percent)").font(.caption).foregroundStyle(Theme.ink2)
+        Text(ReceiptMatchText.detail(tx)).font(.caption).foregroundStyle(Theme.ink2)
     }
 
     private func confirm(_ transactionId: String) async {

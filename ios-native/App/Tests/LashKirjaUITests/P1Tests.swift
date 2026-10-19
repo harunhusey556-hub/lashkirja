@@ -14,9 +14,13 @@ final class P1Tests: WalkTestCase {
         tab("Lisää"); sleep(1); let opened = tap("Uusi myyntilasku")
         measure("create invoice (Lisää)", reached: opened && app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15))
     }
+    /// N5: the tasks lead Koti. The CI seed puts nine tasks before the overdue invoice (N1), so it is
+    /// behind "Näytä enemmän", which is in reach as Koti opens; the row then takes one scroll.
+    /// Corrected pin (FIX-ROUND §2): zero scrolls would need another seed, or overdue rows ahead of
+    /// the server's other kinds.
     func test03_OpenOverdueInvoice() {
         let opened = openOverdueFromKoti()
-        measure("open overdue invoice (Koti)", reached: opened && exists("label BEGINSWITH %@", "Myöhässä "))
+        measure("open overdue invoice (Koti)", reached: opened && exists("label BEGINSWITH %@", "Myöhässä "), maxScrolls: 1)
     }
     /// U023: the seed had no pending receipt, so this opened an approved one and passed on any detail.
     /// The task ends on the pending receipt's Hyväksy, on screen; tapping it would approve the seed's
@@ -187,6 +191,37 @@ final class P1Tests: WalkTestCase {
         if !onAll { dump(app, "p1-13-bank-from-koti") }
         check("P1 13 heading shown \(shown), Pankki with Toiminnot \(opened), Kaikki selected \(onAll)", onAll)
         measure("bank from Koti", reached: onAll, maxTaps: 1)
+    }
+
+    /// N5 (merged-plan change 2): "Avoimet myyntilaskut" opens Myynti on what the row is about. The
+    /// seed's Lasku 2 is late, so that is "Myöhässä", not every invoice with the paid ones.
+    func test14_KotiOpenInvoicesFiltered() {
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Avoimet myyntilaskut")).firstMatch
+        let shown = row.waitForExistence(timeout: 20) && reveal(row, scrolls: 8)
+        if shown { row.tap(); taps += 1 }
+        let late = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND selected == true", "Myöhässä")).firstMatch
+        let filtered = shown && late.waitForExistence(timeout: 15)
+        if !filtered { dump(app, "p1-14-open-invoices") }
+        check("P1 14 Avoimet myyntilaskut shown \(shown), Myynti on Myöhässä \(filtered)", filtered)
+        measure("open invoices from Koti (filtered)", reached: filtered, maxTaps: 1)
+    }
+
+    /// N5 (merged-plan change 3): what needs the owner leads Koti. A receipt waiting for approval is
+    /// on the first screen, above Rahatilanne: its row opens the receipt, whose Hyväksy is the second
+    /// tap. The task ends on Hyväksy, as test04 does.
+    func test15_ApproveFromKoti() {
+        let party = app.staticTexts["Lumo Kosmetiikka Oy"].firstMatch
+        let shown = party.waitForExistence(timeout: 20) && reveal(party, scrolls: 0)
+        let heading = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rahatilanne")).firstMatch
+        // Above the balance card (Q3); the old order drew the tasks under it.
+        let first = shown && (!heading.exists || party.frame.maxY <= heading.frame.minY)
+        if first { party.tap(); taps += 1 }
+        let loaded = first && app.navigationBars["Kuitti"].buttons["Toiminnot"].waitForExistence(timeout: 15)
+        let approve = app.buttons.matching(NSPredicate(format: "label == %@", "Hyväksy")).firstMatch
+        let reached = loaded && reveal(approve)
+        if !reached { dump(app, "p1-15-approve-from-koti") }
+        check("P1 15 pending row on the first screen \(shown), above Rahatilanne \(first), Hyväksy \(reached)", reached)
+        measure("approve receipt from Koti", reached: reached, maxTaps: 2)
     }
 
     /// The screen on top is `title`; recorded under `step` and asserted, and a miss keeps the tree.

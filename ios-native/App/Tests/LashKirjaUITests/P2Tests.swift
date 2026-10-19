@@ -1,6 +1,7 @@
 import XCTest
 
-/// P2 additions: Spotlight routes, receipt thumbnails, next invoice number, dates in Helsinki.
+/// P2 additions: Spotlight routes, receipt thumbnails, next invoice number, dates in Helsinki, one
+/// sign per figure, Koti's "Näytä kaikki" counts, category labels.
 final class P2Tests: WalkTestCase {
     /// Reads ids from the demo API the app uses (through the walk proxy), with the demo-seed login.
     func demoJSON(_ path: String) -> [String: Any] {
@@ -169,6 +170,141 @@ final class P2Tests: WalkTestCase {
         let shownIso = shown.flatMap(HelsinkiDay.init(shown:))?.iso
         check("P2 E the saved paidDate is the day the picker showed (\(paid ?? "none") vs \(shownIso ?? "none"))", paid != nil && paid == shownIso)
         XCTAssertEqual(paid, shownIso, "paidDate against the day Maksupäivä showed")
+    }
+
+    /// X001 X038 X068 X080: one figure, one sign, on every screen. Money out reads with a minus and
+    /// money back without. The seed's pending credit note Audit Hyvitys Odottaa Oy (booked −18,90 €)
+    /// is 18,90 € on Koti, in Kuitit's queue and on its page. The expense ABC Prisma Kotka and its
+    /// bank row KSO ABC Sahkonlataus are −9,43 € in the list, on the page, as the page's bank row and
+    /// in "Valitse pankkitapahtuma".
+    func testK_AmountsAgree() {
+        let refund = "18,90\u{00A0}€", expense = "\u{2212}9,43\u{00A0}€"
+
+        let party = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Audit Hyvitys Odottaa Oy", "Audit Hyvitys Odottaa Oy,")).firstMatch
+        let koti = party.waitForExistence(timeout: 20) ? moneyBeside(party) : nil
+
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        let queueRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audit Hyvitys Odottaa Oy,")).firstMatch
+        let queue = queueRow.waitForExistence(timeout: 15) && reveal(queueRow) ? money(in: queueRow.label) : nil
+        var page: String?
+        if queue != nil {
+            queueRow.tap(); taps += 1
+            if app.navigationBars["Kuitti"].buttons["Toiminnot"].waitForExistence(timeout: 15) { page = heroAmount() }
+            shot("p2k-credit-note")
+            back("Kuitti")
+        }
+
+        // Kuitit's rows are drawn as they scroll into view: looked for by scrolling, not by waiting.
+        let listRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "ABC Prisma Kotka,")).firstMatch
+        let list = reveal(listRow, scrolls: 8) ? money(in: listRow.label) : nil
+        var abcPage: String?, bankRow: String?, picker: String?
+        if list != nil {
+            listRow.tap(); taps += 1
+            if app.navigationBars["Kuitti"].buttons["Toiminnot"].waitForExistence(timeout: 15) { abcPage = heroAmount() }
+            let candidate = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "KSO ABC Sahkonlataus")).firstMatch
+            if reveal(candidate) { bankRow = money(in: candidate.label) }
+            shot("p2k-expense")
+            let other = app.buttons["Valitse muu pankkitapahtuma"].firstMatch
+            if reveal(other) {
+                other.tap(); taps += 1
+                let sheet = app.navigationBars["Valitse pankkitapahtuma"]
+                // The page under the sheet lists the same row; only the sheet's can be tapped.
+                let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "KSO ABC Sahkonlataus"))
+                if sheet.waitForExistence(timeout: 10), let row = firstHittable(rows, timeout: 20) { picker = money(in: row.label) }
+                shot("p2k-picker")
+                if sheet.buttons["Sulje"].exists { sheet.buttons["Sulje"].tap() }
+            }
+        }
+
+        let seen = "Koti \(koti ?? "-"), queue \(queue ?? "-"), page \(page ?? "-"); list \(list ?? "-"), page \(abcPage ?? "-"), bank row \(bankRow ?? "-"), picker \(picker ?? "-")"
+        let agree = [koti, queue, page].allSatisfy { $0 == refund } && [list, abcPage, bankRow, picker].allSatisfy { $0 == expense }
+        if !agree { dump(app, "p2k-amounts") }
+        check("P2 K one sign per figure: \(seen)", agree)
+        XCTAssertEqual(koti, refund, "Koti's task row for the pending credit note")
+        XCTAssertEqual(queue, refund, "Kuitit's queue row for the pending credit note")
+        XCTAssertEqual(page, refund, "the pending credit note's page")
+        XCTAssertEqual(list, expense, "Kuitit's row for ABC Prisma Kotka")
+        XCTAssertEqual(abcPage, expense, "ABC Prisma Kotka's page")
+        XCTAssertEqual(bankRow, expense, "ABC Prisma Kotka's bank row KSO ABC Sahkonlataus")
+        XCTAssertEqual(picker, expense, "KSO ABC Sahkonlataus in Valitse pankkitapahtuma")
+    }
+
+    /// X005: Koti says how many of a kind there are. A kind with more than the three rows the server
+    /// sends gets "Näytä kaikki (N)", N being the API's itemTotals, and it opens the bank rows that
+    /// need action (Q1).
+    func testL_KotiShowAllMatchesTheAPI() {
+        let today = HelsinkiDay.today()
+        let dashboard = demoJSON(String(format: "/api/dashboard?month=%04d-%02d", today.year, today.month))
+        let totals = dashboard["itemTotals"] as? [String: Int] ?? [:]
+        let sent = (dashboard["items"] as? [[String: Any]] ?? []).filter { $0["kind"] as? String == "missing_receipt" }.count
+        guard let total = totals["missing_receipt"], total > sent else {
+            XCTFail("the CI seed should leave more bank rows without a receipt than the \(sent) Koti is sent: \(totals)"); return
+        }
+        let title = "Näytä kaikki (\(total))"
+        // The row reads as one label or as its two texts, by iOS version.
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+        let kind = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Pankkitapahtumat ilman kuittia")).firstMatch
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä enemmän")).firstMatch
+        // Koti shows five tasks at first; the row may be behind "Näytä enemmän".
+        if !row.waitForExistence(timeout: 20), more.exists, reveal(more) { more.tap(); taps += 1 }
+        let shown = row.waitForExistence(timeout: 5) && reveal(row) && kind.exists
+        if !shown { dump(app, "p2l-koti-show-all") }
+        check("P2 L Koti shows '\(title)' for the bank rows without a receipt", shown)
+        XCTAssertTrue(shown, "Koti has no '\(title) · Pankkitapahtumat ilman kuittia' (itemTotals \(totals))")
+        guard shown else { return }
+        row.tap(); taps += 1
+        let needsAction = app.segmentedControls.firstMatch.buttons["Vaatii toimia"]
+        let opened = app.navigationBars["Pankki"].waitForExistence(timeout: 15) && needsAction.waitForExistence(timeout: 10) && needsAction.isSelected
+        shot("p2l-show-all")
+        check("P2 L Näytä kaikki opens Pankki on Vaatii toimia", opened)
+        XCTAssertTrue(opened, "Näytä kaikki did not open Pankki on Vaatii toimia")
+    }
+
+    /// X081: Raportit's Luokittain names a category as Kuitit does ('Tarvikkeet & ostot'), not by
+    /// the id it is stored under ('tarvikkeet').
+    func testM_RaportitCategoryLabels() {
+        XCTAssertTrue(selectTab("Raportit"), "Raportit is not selected")
+        // The year's figures first: the categories come in the same answer, at the bottom.
+        _ = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", Self.moneyPattern)).firstMatch.waitForExistence(timeout: 20)
+        let label = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Tarvikkeet & ostot")).firstMatch
+        let shown = reveal(label, scrolls: 10)
+        let raw = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "tarvikkeet")).firstMatch
+        shot("p2m-luokittain")
+        if !shown { dump(app, "p2m-luokittain") }
+        check("P2 M Luokittain reads Tarvikkeet & ostot \(shown), no raw id \(!raw.exists)", shown && !raw.exists)
+        XCTAssertTrue(shown, "Raportit's Luokittain has no 'Tarvikkeet & ostot'")
+        XCTAssertFalse(raw.exists, "Raportit shows the stored id: \(raw.exists ? raw.label : "")")
+    }
+
+    /// A money figure as the app prints it: "−9,43 €", "1 234,50 €" (U+2212 minus, no-break spaces).
+    private static let moneyPattern = "[+\u{2212}-]?[0-9][0-9\u{00A0} ]*,[0-9]{2}\u{00A0}€"
+
+    /// The first money figure in a label ("ABC Prisma Kotka, 16.10.2026 · Tarvikkeet & ostot, −9,43 €").
+    private func money(in label: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: Self.moneyPattern),
+              let match = regex.firstMatch(in: label, range: NSRange(label.startIndex..., in: label)),
+              let range = Range(match.range, in: label) else { return nil }
+        return String(label[range])
+    }
+
+    /// The figure on `anchor`'s row: in its label when the row reads as one element, else the money
+    /// text right of it nearest its middle.
+    private func moneyBeside(_ anchor: XCUIElement) -> String? {
+        if let inLabel = money(in: anchor.label) { return inLabel }
+        let frame = anchor.frame
+        let texts = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", Self.moneyPattern)).allElementsBoundByIndex
+        return texts
+            .filter { $0.frame.minX >= frame.maxX && abs($0.frame.midY - frame.midY) < 40 }
+            .min { abs($0.frame.midY - frame.midY) < abs($1.frame.midY - frame.midY) }?
+            .label
+    }
+
+    /// A receipt page's figure: the tallest money text on the screen.
+    private func heroAmount() -> String? {
+        app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", Self.moneyPattern)).allElementsBoundByIndex
+            .max { $0.frame.height < $1.frame.height }?
+            .label
     }
 
     /// A fresh launch with the device in `zone`; the simulator itself runs in UTC.

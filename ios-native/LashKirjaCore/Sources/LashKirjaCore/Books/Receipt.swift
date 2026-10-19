@@ -12,6 +12,8 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
         /// Only on a suggestion or a candidate.
         public let score: Double?
         public let reasons: [String]?
+        /// A candidate's reasons in Finnish ("summa sama"), as the bank row picker gives them.
+        public let explanation: [String]?
 
         public var bestScore: Double? { score ?? matchScore }
         public var bestReasons: [String]? { reasons ?? matchReasons }

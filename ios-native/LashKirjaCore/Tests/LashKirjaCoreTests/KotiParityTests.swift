@@ -44,7 +44,7 @@ private let now = ISO8601DateFormatter().date(from: "2026-10-03T09:00:00Z")!
 @Test func pendingReceiptWithGapsIsCompletedNotApproved() throws {
     let ready = try item(#"{"id":"p1","kind":"pending_receipt","receiptId":"R1","party":"K-Market","amount":12.4,"category":"tarvikkeet","vatRate":25.5,"gaps":[]}"#)
     #expect(Koti.taskAction(ready, now: now) == .approve)
-    #expect(Koti.pendingSubtitle(ready) == "tarvikkeet · ALV 25,5 %")
+    #expect(Koti.pendingSubtitle(ready) == "Tarvikkeet & ostot · ALV 25,5 %")
 
     let gaps = try item(#"{"id":"p2","kind":"pending_receipt","receiptId":"R2","party":"kuitti.jpg","amount":null,"gaps":["amount","vendor"]}"#)
     #expect(Koti.taskAction(gaps, now: now) == .complete)
@@ -53,6 +53,90 @@ private let now = ISO8601DateFormatter().date(from: "2026-10-03T09:00:00Z")!
 
     let bare = try item(#"{"id":"p3","kind":"pending_receipt","receiptId":"R3","party":"S-Market","amount":3,"gaps":[]}"#)
     #expect(Koti.pendingSubtitle(bare) == "Tarkista luokka ja ALV")
+}
+
+// C2: a credit note says it is one, and its figure reads as money back (X001).
+@Test func pendingCreditNoteSaysItIsOne() throws {
+    let credit = try item(#"{"id":"p4","kind":"pending_receipt","receiptId":"R4","party":"Audit Hyvitys Odottaa Oy","amount":-18.9,"type":"meno","category":"tarvikkeet","vatRate":25.5,"gaps":[]}"#)
+    #expect(Koti.pendingSubtitle(credit) == "Hyvityslasku · Tarvikkeet & ostot · ALV 25,5 %")
+    #expect(Koti.taskAmount(credit) == Decimal(string: "18.9"))
+    let expense = try item(#"{"id":"p5","kind":"pending_receipt","receiptId":"R5","party":"K-Market","amount":12.4,"type":"meno","gaps":[]}"#)
+    #expect(Koti.pendingSubtitle(expense) == "Tarkista luokka ja ALV")
+    #expect(Koti.taskAmount(expense) == Decimal(string: "-12.4"))
+    let sale = try item(#"{"id":"p6","kind":"pending_receipt","receiptId":"R6","party":"MobilePay","amount":8.5,"type":"tulo","gaps":[]}"#)
+    #expect(Koti.taskAmount(sale) == Decimal(string: "8.5"))
+    // A bank row and an invoice keep the server's figure.
+    let outflow = try item(#"{"id":"m1","kind":"missing_receipt","transactionId":"T1","party":"Neste","amount":-5}"#)
+    #expect(Koti.taskAmount(outflow) == -5)
+    let overdue = try item(#"{"id":"o1","kind":"overdue_invoice","invoiceId":"I1","party":"Harun","amount":81.58}"#)
+    #expect(Koti.taskAmount(overdue) == Decimal(string: "81.58"))
+}
+
+// X081: the category by its label; one the app does not know shows as stored.
+@Test func pendingSubtitleNamesTheCategoryByItsLabel() throws {
+    let custom = try item(#"{"id":"p7","kind":"pending_receipt","receiptId":"R7","party":"Kukka","amount":3,"category":"Kukat","vatRate":14,"gaps":[]}"#)
+    #expect(Koti.pendingSubtitle(custom) == "Kukat · ALV 14 %")
+}
+
+// MARK: Näytä kaikki and the bank-mismatch task (web DashboardClient moreRows, buildAccountTasks)
+
+private func fixture(_ name: String) throws -> Data {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/\(name)")
+    return try Data(contentsOf: url)
+}
+
+private func missingRows(_ count: Int) -> String {
+    (1...count).map { #"{"id":"m\#($0)","kind":"missing_receipt","transactionId":"T\#($0)","party":"Kauppa \#($0)","amount":-\#($0)}"# }
+        .joined(separator: ",")
+}
+
+@Test func showAllFollowsAKindWithMoreThanIsShown() throws {
+    // The web's fixture: four bank rows without a receipt, three of them sent.
+    let real = try JSONDecoder().decode(Dashboard.self, from: fixture("dashboard-items.json"))
+    let entries = Koti.taskEntries(real, visible: real.items, atCurrentMonth: true)
+    #expect(entries.count == real.items.count + 1)
+    #expect(entries.last == .showAll(.missingReceipt, total: 4))
+
+    let d = try dashboard(#""items":["# + missingRows(3) + #"],"itemTotals":{"missing_receipt":30,"pending_receipt":0}"#)
+    #expect(Koti.taskEntries(d, visible: d.items, atCurrentMonth: true).map(\.id) == ["m1", "m2", "m3", "more:missing_receipt"])
+    #expect(Koti.taskEntries(d, visible: d.items, atCurrentMonth: true).last == .showAll(.missingReceipt, total: 30))
+    #expect(Koti.showAllTitle(total: 30) == "Näytä kaikki (30)")
+    #expect(Koti.showAllLabel(.missingReceipt) == "Pankkitapahtumat ilman kuittia")
+    #expect(Koti.showAllLabel(.pendingReceipt) == "Hyväksyntää odottavat kuitit")
+    // A row the owner just acted on leaves the total too.
+    #expect(Koti.taskEntries(d, visible: Array(d.items.dropFirst()), atCurrentMonth: true).last == .showAll(.missingReceipt, total: 29))
+    // Everything shown, or a server without the totals: no row.
+    let all = try dashboard(#""items":["# + missingRows(3) + #"],"itemTotals":{"missing_receipt":3}"#)
+    #expect(Koti.taskEntries(all, visible: all.items, atCurrentMonth: true).map(\.id) == ["m1", "m2", "m3"])
+    let old = try dashboard(#""items":["# + missingRows(3) + #"]"#)
+    #expect(Koti.taskEntries(old, visible: old.items, atCurrentMonth: true).count == 3)
+}
+
+@Test func showAllKeepsTheServersOrderOfKinds() throws {
+    let d = try dashboard(#"""
+    "items":[
+      {"id":"p1","kind":"pending_receipt","receiptId":"R1","party":"Lumo","amount":23.8,"type":"meno","gaps":[]},
+      {"id":"m1","kind":"missing_receipt","transactionId":"T1","party":"Neste","amount":-5},
+      {"id":"o1","kind":"overdue_invoice","invoiceId":"I1","party":"Kauneus Oy","amount":602.4},
+      {"id":"x1","kind":"something_new","party":"?"}
+    ],
+    "itemTotals":{"pending_receipt":5,"missing_receipt":1,"overdue_invoice":4}
+    """#)
+    #expect(Koti.taskEntries(d, visible: d.items, atCurrentMonth: true).map(\.id)
+        == ["p1", "more:pending_receipt", "m1", "o1", "more:overdue_invoice", "x1"])
+}
+
+@Test func bankMismatchIsATaskOfTheCurrentMonth() throws {
+    let d = try dashboard(#""bank":{"totalBalance":1812.21,"accountCount":1,"needsAttention":1,"state":"connected","hasBalance":true}"#)
+    #expect(Koti.taskEntries(d, visible: [], atCurrentMonth: true) == [.bankMismatch(accounts: 1)])
+    #expect(Koti.bankMismatchTitle(accounts: 1) == "Pankkitilin saldo ei täsmää")
+    #expect(Koti.bankMismatchTitle(accounts: 2) == "2 pankkitilin saldo ei täsmää")
+    #expect(Koti.bankMismatchSubtitle == "Tarkista tiliotteet")
+    #expect(Koti.bankMismatchAction == "Tarkista")
+    // Not tied to the month on screen: only the current month shows it, as on the web.
+    #expect(Koti.taskEntries(d, visible: [], atCurrentMonth: false).isEmpty)
+    let fine = try dashboard(#""bank":{"totalBalance":1,"accountCount":1,"needsAttention":0,"state":"connected","hasBalance":true}"#)
+    #expect(Koti.taskEntries(fine, visible: [], atCurrentMonth: true).isEmpty)
 }
 
 @Test func approvalGapWording() {

@@ -73,7 +73,7 @@ import { kotiBankRow, kotiBankState, type KotiBank } from "@/lib/koti-bank";
 import { BalanceTrendCard, type BalanceTrendPoint } from "@/components/charts/BalanceTrendCard";
 import { handledDetail, handledHref, handledTitle, type Handled } from "@/lib/koti-handled";
 import { useVatDue } from "@/components/useVatDue";
-import { approvalGapText } from "@/lib/receipt-approval";
+import { bankRowAmount, pendingReceiptSecondary } from "@/lib/koti-tasks";
 import { requestReceiptCapture, requestStatementImport } from "@/lib/capture-request";
 import { AnimatedRows } from "@/components/AnimatedRows";
 import { armNavigation } from "@/lib/nav-direction";
@@ -185,10 +185,6 @@ const KIND_LIST: Record<ItemKind, { href: string; label: string }> = {
   payment_duplicate: { href: "/tyot", label: "Mahdolliset kaksoiskirjaukset" },
   draft_invoice: { href: "/laskut?status=draft", label: "Lähettämättömät laskut" },
 };
-
-function vatRateText(rate: number): string {
-  return `ALV ${String(rate).replace(".", ",")} %`;
-}
 
 function currentMonth(): string {
   return helsinkiMonthKey();
@@ -526,12 +522,7 @@ export default function DashboardClient() {
           icon: Tag,
           title: item.party,
           amount: item.amount == null ? undefined : formatEur(item.amount),
-          secondary:
-            gaps.length > 0
-              ? approvalGapText(gaps)
-              : item.category && item.vatRate != null
-                ? `${item.category} · ${vatRateText(item.vatRate)}`
-                : item.category || (item.vatRate != null ? vatRateText(item.vatRate) : "Tarkista luokka ja ALV"),
+          secondary: pendingReceiptSecondary({ ...item, gaps }),
           pill: gaps.length > 0 ? "Täydennä" : "Hyväksy",
           blocking: true,
           href: detailHref("receipt", item.receiptId),
@@ -559,7 +550,7 @@ export default function DashboardClient() {
           key: item.id,
           icon: Camera,
           title: item.party,
-          amount: formatEur(Math.abs(item.amount)),
+          amount: bankRowAmount(item.amount),
           amountTone: item.amount > 0 ? "positive" : "default",
           secondary: item.date ? `Kuitti puuttuu · ${formatDayMonth(item.date)}` : "Kuitti puuttuu",
           pill: "Kuvaa kuitti",
@@ -573,7 +564,7 @@ export default function DashboardClient() {
           key: item.id,
           icon: ArrowLeftRight,
           title: item.party,
-          amount: formatEur(Math.abs(item.amount)),
+          amount: bankRowAmount(item.amount),
           secondary: "Kohdistusehdotus · tarkista",
           pill: "Tarkista",
           blocking: true,
