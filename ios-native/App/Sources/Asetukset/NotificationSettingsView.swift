@@ -64,7 +64,10 @@ struct NotificationSettingsView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         .navigationTitle("Ilmoitukset")
+        .navigationBarTitleDisplayMode(.inline)
         .task { status = await AppNotifications.shared.permission() }
         // Back from iOS's own settings: the permission may have changed there.
         .onChange(of: scenePhase) { _, phase in

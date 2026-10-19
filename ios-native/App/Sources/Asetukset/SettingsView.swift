@@ -242,6 +242,8 @@ struct ProfileForm: View {
             }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         .formKeyboard()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -340,6 +342,8 @@ struct PasswordView: View {
             } footer: { Text("Vähintään 8 merkkiä.") }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         .formKeyboard()
         .navigationTitle("Vaihda salasana")
         .navigationBarTitleDisplayMode(.inline)
@@ -403,7 +407,10 @@ struct DevicesView: View {
             }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         .navigationTitle("Laitteet")
+        .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
         .confirmSheet(presenting: $confirmSession) { session in

@@ -445,6 +445,8 @@ private struct ConversationsSheet: View {
                     Section { moreButton(title) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             // The empty state is not a row: a row that comes and goes beside the swiped
             // rows upset the list's row count while a swipe removal was animating.
             .overlay {

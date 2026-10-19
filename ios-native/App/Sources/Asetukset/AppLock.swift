@@ -325,8 +325,11 @@ struct AppLockSettingsView: View {
             }
             if let message { Text(message).foregroundStyle(Theme.danger) }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         .formKeyboard()
         .navigationTitle("Sovelluslukitus")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func enable() {

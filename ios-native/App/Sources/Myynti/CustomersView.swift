@@ -415,6 +415,8 @@ struct CustomerFormSheet: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi asiakas" : "Muokkaa asiakasta")
             .navigationBarTitleDisplayMode(.inline)
@@ -516,6 +518,8 @@ struct CustomerImportSheet: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .navigationTitle("Tuo asiakkaita")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -605,6 +609,8 @@ struct CustomerMergeSheet: View {
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .navigationTitle("Yhdistä kaksoiskappale")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -191,6 +191,8 @@ struct EmailTemplateEditor: View {
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi malli" : "Muokkaa mallia")
             .navigationBarTitleDisplayMode(.inline)

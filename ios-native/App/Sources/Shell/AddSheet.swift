@@ -55,6 +55,8 @@ struct AddSheet: View {
                     Text(notice).font(.footnote).foregroundStyle(Theme.ink2).transition(.opacity)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             // The answer of an import or a mail fetch fades in under the actions; the mailbox
             // row's words change by a fade once it is known whether a mailbox is connected.
             .motion(.snappy, value: notice)

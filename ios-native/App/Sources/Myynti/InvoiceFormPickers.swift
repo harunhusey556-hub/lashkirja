@@ -73,6 +73,8 @@ struct CustomerPickerSheet: View {
                     if rows.isEmpty && !search.isEmpty { Text("Ei asiakkaita haulla \u{201C}\(search)\u{201D}.") }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Nimi, Y-tunnus tai sähköposti")
             .onChange(of: search) { limit.reset() }
             .navigationTitle("Valitse asiakas")
@@ -132,6 +134,8 @@ struct CatalogPickerSheet: View {
                     Text("Pyyhkäise tuotetta vasemmalle poistaaksesi sen valikosta. Laskut, joilla sitä on käytetty, eivät muutu.")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .searchable(text: $search, prompt: "Hae tuotetta")
             .onChange(of: search) { limit.reset() }
             .navigationTitle("Lisää tuotteista")

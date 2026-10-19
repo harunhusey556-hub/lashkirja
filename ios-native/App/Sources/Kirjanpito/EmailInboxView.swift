@@ -124,7 +124,16 @@ struct EmailInboxView: View {
             if mailboxes.isEmpty {
                 Section {
                     ContentUnavailableView {
-                        Label("Sähköpostia ei ole yhdistetty", systemImage: "envelope.badge")
+                        // In a list row the title was laid out on one line and cut mid-word
+                        // ('Sähköpostia ei ole yhdist…', M073): it takes the lines it needs.
+                        Label {
+                            Text("Sähköpostia ei ole yhdistetty")
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "envelope.badge")
+                        }
                     } description: {
                         Text("Yhdistä sähköpostiosoite, niin siihen tulevat laskut haetaan tänne. Liitteet, jotka eivät ole laskuja, arkistoidaan.")
                     } actions: {

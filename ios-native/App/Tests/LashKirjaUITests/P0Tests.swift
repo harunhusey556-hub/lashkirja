@@ -163,4 +163,98 @@ final class P0Tests: WalkTestCase {
         sleep(1)
         check("P0.5 Jatka keeps the customer form open", app.navigationBars["Uusi asiakas"].exists)
     }
+
+    // U002 U033 U093 M058: the forms and the pushed Asetukset screens are on the warm canvas, not the
+    // cool system grey (242,242,247), and Laitteet, Sovelluslukitus and Ilmoitukset have the inline
+    // title the other pushed screens have. Maksut has both already: the control. Asserted.
+    func testI_WarmCanvasOnForms() {
+        openSettings()
+        // Top to bottom of Asetukset: tapLabel scrolls down only, and a pop keeps the list's offset.
+        if tap("Laskuttajan tiedot") {
+            assertWarmCanvas(app, under: app.navigationBars["Laskuttajan tiedot"], "Laskuttajan tiedot")
+            backToSettings(from: "Laskuttajan tiedot")
+        } else { XCTFail("Asetukset has no Laskuttajan tiedot") }
+        if tap("Sähköpostimallit"), tap("Uusi malli") {
+            assertWarmCanvas(app, under: app.navigationBars["Uusi malli"], "Uusi malli")
+            closeSheet("Uusi malli")
+            backToSettings(from: "Sähköpostimallit")
+        } else { XCTFail("Sähköpostimallit > Uusi malli did not open") }
+        for title in ["Maksut", "Laitteet", "Sovelluslukitus", "Ilmoitukset"] {
+            guard tap(title) else { XCTFail("Asetukset has no \(title)"); continue }
+            assertWarmCanvas(app, under: app.navigationBars[title], title)
+            assertInlineTitle(title)
+            backToSettings(from: title)
+        }
+
+        // The receipt form needs the capture fixture (`-LKUITest`). The flag stands for the one-time
+        // notification question, which a later launch can raise over the screen being read (U027).
+        app.terminate()
+        app.launchArguments += ["-LKUITest", "-notifications.asked.v1", "YES"]
+        launchSignedIn()
+        dismissSystemPrompts()
+
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        if tap("Uusi lasku") {
+            assertWarmCanvas(app, under: app.navigationBars["Uusi lasku"], "Uusi lasku")
+            closeSheet("Uusi lasku")
+        } else { XCTFail("Myynti has no Uusi lasku") }
+        if tap("Asiakkaat"), tap("Lisää asiakkaita"), tap("Uusi asiakas") {
+            assertWarmCanvas(app, under: app.navigationBars["Uusi asiakas"], "Uusi asiakas")
+            closeSheet("Uusi asiakas")
+        } else { XCTFail("Asiakkaat > Uusi asiakas did not open") }
+
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        let camera = app.navigationBars["Kuitit"].buttons["Kuvaa kuitti"]
+        (camera.exists ? camera : app.buttons["Kuvaa kuitti"].firstMatch).tap(); taps += 1
+        let fixture = app.buttons["capture-fixture"].firstMatch
+        guard fixture.waitForExistence(timeout: 10) else {
+            XCTFail("no Testikuitti button: is the app a Debug build launched with -LKUITest?"); return
+        }
+        if !fixture.isHittable {
+            app.swipeUp()
+            _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: fixture)], timeout: 5)
+        }
+        fixture.tap(); taps += 1
+        // Uploaded and read by the demo API (an empty reading), then the form opens by itself.
+        let preview = app.descendants(matching: .any).matching(identifier: "captured-file-preview").firstMatch
+        if !preview.waitForExistence(timeout: 90) {
+            let use = app.buttons["Käytä lomakkeessa"].firstMatch
+            if use.exists { use.tap(); taps += 1; _ = preview.waitForExistence(timeout: 10) }
+        }
+        guard preview.exists else { shot("i-no-receipt-form"); XCTFail("the receipt form did not open"); return }
+        assertWarmCanvas(app, under: app.navigationBars["Uusi kuitti"], "Uusi kuitti, lomake")
+    }
+
+    /// M058: the small inline title of the screens pushed through Route (appDestinations): a bar of
+    /// one row, the title on the back button's line. The large title made it about 100 pt tall,
+    /// with the 34 pt title on its own row under the back button.
+    private func assertInlineTitle(_ title: String, file: StaticString = #filePath, line: UInt = #line) {
+        let bar = app.navigationBars[title]
+        guard bar.exists else { XCTFail("\(title) did not open", file: file, line: line); return }
+        waitStill(bar)
+        XCTAssertLessThanOrEqual(bar.frame.height, 60, "\(title): the bar is \(bar.frame.height) pt tall, a large title", file: file, line: line)
+        let back = bar.buttons.firstMatch
+        let name = bar.staticTexts[title].firstMatch
+        guard back.exists, name.exists else { XCTFail("\(title): the bar has no back button or no title", file: file, line: line); return }
+        XCTAssertLessThanOrEqual(abs(back.frame.midY - name.frame.midY), 4,
+                                 "\(title): the title's midY \(name.frame.midY) is not on the back button's \(back.frame.midY)", file: file, line: line)
+    }
+
+    /// Back from a screen pushed inside the Asetukset sheet, by its bar's back button.
+    private func backToSettings(from title: String) {
+        let bar = app.navigationBars[title]
+        if bar.exists { bar.buttons.firstMatch.tap(); taps += 1 }
+        XCTAssertTrue(app.navigationBars["Asetukset"].waitForExistence(timeout: 10), "\(title): Back did not return to Asetukset")
+    }
+
+    /// Peruuta on a sheet nothing was typed into; a kept draft that asks first is let go.
+    private func closeSheet(_ title: String) {
+        let bar = app.navigationBars[title]
+        let cancel = bar.buttons["Peruuta"]
+        if cancel.exists { cancel.tap(); taps += 1 }
+        if discardDialog.waitForExistence(timeout: 2) { app.buttons["Hylkää muutokset"].firstMatch.tap(); taps += 1 }
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: bar)
+        let closed = XCTWaiter().wait(for: [gone], timeout: 10) == .completed
+        XCTAssertTrue(closed, "\(title) did not close")
+    }
 }

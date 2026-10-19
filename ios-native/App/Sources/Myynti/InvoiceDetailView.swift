@@ -781,6 +781,8 @@ struct PaymentSheet: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle("Kirjaa maksu")
             .navigationBarTitleDisplayMode(.inline)
@@ -884,6 +886,8 @@ struct ReminderSheet: View {
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .navigationTitle("Lähetä maksumuistutus")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1000,6 +1004,8 @@ struct SendInvoiceSheet: View {
                         .listRowBackground(Color.clear)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle(invoice.isCreditNote ? "Lähetä hyvityslasku" : "Lähetä lasku")
             .navigationBarTitleDisplayMode(.inline)
@@ -1249,6 +1255,8 @@ struct CloseReasonSheet: View {
                         .listRowInsets(EdgeInsets())
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle("Sulje perustelulla")
             .navigationBarTitleDisplayMode(.inline)
