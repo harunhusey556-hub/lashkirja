@@ -677,6 +677,11 @@ struct ReceiptEditor: View {
     /// reports the approval.
     @State private var savedOutcome: ReceiptSaving.Outcome?
     @State private var customCategory: Bool
+    /// The field being typed into. Meanwhile the keyboard's own "Valmis" bar is the only bar over
+    /// it: the pinned save stood there too and covered the row being typed (as on Uusi lasku).
+    @FocusState private var focus: CaptureFormField?
+
+    private enum CaptureFormField: Hashable { case vendor, total, originalAmount, vat(Int), reference, invoiceNumber, notes }
 
     init(model: CaptureQueueModel, rowId: String, draft: ReceiptDraft, preview: URL?, dirty: Binding<Bool>, done: @escaping (ReceiptSaving.Outcome) -> Void) {
         let form = ReceiptForm(draft: draft)
@@ -693,6 +698,30 @@ struct ReceiptEditor: View {
     }
 
     var body: some View {
+        // The save is pinned under the form, so what a failed save points at can sit below it, out
+        // of sight (the category on the first screen, UI suite 39285931841): the form scrolls to the
+        // first field it found wrong, to the failure, or to the duplicate question.
+        ScrollViewReader { proxy in
+            formBody
+                .onChange(of: errors) { _, found in
+                    if let key = form.firstErrorKey(in: found) { bringIntoView("error-\(key)", proxy) }
+                }
+                .onChange(of: failure) { _, now in
+                    if now != nil { bringIntoView("save-failure", proxy) }
+                }
+                .onChange(of: duplicate) { _, now in
+                    if now { bringIntoView("save-duplicate", proxy) }
+                }
+        }
+    }
+
+    /// The row is inserted by the same update that asks for it, so it is scrolled to on the main
+    /// actor's next turn, once the form has it.
+    private func bringIntoView(_ id: String, _ proxy: ScrollViewProxy) {
+        Task { @MainActor in withMotion(.snappy) { proxy.scrollTo(id, anchor: .center) } }
+    }
+
+    private var formBody: some View {
         Form {
             // The document first, the reading below it: a wrong reading shows against the receipt.
             if let preview {
@@ -718,6 +747,7 @@ struct ReceiptEditor: View {
                     TextField("", text: $form.vendor)
                         .textContentType(.organizationName)
                         .multilineTextAlignment(.trailing)
+                        .focused($focus, equals: .vendor)
                 }
                 fieldError("vendor")
                 DatePicker("Päivä", selection: dateBinding, displayedComponents: .date)
@@ -730,6 +760,7 @@ struct ReceiptEditor: View {
                             .moneyInput()
                             .multilineTextAlignment(.trailing)
                             .accessibilityLabel("Summa euroina")
+                            .focused($focus, equals: .total)
                         Text("€").foregroundStyle(Theme.ink2).accessibilityHidden(true)
                     }
                 }
@@ -749,6 +780,7 @@ struct ReceiptEditor: View {
                     if form.isForeign {
                         TextField(ReceiptCurrency.originalAmountLabel(form.currency), text: $form.originalAmountText)
                             .moneyInput()
+                            .focused($focus, equals: .originalAmount)
                         fieldError("originalAmount")
                     }
                 }
@@ -761,27 +793,28 @@ struct ReceiptEditor: View {
             vatSection
             Section {
                 LabeledContent("Viitenumero") {
-                    TextField("", text: $form.reference).multilineTextAlignment(.trailing)
+                    TextField("", text: $form.reference).multilineTextAlignment(.trailing).focused($focus, equals: .reference)
                 }
                 fieldError("reference")
                 LabeledContent("Laskun numero") {
-                    TextField("", text: $form.invoiceNumber).multilineTextAlignment(.trailing)
+                    TextField("", text: $form.invoiceNumber).multilineTextAlignment(.trailing).focused($focus, equals: .invoiceNumber)
                 }
                 fieldError("invoiceNumber")
                 LabeledContent("Muistiinpano") {
-                    TextField("", text: $form.notes, axis: .vertical).multilineTextAlignment(.trailing)
+                    TextField("", text: $form.notes, axis: .vertical).multilineTextAlignment(.trailing).focused($focus, equals: .notes)
                 }
                 fieldError("notes")
             } header: {
                 Text("Lisätiedot")
             }
-            if let failure { Section { Text(failure).foregroundStyle(Theme.danger) }.transition(.opacity) }
+            if let failure { Section { Text(failure).foregroundStyle(Theme.danger).id("save-failure") }.transition(.opacity) }
             if duplicate {
                 // Both answers to the look-alike question; before W27 "no" had no button and the
                 // file waited under "Kesken" for good.
                 Section {
                     Button("Tallenna silti") { Task { await save(forceDuplicate: true) } }
                         .disabled(busy)
+                        .id("save-duplicate")
                     Button(ReceiptSaving.skipDuplicateTitle, role: .destructive) { Task { await skipDuplicate() } }
                         .disabled(busy)
                 } footer: { Text("Sama kuitti on jo tallennettu. \"\(ReceiptSaving.skipDuplicateTitle)\" poistaa tämän tiedoston.") }
@@ -789,7 +822,7 @@ struct ReceiptEditor: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
-        .safeAreaInset(edge: .bottom, spacing: 0) { saveBar }
+        .safeAreaInset(edge: .bottom, spacing: 0) { if focus == nil { saveBar } }
         // Field errors, the duplicate question, a currency or VAT row coming or going: the rows
         // below ease to their new place.
         .motion(.snappy, value: errors)
@@ -834,7 +867,7 @@ struct ReceiptEditor: View {
 
     @ViewBuilder private func fieldError(_ key: String) -> some View {
         if let message = errors[key] {
-            Text(message).font(.caption).foregroundStyle(Theme.danger)
+            Text(message).font(.caption).foregroundStyle(Theme.danger).id("error-\(key)")
         }
     }
 
@@ -856,6 +889,7 @@ struct ReceiptEditor: View {
                     TextField("ALV €", text: Binding(get: { row.amountText }, set: { form.setVatAmount($0, at: index) }))
                         .moneyInput()
                         .multilineTextAlignment(.trailing)
+                        .focused($focus, equals: .vat(index))
                     Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle").tapTarget() }
                         .buttonStyle(.borderless)
                         .accessibilityLabel("Poista ALV-rivi")

@@ -269,11 +269,27 @@ final class OwnerScreensTests: WalkTestCase {
 
         reopen.tap()
         guard vendor.waitForExistence(timeout: 10) else { capture("c4-no-form"); XCTFail("Käytä lomakkeessa did not open the form"); return }
-        if isBlank(vendor, "Myyjä") { type(vendor, "Testikauppa Oy") }
+        // While a field is typed into, the keyboard's own "Valmis" bar is the only bar over it: the
+        // pinned save stood there too, over the amount row (iOS native 39285936564 tapped the save).
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        for _ in 0..<5 {
+            vendor.tap()
+            if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: focused, object: vendor)], timeout: 2) == .completed { break }
+        }
+        if isBlank(vendor, "Myyjä") { vendor.typeText("Testikauppa Oy") }
+        let keyboardDone = app.buttons["Valmis"].firstMatch
+        if keyboardDone.waitForExistence(timeout: 3) {
+            XCTAssertTrue(save.waitForNonExistence(timeout: 3), "Tallenna kuitti stands over the keyboard while Myyjä is typed into")
+            keyboardDone.tap()
+        }
+        XCTAssertTrue(save.waitForExistence(timeout: 5), "Tallenna kuitti did not come back after Valmis")
         // "Summa" beside the field, "0,00" in it while empty; the field is named "Summa euroina".
         let total = app.textFields.matching(NSPredicate(format: "label BEGINSWITH %@ OR placeholderValue == %@", "Summa", "0,00")).firstMatch
         // Whole euros: the decimal key follows the simulator's region, not the app's Finnish.
-        if total.exists && isBlank(total, "0,00") { type(total, "12") }
+        if total.exists && isBlank(total, "0,00") {
+            XCTAssertTrue(clearOfSave(total, save), "the amount stays under Tallenna kuitti at \(total.frame)")
+            type(total, "12")
+        }
         if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap(); sleep(1) }
         // U095: the filled rows keep their names (they read "Testikauppa Oy" and "12,40" alone).
         XCTAssertTrue(onTop("label == %@", "Myyjä"), "the filled vendor row has no Myyjä label")
@@ -281,7 +297,20 @@ final class OwnerScreensTests: WalkTestCase {
         // Category is required and only the cloud AI suggests one: the owner picks it from the menu.
         let category = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kategoria, ")).firstMatch
         if category.waitForExistence(timeout: 5), category.label.hasSuffix("Valitse") {
-            if !category.isHittable { app.swipeUp(); sleep(1) }
+            // A save without one says so where the category is, and brings it into view: on the
+            // first screen the field and its error sit under the pinned save, and the tap changed
+            // nothing in sight (UI suite 39285931841).
+            save.tap()
+            let missing = app.staticTexts["Valitse kategoria."].firstMatch
+            XCTAssertTrue(missing.waitForExistence(timeout: 5), "a save without a category said nothing")
+            var inView = false
+            for _ in 0..<20 where !inView {
+                inView = missing.exists && missing.frame.minY > 100 && missing.frame.maxY <= save.frame.minY
+                if !inView { usleep(250_000) }
+            }
+            XCTAssertTrue(inView, "'Valitse kategoria.' stays out of sight at \(missing.frame), Tallenna kuitti at \(save.frame)")
+            capture("c4-category-missing")
+            XCTAssertTrue(clearOfSave(category, save), "Kategoria stays under Tallenna kuitti at \(category.frame)")
             category.tap()
             let choice = app.buttons["Tarvikkeet & ostot"].firstMatch
             if choice.waitForExistence(timeout: 5) { choice.tap() }
@@ -311,10 +340,9 @@ final class OwnerScreensTests: WalkTestCase {
         if outcome.isEmpty { tree("c5-after-save") }
         keep("c-save-outcome", outcome.isEmpty ? "none" : (outcome == "toast" ? toastLabel : outcome))
         XCTAssertFalse(outcome.isEmpty, "Tallenna kuitti neither saved (screen still up, no toast)")
-        // U094: the host's picture is asked for at the step, so it shows the toast that was seen.
-        if let lag = shotLag["c5-after-save"] {
-            XCTAssertLessThan(lag, 2000, "the host's c5 picture came \(lag) ms after the step")
-        }
+        // U094: the host's picture is asked for at the step, before the in-process one. How late it
+        // came is kept, not bounded: 627–4661 ms within one run on a shared host (UI suite 39285931841).
+        keep("c-shot-lag", shotLag.map { "\($0.key) \($0.value) ms" }.sorted().joined(separator: "\n"))
         if outcome == "toast" {
             XCTAssertTrue(toastLabel.contains("lasku"), "toast: \(toastLabel)")
             XCTAssertGreaterThan(toastFrame.minY, window.height * 0.6, "the toast is at \(toastFrame.minY): not at the bottom")
@@ -338,6 +366,20 @@ final class OwnerScreensTests: WalkTestCase {
     /// The fixture's queue row: the row (a button once saved, named by the file first) or its texts.
     var queueRow: NSPredicate {
         NSPredicate(format: "identifier == %@ OR label BEGINSWITH %@", "capture-queue-row", "testikuitti.jpg")
+    }
+
+    /// Scrolls a form row above the pinned save, as the owner would before tapping it: a row under
+    /// the bar still counts as hittable, and a tap on it lands on the save (UI suite 39285931841).
+    func clearOfSave(_ element: XCUIElement, _ save: XCUIElement) -> Bool {
+        for attempt in 0...4 {
+            guard element.exists else { return false }
+            let bar = save.exists ? save.frame.minY : app.windows.firstMatch.frame.maxY
+            if element.isHittable, element.frame.minY > 100, element.frame.maxY <= bar - 4 { return true }
+            guard attempt < 4 else { break }
+            app.windows.firstMatch.swipeUp(velocity: .slow)
+            waitStill(element)
+        }
+        return false
     }
 
     /// A label on the screen on top: one under a sheet or cover is in the tree too, but cannot be hit.
