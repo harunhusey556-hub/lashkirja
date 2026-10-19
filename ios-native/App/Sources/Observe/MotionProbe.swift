@@ -7,9 +7,10 @@ import os
 /// builds only. The simulator on the iMac records video at ~4 fps, too slow to see a row that
 /// jumps for one frame; this sees every layout change instead.
 ///
-/// Ten times a second it reads the frame of every visible layer in the key window, measured in
-/// its nearest scroll view's content (so scrolling is not movement), and appends to the file in
-/// `LK_MOTION_LOG` (one line each, epoch seconds, so the analyzer can line them up with the walk):
+/// Ten times a second it reads the on-screen (presentation) frame of every visible layer in the
+/// key window, measured in its nearest scroll view's content (so scrolling is not movement), and
+/// appends to the file in `LK_MOTION_LOG` (one line each, epoch seconds, so the analyzer can line
+/// them up with the walk):
 ///   SCREEN <t> <name>                          a tab or pushed screen appeared
 ///   ROOT <t> <name> <w>x<h>                    the screen's root changed size (GeometryReader)
 ///   MOVE <t> <screen> n=<count> max=<pt> ...   layers moved more than 2 pt since the last tick
@@ -69,8 +70,9 @@ final class MotionProbe: NSObject {
         write("ROOT \(Self.now) \(name.replacingOccurrences(of: " ", with: "_")) \(Int(size.width))x\(Int(size.height))")
     }
 
-    /// A moment the audit's reader wants on the timeline (a tap handled, a copy freed); the
-    /// analyzer reads only MOVE, SCROLLJUMP and QUIET, so these never count as motion.
+    /// A moment the audit's reader wants on the timeline (a tap handled, a copy freed). These never
+    /// count as motion (the analyzer counts MOVE and SCROLLJUMP); of the MARK lines it reads only
+    /// 'MARK presented', to place a sheet's settle point.
     func mark(_ name: String) {
         guard Self.active else { return }
         write("MARK \(Self.now) \(name.replacingOccurrences(of: " ", with: "_"))")
@@ -130,11 +132,15 @@ final class MotionProbe: NSObject {
 
     private func walk(_ layer: CALayer, space: CALayer, seen: inout [ObjectIdentifier: CGRect],
                       moved: inout [(delta: CGFloat, dx: CGFloat, dy: CGFloat, what: String)], budget: inout Int) {
-        guard budget > 0, !layer.isHidden, layer.opacity > 0.01 else { return }
+        // A model layer jumps to its end when an animation is committed, so a slide or push wrote
+        // one MOVE at the commit and none while it ran (M097); the presentation copy is what is on
+        // screen. Copies are new objects every tick, so a layer is known by its model layer.
+        let shown = layer.presentation() ?? layer
+        guard budget > 0, !shown.isHidden, shown.opacity > 0.01 else { return }
         budget -= 1
         let id = ObjectIdentifier(layer)
-        let frame = layer.convert(layer.bounds, to: space)
-        if layer.bounds.width >= 4, layer.bounds.height >= 4 {
+        let frame = shown.convert(shown.bounds, to: space.presentation() ?? space)
+        if shown.bounds.width >= 4, shown.bounds.height >= 4 {
             seen[id] = frame
             if let old = frames[id] {
                 let dx = frame.minX - old.minX, dy = frame.minY - old.minY
