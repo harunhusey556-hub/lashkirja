@@ -196,6 +196,14 @@ class WalkTestCase: XCTestCase {
         note("MISS could not find \(arg)"); return false
     }
     func tap(_ label: String) -> Bool { tapLabel("label == %@", label) }
+    /// The overdue invoice from Koti's "Tarvitaan sinulta". Koti shows five tasks; with more waiting
+    /// (the CI seed puts documents and matches before it) the overdue row is behind "Näytä enemmän",
+    /// which is then tapped first, as the owner would.
+    func openOverdueFromKoti() -> Bool {
+        if tapLabel("label CONTAINS %@", "· myöhässä") { return true }
+        guard tapLabel("label BEGINSWITH %@", "Näytä enemmän") else { return false }
+        return tapLabel("label CONTAINS %@", "· myöhässä")
+    }
     /// Scrolls the screen (each swipe counted) until `element` sits inside the window, as tapLabel
     /// does before it taps, and taps nothing: a task can end on the button that does it.
     func reveal(_ element: XCUIElement, scrolls maxScrolls: Int = 6) -> Bool {

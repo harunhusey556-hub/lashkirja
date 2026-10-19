@@ -15,7 +15,7 @@ final class P1Tests: WalkTestCase {
         measure("create invoice (Lisää)", reached: opened && app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15))
     }
     func test03_OpenOverdueInvoice() {
-        let opened = tapLabel("label CONTAINS %@", "· myöhässä")
+        let opened = openOverdueFromKoti()
         measure("open overdue invoice (Koti)", reached: opened && exists("label BEGINSWITH %@", "Myöhässä "))
     }
     /// U023: the seed had no pending receipt, so this opened an approved one and passed on any detail.
