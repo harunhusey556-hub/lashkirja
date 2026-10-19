@@ -277,6 +277,33 @@ final class OwnerScreensTests: WalkTestCase {
         }
     }
 
+    // M073: with no mailbox connected, Kirjanpito > Sähköposti's headline ended mid-word in an
+    // ellipsis ('Sähköpostia ei ole yhdist…') at the default text size. Owner rule: no cut text.
+    // The demo seed connects no mailbox.
+    func testD_EmailEmptyStateNotClipped() {
+        guard selectTab("Kirjanpito") else { capture("m0-no-tab"); XCTFail("Kirjanpito did not open"); return }
+        let screen = app.navigationBars["Sähköposti"]
+        for _ in 0..<2 where !screen.exists {
+            tapLabel("label BEGINSWITH %@", "Sähköposti")
+            _ = screen.waitForExistence(timeout: 10)
+        }
+        guard screen.exists else { capture("m0-no-email"); tree("m0-no-email"); XCTFail("Sähköposti did not open"); return }
+        // A text of its own or the start of the empty state's combined label, by iOS version.
+        let title = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Sähköpostia ei ole yhdistetty")).firstMatch
+        guard title.waitForExistence(timeout: 15) else {
+            capture("m1-no-empty-state"); tree("m1-no-empty-state"); XCTFail("no 'Sähköpostia ei ole yhdistetty': has the demo user a mailbox?"); return
+        }
+        waitStill(title)
+        capture("m1-email-empty-state")
+        keep("m-title", "\(title.frame)")
+        // The node is the icon (~40 pt) and the title. Ending in "…" the title kept to one line
+        // (~90 pt in all); wrapped whole it takes two (121 pt in run 39207976615). The .textClipped
+        // audit cannot tell them apart: it flags every text of this view as "may be clipped at
+        // larger Dynamic Type sizes", the wrapped title included.
+        XCTAssertGreaterThanOrEqual(title.frame.height, 100, "the empty-state title is on one line: \(title.frame)")
+    }
+
     // W39 (OPEN-ISSUES 16): a photo kept on the phone to be sent later showed only on Kuitit's card,
     // under the capture cover. Saved to the queue from inside "Lisää kuitti", it must show there,
     // whether it is still waiting, being sent, refused or already sent when the test looks.

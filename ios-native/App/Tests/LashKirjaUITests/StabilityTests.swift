@@ -95,6 +95,10 @@ final class StabilityTests: WalkTestCase {
             assertResponsive("kirjanpito: \(part)")
         }
         XCTAssertFalse(app.staticTexts["Tase ei täsmää. Ilmoita tästä tukeen."].exists, "balance sheet does not balance")
+        // U079: the books are on the warm canvas, as Pankki is (test04), not the system grey.
+        if app.buttons["Tulos"].exists {
+            assertWarmCanvas(app, under: app.navigationBars["Kirjanpito"], "kirjanpito")
+        } else { XCTFail("kirjanpito: the books did not open") }
         shot("stability-kirjanpito")
     }
 
@@ -126,6 +130,8 @@ final class StabilityTests: WalkTestCase {
         tap("Pankki")
         XCTAssertTrue(app.navigationBars["Pankki"].waitForExistence(timeout: 10), "Pankki did not open")
         assertResponsive("pankki")
+        // The control for the canvas reads in test03 and test06: Pankki has had the canvas pair all along.
+        assertWarmCanvas(app, under: app.navigationBars["Pankki"], "pankki")
         shot("stability-pankki")
     }
 
@@ -143,6 +149,8 @@ final class StabilityTests: WalkTestCase {
     func test06_ReportProblemSends() {
         openSettings()
         XCTAssertTrue(tap("Ilmoita ongelmasta"), "Ilmoita ongelmasta missing from settings")
+        // U079: read before the keyboard rises over the form.
+        assertWarmCanvas(app, under: app.navigationBars["Ilmoita ongelmasta"], "ilmoita ongelmasta")
         let field = app.textFields.firstMatch.exists ? app.textFields.firstMatch : app.textViews.firstMatch
         if field.waitForExistence(timeout: 10) { type(field, "Simulaattoritesti") }
         tap("Lähetä ilmoitus"); sleep(3)
