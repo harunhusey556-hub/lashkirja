@@ -94,9 +94,26 @@ final class OwnerScreensTests: WalkTestCase {
         let actions = app.buttons["Toiminnot"].firstMatch
         guard actions.waitForExistence(timeout: 20) else { capture("a0-no-detail"); XCTFail("the receipt did not load"); return }
         capture("a1-receipt-detail")
+        // U098 (N3): the body holds the receipt, not a column of actions. Muokkaa was there twice
+        // (body and Toiminnot), and "Merkitse ostolaskuksi" and "Käytä tälle myyjälle myöhemmin"
+        // were accent rows beside the 3-dot menu. The whole body is looked through: a List keeps
+        // the rows below the screen out of the tree.
+        let moved = ["Muokkaa", "Merkitse ostolaskuksi", "Käytä tälle myyjälle myöhemmin"]
+        var inBody: Set<String> = []
+        for look in 0..<5 {
+            for label in moved where app.buttons[label].exists { inBody.insert(label) }
+            if look < 4 { app.windows.firstMatch.swipeUp(velocity: .slow) }
+        }
+        for _ in 0..<5 { app.windows.firstMatch.swipeDown(velocity: .slow) }
+        keep("a-body-actions", inBody.sorted().joined(separator: ", "))
+        XCTAssertTrue(inBody.isEmpty, "the receipt's body still has \(inBody.sorted())")
         actions.tap()
         let delete = app.buttons["Poista kuitti"].firstMatch
         guard delete.waitForExistence(timeout: 5) else { capture("a1-menu"); XCTFail("Toiminnot has no Poista kuitti"); return }
+        for label in moved {
+            XCTAssertTrue(app.buttons[label].firstMatch.waitForExistence(timeout: 5), "Toiminnot has no \(label)")
+        }
+        capture("a1-menu")
         delete.tap()
 
         let sheet = app.descendants(matching: .any).matching(identifier: "confirm-sheet").firstMatch
@@ -169,6 +186,10 @@ final class OwnerScreensTests: WalkTestCase {
         XCTAssertTrue(chip.label.hasPrefix("Ei kohdistettu"), "chip label: \(chip.label)")
         XCTAssertGreaterThan(count, 0, "Ei kohdistettu shows \(count): \(chip.label)")
         capture("b1-kuitit-list")
+        // U098 (N3): one primary in the bar, the camera; filtering and picking are in Toiminnot.
+        let items = barItems(app.navigationBars["Kuitit"])
+        keep("b-bar", items.joined(separator: ", "))
+        XCTAssertEqual(items.sorted(), ["Kuvaa kuitti", "Toiminnot"], "the Kuitit bar beside Back")
 
         // The chips scroll sideways; the fifth may sit past the edge.
         if !chip.isHittable { app.buttons["receipt-tab-all"].firstMatch.swipeLeft(); sleep(1) }

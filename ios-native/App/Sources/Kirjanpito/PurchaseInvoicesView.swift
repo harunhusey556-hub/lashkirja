@@ -90,7 +90,7 @@ struct PurchaseInvoicesView: View {
             if selection.isActive && !picked.isEmpty {
                 let payable = PurchaseBulk.payable(picked).count
                 let deletable = PurchaseBulk.deletable(picked).count
-                BulkBar(count: picked.count, busy: busy, onCancel: { selection.end() }) {
+                BulkBar(count: picked.count, busy: busy) {
                     if payable > 0 {
                         BulkBarButton(title: PurchaseBulk.markPaidLabel(payable)) {
                             bulkReason = ""

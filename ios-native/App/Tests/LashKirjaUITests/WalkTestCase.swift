@@ -283,4 +283,59 @@ class WalkTestCase: XCTestCase {
     }
     var discardDialog: XCUIElement { app.staticTexts["Hylätäänkö muutokset?"].firstMatch }
 
+    /// The items of a navigation bar beside Back, each label once: a toolbar Menu is a labelled
+    /// button around an unlabelled one.
+    func barItems(_ bar: XCUIElement) -> [String] {
+        var items: [String] = []
+        for button in bar.buttons.allElementsBoundByIndex where button.identifier != "BackButton" {
+            let label = button.label
+            if !label.isEmpty && !items.contains(label) { items.append(label) }
+        }
+        return items
+    }
+
+    /// The band between a bottom bar (`button`, its capsule) and the tab bar under it is the canvas,
+    /// flat: rows scrolled under the bar showed through it, cut across, and a row's own white
+    /// reads 10 above the canvas even where no text falls (X065). The 3 pt over the tab bar are
+    /// left out, where the floating bar's own shadow falls, and 8 pt at each side, where a scroll
+    /// indicator may still be fading. Read until it holds, for up to 3 s: the bar fades in.
+    @discardableResult
+    func assertCanvasUnderBar(_ button: XCUIElement, _ step: String, file: StaticString = #filePath, line: UInt = #line) -> Bool {
+        waitStill(button)
+        let tabs = app.tabBars.firstMatch
+        let window = app.windows.firstMatch.frame
+        guard button.exists, tabs.exists else {
+            XCTFail("\(step): no bar or no tab bar to measure between", file: file, line: line); return false
+        }
+        // A button on or under the tab bar (a row's Hyväksy below the fold, a bar slid behind the
+        // tabs) leaves no band, and the check below would pass on nothing.
+        guard button.frame.maxY <= tabs.frame.minY else {
+            XCTFail("\(step): the bar (maxY \(button.frame.maxY)) is not above the tab bar (minY \(tabs.frame.minY))", file: file, line: line)
+            return false
+        }
+        let band = CGRect(x: window.minX + 8, y: button.frame.maxY + 1, width: window.width - 16,
+                          height: tabs.frame.minY - 3 - (button.frame.maxY + 1))
+        guard band.height >= 1 else {
+            note("INFO \(step): the bar ends at \(button.frame.maxY), the tab bar starts at \(tabs.frame.minY): no band between")
+            return true
+        }
+        let canvas = RGB.canvas.luma
+        func holds(_ read: (mean: Double, spread: Double)?) -> Bool {
+            guard let read else { return false }
+            // Rows showing through are white (luma ~255) and uneven. The floating bar and the tab bar
+            // cast a soft, even shadow on this ~7 pt strip (mean 240 against 243, std 0.9 in run
+            // 39276760350), so the band may be a little darker than the canvas, never brighter.
+            return read.spread < 3 && read.mean <= canvas + 3 && read.mean >= canvas - 8
+        }
+        var read = luma(app, in: band)
+        let deadline = Date().addingTimeInterval(3)
+        while !holds(read) && Date() < deadline {
+            usleep(250_000)
+            read = luma(app, in: band)
+        }
+        let said = read.map { String(format: "mean %.1f (canvas %.1f), std %.2f", $0.mean, canvas, $0.spread) } ?? "unread"
+        note("INFO \(step): band \(band) \(said)")
+        XCTAssertTrue(holds(read), "\(step): the band under the bar is not the flat canvas (\(said)): rows show through", file: file, line: line)
+        return holds(read)
+    }
 }

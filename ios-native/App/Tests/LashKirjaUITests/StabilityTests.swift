@@ -424,4 +424,155 @@ final class StabilityTests: WalkTestCase {
         note("MARK alv-end \(Date().formatted(.iso8601))")
         XCTAssertEqual(app.state, .runningForeground)
     }
+
+    /// X040 (B12): picking rows moves nothing. On Kuitit the review card left as the mode began and
+    /// pulled the chips and every row up by its height; the bulk bar had its own Peruuta beside the
+    /// toolbar's Valmis, and stood two rows tall around a single action. The same bar is checked on
+    /// Ostolaskut and on the bank rows, which share it.
+    func test14_SelectModeHoldsStill() {
+        openHubRow("Kuitit")
+        let chips = app.buttons["receipt-tab-all"].firstMatch
+        let actions = app.navigationBars["Kuitit"].buttons["Toiminnot"].firstMatch
+        guard chips.waitForExistence(timeout: 15), actions.waitForExistence(timeout: 15) else {
+            dump(app, "stability-14-kuitit"); XCTFail("Kuitit opened without its chips or Toiminnot"); return
+        }
+        // The CI seed's two receipts wait for review: the card is on screen before the mode starts.
+        let pending = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", ", Tarkista")).firstMatch
+        XCTAssertTrue(pending.waitForExistence(timeout: 15), "no Odottaa hyväksyntää card: is the seed demo-seed.ts --ci?")
+        waitStill(chips)
+        let before = chips.frame.minY
+        actions.tap(); taps += 1
+        let select = app.buttons["Valitse kuitteja"].firstMatch
+        guard select.waitForExistence(timeout: 5) else { dump(app, "stability-14-menu"); XCTFail("Toiminnot has no Valitse kuitteja"); return }
+        select.tap(); taps += 1
+        guard app.buttons["Valitse kaikki"].firstMatch.waitForExistence(timeout: 5) else {
+            dump(app, "stability-14-no-mode"); XCTFail("Valitse kuitteja did not start picking"); return
+        }
+        guard let row = firstListRow(below: chips) else {
+            dump(app, "stability-14-no-row"); XCTFail("no receipt row on screen under the chips"); return
+        }
+        row.tap(); taps += 1
+        guard let bar = bulkBar("kuitit") else { return }
+        waitStill(chips)
+        note("INFO stability 14: chips at \(before) before Valitse, \(chips.frame.minY) with a row picked")
+        XCTAssertEqual(chips.frame.minY, before, accuracy: 1, "the chips moved when picking started")
+        XCTAssertTrue(pending.exists, "the Odottaa hyväksyntää card left when picking started")
+        shot("stability-select-kuitit")
+        endSelectMode(bar, "Kuitit", "kuitit")
+        XCTAssertEqual(chips.frame.minY, before, accuracy: 1, "the chips moved when picking ended")
+        backToBooks("Kuitit")
+
+        // Ostolaskut: the CI seed's rent bill, filed as an ostolasku.
+        openHubRow("Ostolaskut")
+        let pick = app.navigationBars["Ostolaskut"].buttons["Valitse"].firstMatch
+        guard pick.waitForExistence(timeout: 15) else { dump(app, "stability-14-ostolaskut"); XCTFail("Ostolaskut has no Valitse"); return }
+        pick.tap(); taps += 1
+        guard tapLabel("label CONTAINS %@", "Kiinteistö Oy Kauppakatu 1") else {
+            dump(app, "stability-14-ostolaskut-no-row"); XCTFail("Ostolaskut: no Kiinteistö Oy Kauppakatu 1 row to pick"); return
+        }
+        guard let invoiceBar = bulkBar("ostolaskut") else { return }
+        shot("stability-select-ostolaskut")
+        endSelectMode(invoiceBar, "Ostolaskut", "ostolaskut")
+        backToBooks("Ostolaskut")
+
+        // The bank rows: today behind the Pankki hub's "Näytä kaikki" on Pankkitapahtumat, and with
+        // N2 Pankki itself, where Valitse is in Toiminnot. Either way in, the same bar.
+        openHubRow("Pankki")
+        let bankRow = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*, [0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{4} · .*, .*")).firstMatch
+        if !app.navigationBars["Pankki"].buttons["Toiminnot"].waitForExistence(timeout: 5) {
+            tapLabel("label == %@", "Näytä kaikki")
+            _ = app.navigationBars["Pankkitapahtumat"].waitForExistence(timeout: 10)
+        }
+        let feed = app.navigationBars["Pankkitapahtumat"].exists ? app.navigationBars["Pankkitapahtumat"] : app.navigationBars["Pankki"]
+        guard bankRow.waitForExistence(timeout: 15) else { dump(app, "stability-14-bank"); XCTFail("no bank row arrived"); return }
+        let feedTitle = feed.identifier
+        if feed.buttons["Valitse"].exists {
+            feed.buttons["Valitse"].firstMatch.tap(); taps += 1
+        } else {
+            feed.buttons["Toiminnot"].firstMatch.tap(); taps += 1
+            let item = app.buttons["Valitse"].firstMatch
+            guard item.waitForExistence(timeout: 5) else { dump(app, "stability-14-bank-menu"); XCTFail("\(feedTitle): no Valitse"); return }
+            item.tap(); taps += 1
+        }
+        guard tapLabel("label MATCHES %@", ".*, [0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{4} · .*, .*") else {
+            dump(app, "stability-14-bank-no-row"); XCTFail("\(feedTitle): no bank row to pick"); return
+        }
+        guard let bankBar = bulkBar("pankki") else { return }
+        shot("stability-select-pankki")
+        endSelectMode(bankBar, feedTitle, "pankki")
+    }
+
+    /// X065 (B12, N3): under a bottom bar, down to the tab bar, the canvas and nothing else. The
+    /// rows under Kuitit's "Kohdista varmat" showed through the gap above the floating tab bar.
+    /// The receipt's Hyväksy, at the bottom since N3, has the same backing.
+    func test15_BottomBarsHaveABacking() {
+        openHubRow("Kuitit")
+        let unlinked = app.buttons["receipt-tab-unlinked"].firstMatch
+        guard unlinked.waitForExistence(timeout: 15) else { dump(app, "stability-15-kuitit"); XCTFail("no Ei kohdistettu chip"); return }
+        // The chips scroll sideways; the fifth may sit past the edge.
+        if !unlinked.isHittable {
+            app.buttons["receipt-tab-all"].firstMatch.swipeLeft()
+            _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: unlinked)], timeout: 5)
+        }
+        unlinked.tap(); taps += 1
+        // The seed's two sure pairs. At the top of the list, rows run on under the bar.
+        let sure = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kohdista varmat")).firstMatch
+        guard sure.waitForExistence(timeout: 20) else {
+            dump(app, "stability-15-no-sure"); XCTFail("no Kohdista varmat on Ei kohdistettu: does the seed have its sure pairs?"); return
+        }
+        assertCanvasUnderBar(sure, "Ei kohdistettu, Kohdista varmat")
+        shot("stability-sure-bar")
+
+        // Not Lumo Kosmetiikka Oy: P1 test04 approves it, and nothing reseeds between tests.
+        guard tapLabel("label BEGINSWITH %@", "Audit Hyvitys Odottaa Oy,") else { XCTFail("no Audit Hyvitys Odottaa Oy waiting for review"); return }
+        let approve = app.buttons.matching(NSPredicate(format: "label == %@", "Hyväksy")).firstMatch
+        guard approve.waitForExistence(timeout: 15) else { dump(app, "stability-15-no-hyvaksy"); XCTFail("the pending receipt has no Hyväksy"); return }
+        assertCanvasUnderBar(approve, "Kuitti, Hyväksy")
+        shot("stability-receipt-bar")
+    }
+
+    /// The first picked-mode row of a list on screen below `top`, not under the bottom of the
+    /// screen: a row's button names a day ("15.10.2026").
+    private func firstListRow(below top: XCUIElement) -> XCUIElement? {
+        let window = app.windows.firstMatch.frame
+        let rows = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{4}.*"))
+        return rows.allElementsBoundByIndex.first { row in
+            row.exists && row.isHittable && row.frame.minY > top.frame.maxY && row.frame.maxY < window.maxY - 120
+        }
+    }
+
+    /// The bulk bar once a row is picked: no Peruuta of its own, and with one action one row high.
+    private func bulkBar(_ screen: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement? {
+        let bar = app.descendants(matching: .any).matching(identifier: "bulk-bar").firstMatch
+        guard bar.waitForExistence(timeout: 5) else {
+            dump(app, "stability-14-\(screen)-no-bar"); XCTFail("\(screen): no bulk bar after picking a row", file: file, line: line); return nil
+        }
+        waitStill(bar)
+        var actions: [String] = []
+        for button in bar.buttons.allElementsBoundByIndex where !button.label.isEmpty && !actions.contains(button.label) {
+            actions.append(button.label)
+        }
+        note("INFO stability 14 \(screen): bulk bar \(bar.frame), actions \(actions)")
+        XCTAssertFalse(actions.isEmpty, "\(screen): the bulk bar has no action", file: file, line: line)
+        XCTAssertFalse(actions.contains("Peruuta"), "\(screen): the bulk bar has its own Peruuta", file: file, line: line)
+        if actions.count == 1 {
+            XCTAssertLessThanOrEqual(bar.frame.height, 64, "\(screen): one action in a \(bar.frame.height) pt bar", file: file, line: line)
+        }
+        return bar
+    }
+
+    /// Back from a Kirjanpito screen to the hub, as the owner goes.
+    private func backToBooks(_ title: String) {
+        app.navigationBars[title].buttons["BackButton"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(app.navigationBars["Kirjanpito"].waitForExistence(timeout: 10), "Back from \(title) did not reach Kirjanpito")
+    }
+
+    /// The toolbar's Valmis ends the mode: the bar and Valitse kaikki go.
+    private func endSelectMode(_ bar: XCUIElement, _ title: String, _ screen: String, file: StaticString = #filePath, line: UInt = #line) {
+        let done = app.navigationBars[title].buttons["Valmis"].firstMatch
+        guard done.exists else { XCTFail("\(screen): no Valmis in the bar", file: file, line: line); return }
+        done.tap(); taps += 1
+        XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "\(screen): Valmis left the bulk bar up", file: file, line: line)
+        XCTAssertFalse(app.buttons["Valitse kaikki"].exists, "\(screen): Valmis left the mode on", file: file, line: line)
+    }
 }
