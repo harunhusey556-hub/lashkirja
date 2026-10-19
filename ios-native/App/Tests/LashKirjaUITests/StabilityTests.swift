@@ -279,6 +279,100 @@ final class StabilityTests: WalkTestCase {
         }
     }
 
+    /// X002 X022 X160 X161 (B3): at the default text size on a 402 pt phone, each confirm sheet's
+    /// inline title reads whole between Peruuta and the confirm button. Long confirm labels cut the
+    /// titles ('Lähetä maksumuis…', 'Hyvitä la…', 'Hyvitä os…') or pushed one out of the bar ('Kirjaa
+    /// maksu' beside 'Merkitse maksetuksi'), and the credit amount's label lost its '(€)'. Text the
+    /// audit finds cut on the screen under a sheet is that screen's and is not counted.
+    func test17_SheetTitlesFit() {
+        // From Myynti, not Koti: Koti's tasks can put the overdue invoice behind "Näytä enemmän".
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        let invoice = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
+        guard tapLabel("label CONTAINS %@", "· myöhässä"), invoice.waitForExistence(timeout: 20) else {
+            dump(app, "stability-17-no-invoice"); XCTFail("no overdue invoice opened from Myynti"); return
+        }
+        var under = clippedTexts()
+        // The primary while a reminder may go, a Toiminnot item while it waits for its date.
+        if let remind = hittable(app.buttons.matching(NSPredicate(format: "label == %@", "Lähetä maksumuistutus")), timeout: 15) {
+            remind.tap(); taps += 1
+            assertSheetFits("Maksumuistutus", beyond: under)
+        } else if pickFromMenu(invoice, "Lähetä maksumuistutus") {
+            assertSheetFits("Maksumuistutus", beyond: under)
+        } else {
+            XCTFail("the overdue invoice offers no Lähetä maksumuistutus")
+        }
+        if pickFromMenu(invoice, "Hyvitä") { assertSheetFits("Hyvitä laskua", beyond: under) } else { XCTFail("Toiminnot has no Hyvitä") }
+
+        openHubRow("Ostolaskut")
+        let purchase = app.navigationBars["Ripsitukku Oy"]
+        guard tapLabel("label CONTAINS %@", "Ripsitukku Oy"), purchase.waitForExistence(timeout: 20) else {
+            dump(app, "stability-17-no-purchase"); XCTFail("the seed's Ripsitukku Oy ostolasku did not open"); return
+        }
+        under = clippedTexts()
+        if pickFromMenu(purchase, "Hyvitä") { assertSheetFits("Hyvitä ostolasku", beyond: under) } else { XCTFail("Ripsitukku Oy: Toiminnot has no Hyvitä") }
+        if pickFromMenu(purchase, "Kirjaa maksu") { assertSheetFits("Kirjaa maksu", beyond: under) } else { XCTFail("Ripsitukku Oy: Toiminnot has no Kirjaa maksu") }
+    }
+
+    /// The sheet titled `title` has risen: its bar shows the title, and the textClipped audit finds no
+    /// text cut beyond `under` (the screen beneath, read before the sheet opened). Closed with Peruuta.
+    private func assertSheetFits(_ title: String, beyond under: [String], file: StaticString = #filePath, line: UInt = #line) {
+        let bar = app.navigationBars[title]
+        guard bar.waitForExistence(timeout: 10) else {
+            dump(app, "stability-17-no-sheet"); XCTFail("\(title) did not open", file: file, line: line); return
+        }
+        waitStill(bar)
+        shot("stability-17-\(title)")
+        let name = bar.staticTexts[title].firstMatch
+        XCTAssertTrue(name.exists && name.frame.width > 1, "\(title): the bar does not show its title", file: file, line: line)
+        let cut = clippedTexts().filter { !under.contains($0) }
+        XCTAssertEqual(cut, [], "\(title): text cut on the sheet", file: file, line: line)
+        bar.buttons["Peruuta"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(bar.waitForNonExistence(timeout: 10), "\(title): Peruuta did not close the sheet", file: file, line: line)
+    }
+
+    /// Taps `item` in the bar's Toiminnot menu. The screen under the menu can have a button of that
+    /// name too (Ostolasku's own "Kirjaa maksu"); the menu lies over it, so its item is the last match.
+    private func pickFromMenu(_ bar: XCUIElement, _ item: String) -> Bool {
+        let menu = bar.buttons["Toiminnot"].firstMatch
+        guard menu.waitForExistence(timeout: 15) else { note("MISS \(item): no Toiminnot"); return false }
+        menu.tap(); taps += 1
+        guard let button = hittable(app.buttons.matching(NSPredicate(format: "label == %@", item)), last: true, timeout: 5) else {
+            dump(app, "stability-17-menu"); note("MISS \(item) in Toiminnot")
+            // Closes the menu, so the next step starts from the screen.
+            app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+            return false
+        }
+        button.tap(); taps += 1
+        return true
+    }
+
+    /// The first hittable element of `query` (the last one with `last`), looked for until `timeout`.
+    private func hittable(_ query: XCUIElementQuery, last: Bool = false, timeout: TimeInterval) -> XCUIElement? {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let all = query.allElementsBoundByIndex
+            if let element = last ? all.last(where: { $0.isHittable }) : all.first(where: { $0.isHittable }) { return element }
+            usleep(250_000)
+        } while Date() < deadline
+        return nil
+    }
+
+    /// The texts the textClipped audit finds cut on the screen, by label; the audit itself records
+    /// nothing. P2Tests has a copy: the session gate builds this file alone onto an older ref.
+    private func clippedTexts() -> [String] {
+        let found = ClippedTexts()
+        do {
+            try app.performAccessibilityAudit(for: .textClipped) { issue in
+                let label = issue.element?.label ?? ""
+                found.labels.append(label.isEmpty ? issue.compactDescription : label)
+                return true
+            }
+        } catch {
+            XCTFail("the textClipped audit did not run: \(error)")
+        }
+        return found.labels
+    }
+
     /// A month chip's button: "Syyskuu, 3", or "Joulukuu 2025, 3" for another year (SectionChip).
     static let monthChip = "[A-ZÄÖÅ][a-zäöå]+( [0-9]{4})?, [0-9]+"
     /// Any bank row's button, whatever its state. A copy of P1Tests.bankRow: the session gate
@@ -424,4 +518,9 @@ final class StabilityTests: WalkTestCase {
         note("MARK alv-end \(Date().formatted(.iso8601))")
         XCTAssertEqual(app.state, .runningForeground)
     }
+}
+
+/// What an audit's handler found; a class, so the handler fills it in place.
+private final class ClippedTexts {
+    var labels: [String] = []
 }

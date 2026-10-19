@@ -82,7 +82,8 @@ final class P0Tests: WalkTestCase {
         check("P0.4 keyboard shows Valmis", app.buttons["Valmis"].exists)
     }
 
-    // P0.5 #1: payment sheet asks only when dirty.
+    // P0.5 #1: payment sheet asks only when dirty. U007 U000 (asserted): the amount is named, and the
+    // dirty question stacks over the form, which stays in view, so Jatka muokkausta returns to it.
     func testE_PaymentSheet() {
         // A miss fails: it returned quietly before, and the sheet checks below never ran (N1 run 39180264585).
         guard openOverdueFromKoti() else { XCTFail("no overdue invoice on Koti"); return }
@@ -92,6 +93,8 @@ final class P0Tests: WalkTestCase {
         guard tap("Maksu") else { return }
         sleep(2); shot("e3-payment-clean")
         dump(app, "e3-payment")
+        // The open sum is filled in at once, so a placeholder alone left the amount unnamed.
+        XCTAssertTrue(app.staticTexts["Summa (€)"].waitForExistence(timeout: 5), "the clean payment sheet does not name its amount Summa (€)")
         swipeSheetDown("Kirjaa maksu"); sleep(2); shot("e4-clean-swipe")
         check("P0.5 clean payment sheet closes without asking", !discardDialog.exists && !app.navigationBars["Kirjaa maksu"].exists)
         guard tap("Maksu") else { return }
@@ -99,8 +102,30 @@ final class P0Tests: WalkTestCase {
         let amount = app.textFields.firstMatch
         type(amount, "1")
         if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap() }
+        let typed = amount.value as? String
         sleep(1); swipeSheetDown("Kirjaa maksu"); sleep(2); shot("e5-dirty-swipe")
         check("P0.5 dirty payment sheet asks Hylätäänkö muutokset?", discardDialog.exists)
+        guard discardDialog.waitForExistence(timeout: 3) else { XCTFail("the dirty payment sheet did not ask Hylätäänkö muutokset?"); return }
+
+        // On a half-height sheet the question pushed the form out of view: the bare invoice showed
+        // behind it. The form's bar must be on the screen, above the question.
+        let question = app.descendants(matching: .any).matching(identifier: "confirm-sheet").firstMatch
+        let bar = app.navigationBars["Kirjaa maksu"]
+        waitStill(app.buttons["confirm-sheet-confirm"].firstMatch)
+        waitStill(bar)
+        XCTAssertTrue(question.exists, "the question is not the confirm sheet")
+        XCTAssertTrue(bar.exists, "the Kirjaa maksu bar is gone behind the question")
+        if question.exists, bar.exists {
+            let window = app.windows.firstMatch.frame
+            XCTAssertGreaterThanOrEqual(bar.frame.minY, window.minY, "the Kirjaa maksu bar \(bar.frame) is above the screen")
+            XCTAssertLessThanOrEqual(bar.frame.maxY, question.frame.minY, "the Kirjaa maksu bar \(bar.frame) is not above the question \(question.frame)")
+        }
+
+        app.buttons["Jatka muokkausta"].firstMatch.tap()
+        XCTAssertTrue(question.waitForNonExistence(timeout: 5), "Jatka muokkausta did not close the question")
+        XCTAssertTrue(bar.waitForExistence(timeout: 5), "Jatka muokkausta closed Kirjaa maksu")
+        XCTAssertEqual(amount.value as? String, typed, "Jatka muokkausta did not keep the typed amount")
+        shot("e6-jatka")
     }
 
     // P0.4 #5 isolated: Peruuta on a fresh dirty template editor asks.
