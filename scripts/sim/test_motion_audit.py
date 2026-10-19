@@ -1,14 +1,18 @@
 """Unit tests for motion-audit.py and motion-gate.py (batch H1): no vacuous PASS, no false FIXED,
-spinner pages and late shifts after a stalled presentation caught.
+spinner pages and late shifts after a stalled presentation caught. Batch H6: frame times, the
+contact sheet, and the motion a step is expected to make, each rule with a case it must still fail.
 usage: python3 -m unittest discover -s scripts/sim -p 'test_*.py'
 Synthetic frames stand in for ffmpeg; the gate runs as the workflow runs it, as a script."""
 import importlib.util, json, os, subprocess, sys, tempfile, unittest
+from unittest import mock
 import numpy as np
+from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("motion_audit", os.path.join(HERE, "motion-audit.py"))
 ma = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ma)
+FRAMES = ma.frames  # the ffmpeg reader, before the helpers below swap in synthetic frames
 
 H = 874  # an iPhone 16 Pro frame at the analysis width (402 pt)
 CANVAS, CARD, INK = 242, 255, 60
@@ -32,10 +36,10 @@ A = screen([150, 250, 350, 450, 550, 650])
 B = screen([170, 290, 410, 530, 650], text_w=300)
 
 
-def analyze(times, data, tap_s=0.5, step="x-open"):
+def analyze(times, data, tap_s=0.5, step="x-open", probe=()):
     ma.frames = lambda video: (times, np.stack(data))
     hold = (ma.GESTURE_HOLD_S, ma.GESTURE_HOLD_S + 0.4) if ma.GESTURE.search(step) else (ma.HOLD_S, ma.QUIET_S)
-    return ma.analyze_video("-", tap_s, *hold)
+    return ma.analyze_video("-", tap_s, *hold, probe=probe)
 
 
 def probe(lines):
@@ -239,6 +243,233 @@ class Intermediate(unittest.TestCase):
         self.assertEqual(pause["intermediate"], [])
         held = analyze([0.0, 0.6, 0.7, 1.6, 1.7, 1.8], [A, mid, mid, mid, B, B], step="periods-swipeback")
         self.assertEqual([x["frame"] for x in held["intermediate"]], [1])
+
+
+def listing(off):
+    """A long list scrolled by off pt: a card every 100 pt, each with its own line lengths."""
+    f = screen([])
+    for k, y in enumerate(range(150 - off, 2000 - off, 100)):
+        if 120 < y < 700:
+            w = 100 + (k * 67) % 240
+            f[y:y + 80, 16:386] = CARD
+            f[y + 16:y + 26, 32:32 + w] = INK
+            f[y + 44:y + 52, 32:32 + w // 2] = INK
+    return f
+
+
+def pulled(f, dy):
+    """f with everything between the status bar and the tab bar pulled down by dy pt."""
+    out = f.copy()
+    out[60 + dy:790] = f[60:790 - dy]
+    out[60:60 + dy] = CANVAS
+    return out
+
+
+def fading(a, b, w):
+    """A SwiftUI cross-fade w of the way: b fades in over a fading out over the canvas."""
+    return np.round(w * b + (1 - w) ** 2 * a + w * (1 - w) * CANVAS).astype(np.uint8)
+
+
+def ffmpeg_run(pts, best_effort, h=8):
+    """subprocess.run for frames(): showinfo prints the frames' own pts when ffmpeg ignores the
+    DTS, its best_effort_timestamp otherwise."""
+    def run(cmd, capture_output):
+        times = pts if "+igndts" in cmd else best_effort
+        err = "".join(f"[Parsed_showinfo_2 @ 0] n:{i} pts:{round(t * 600)} pts_time:{t:g} duration:1\n"
+                      for i, t in enumerate(times))
+        return subprocess.CompletedProcess(cmd, 0, stdout=bytes(len(times) * ma.W * h), stderr=err.encode())
+    return run
+
+
+def inter_frames(res):
+    return [x["frame"] for x in res["intermediate"]]
+
+
+def chat_screens():
+    """Avustaja waiting under the question (the typing dots), and with the three-line answer there."""
+    question = screen([150])
+    question[290:300, 40:70] = INK
+    answer = screen([150])
+    answer[270:390, 16:386] = CARD
+    for y, w in ((286, 330), (310, 300), (334, 250)):
+        answer[y:y + 10, 32:32 + w] = INK
+    return question, answer
+
+
+class Timestamps(unittest.TestCase):
+    def test_frames_read_their_own_pts(self):
+        # pr-run1 raportit-zip-close (M042): two pts tie, ffmpeg's best effort drops to the DTS,
+        # 1.2 s behind, and the contact sheet read #16 +2.21 s, then #18 +1.05 s.
+        pts = [0.0, 2.19, 2.75, 2.768, 2.768, 2.93, 4.11]
+        with mock.patch.object(ma.subprocess, "run", ffmpeg_run(pts, [0.0, 2.19, 2.75, 2.768, 1.597, 1.75, 2.93])):
+            times, data = FRAMES("m.mov")
+        self.assertEqual((times, data.shape), (pts, (7, 8, ma.W)))
+
+    def test_best_effort_when_the_pts_go_back(self):
+        best = [0.0, 0.5, 0.9, 1.4]
+        with mock.patch.object(ma.subprocess, "run", ffmpeg_run([0.0, 0.5, 0.3, 1.4], best)):
+            self.assertEqual(FRAMES("m.mov")[0], best)
+
+    def test_times_that_still_go_back_are_not_judged(self):
+        frames = ([0.1, 0.6, 0.7, 0.65, 1.5], np.stack([A, B, B, B, B]))
+        with tempfile.TemporaryDirectory() as root:
+            r = walk(root, "s", [step("a")], {"m-a.mov": frames})["a"]
+        self.assertEqual(r["checks"]["intermediate"], "n/a (bad timestamps)")
+        self.assertEqual(r["checks"]["shift_video"], "n/a (bad timestamps)")
+        self.assertEqual(r["checks"]["flash"], "PASS")  # frame order alone finds a flash
+
+    def test_tied_times_are_judged(self):
+        frames = ([0.1, 0.6, 0.7, 0.7, 1.5], np.stack([A, B, B, B, B]))
+        with tempfile.TemporaryDirectory() as root:
+            r = walk(root, "s", [step("a")], {"m-a.mov": frames})["a"]
+        self.assertEqual(set(r["checks"].values()) - {"n/a"}, {"PASS"})
+
+
+class ContactSheet(unittest.TestCase):
+    def shown(self, n, flags=(), settle=None):
+        """The frames the sheet shows, read back from the png: frame i is filled with grey 3i + 2."""
+        res = {"times": [i * 0.1 for i in range(n)], "flags": list(flags), "tap_i": 1,
+               "settle_i": n - 1 if settle is None else settle,
+               "data": np.stack([np.full((H, ma.W), 3 * i + 2, np.uint8) for i in range(n)])}
+        with tempfile.TemporaryDirectory() as d:
+            ma.contact_sheet(os.path.join(d, "sheet.png"), res, 0.0)
+            img = np.asarray(Image.open(os.path.join(d, "sheet.png")).convert("L"))
+        tw, th = 134, int(134 * H / ma.W)
+        tiles = [img[(k // 10) * (th + 22) + 3 + th // 2, (k % 10) * (tw + 6) + 3 + tw // 2]
+                 for k in range(img.shape[0] // (th + 22) * 10)]
+        return [(int(v) - 2) // 3 for v in tiles if v != 255]
+
+    def test_settle_last_and_flags_are_never_cut(self):
+        # koti-settings-sheet (M021): 56 frames, the sheet stopped at #39 and lost the Asetukset sheet.
+        for n, flags in ((41, ()), (56, (50,)), (57, ()), (78, (44, 70))):
+            got = self.shown(n, flags, settle=n - 2)
+            self.assertLessEqual({0, 1, n - 2, n - 1, *flags}, set(got), n)
+            self.assertLessEqual(len(got), 40, n)
+
+    def test_long_videos_are_still_sampled(self):
+        self.assertEqual(self.shown(20), list(range(20)))
+        got = self.shown(84, (70,))
+        self.assertLessEqual({0, 1, 70, 83}, set(got))
+        self.assertLessEqual(len(got), 33)
+
+
+class ProbeCrossCheck(unittest.TestCase):
+    # lasku-form-scroll baseline (M093): one frame written twice mid-fling, then nothing for 0.37 s
+    # while the probe logged the list decelerating every 0.1 s.
+    HOLD = ([0.0, 0.6, 0.75, 0.76, 1.13, 1.3, 1.9],
+            [listing(0), listing(120), listing(230), listing(230), listing(330), listing(470), listing(470)])
+    FLING = [(0.77, "MOVE"), (0.86, "MOVE"), (0.97, "MOVE"), (1.07, "MOVE")]
+
+    def test_hold_the_probe_saw_moving_is_a_recorder_stall(self):
+        self.assertEqual(inter_frames(analyze(*self.HOLD)), [2])
+        self.assertEqual(inter_frames(analyze(*self.HOLD, probe=self.FLING)), [])
+
+    def test_hold_the_probe_did_not_see_moving_is_a_screen(self):
+        # One move is the change that ends the hold (raportit-prev-year's spinner page, M045).
+        self.assertEqual(inter_frames(analyze(*self.HOLD, probe=[(1.07, "MOVE")])), [2])
+        # Moves over part of the hold leave the rest standing.
+        self.assertEqual(inter_frames(analyze(*self.HOLD, probe=[(0.77, "MOVE"), (0.8, "MOVE")])), [2])
+        # Frames kept coming: the recorder ran, the screen held (kirjanpito-purchases-open, H1 run).
+        t, d = self.HOLD
+        kept = ([*t[:3], 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, *t[4:]], [*d[:3], *[d[2]] * 6, *d[4:]])
+        self.assertEqual(inter_frames(analyze(*kept, probe=self.FLING)), [2])
+
+    @staticmethod
+    def sheet_rise():
+        """koti-add-sheet pr-run1 (M013): the tab-bar lens moves until +0.9 s, the main thread
+        stalls 0.94 s before the presentation, and the sheet rises from +1.56 s."""
+        lens = [A.copy() for _ in range(3)]
+        for k, f in enumerate(lens):
+            f[795:840, 40 + 60 * k:110 + 60 * k] = 120
+        sheets = []
+        for top in (700, 560, 440, 440):
+            f = A.copy()
+            f[top:] = 252
+            f[top + 30:top + 44, 150:250] = 40
+            sheets.append(f)
+        return [0.0, 0.6, 0.75, 0.9, 1.56, 1.62, 1.68, 2.5], [A, *lens, *sheets]
+
+    def test_pause_with_the_sheet_presented_in_it_is_not_the_end(self):
+        self.assertNotEqual(analyze(*self.sheet_rise())["shift"], [])
+        self.assertEqual(analyze(*self.sheet_rise(), probe=[(1.36, "MARK")])["shift"], [])
+        # The presentation before the pause does not reach into it.
+        self.assertNotEqual(analyze(*self.sheet_rise(), probe=[(0.8, "MARK")])["shift"], [])
+
+    def test_probe_lines_on_the_video_clock(self):
+        t, d = self.sheet_rise()
+        lines = ["MOVE 100.700 add-sheet n=1 max=40 _UILiquidLensView@0,0,90x70:40,0", "QUIET 101.100 add-sheet"]
+        with tempfile.TemporaryDirectory() as root:
+            r = walk(root, "s", [step("add", kind="sheet")], {"m-add.mov": (t, np.stack(d))},
+                     probe_lines=lines + ["MARK 101.360 presented"])["add"]
+        self.assertEqual(r["checks"]["shift_video"], "PASS")
+        # A move after the probe's QUIET is a late shift, not the step still moving.
+        with tempfile.TemporaryDirectory() as root:
+            r = walk(root, "s", [step("add", kind="sheet")], {"m-add.mov": (t, np.stack(d))},
+                     probe_lines=lines + ["MOVE 101.300 add-sheet n=1 max=12 HostingView@0,0,402x874:0,12"])["add"]
+        self.assertEqual(r["checks"]["shift_video"], "FAIL")
+
+
+class ExpectedMotion(unittest.TestCase):
+    def test_refresh_rebound_past_80_pt_is_the_rebound(self):
+        # koti-refresh baseline (M014): the recorder missed the rebound, and the page came back
+        # 215 pt in one frame after a 0.62 s gap; a search of +-80 pt called it a pop.
+        koti = screen([150, 260, 330, 480, 600], text_w=260)
+        frames = ([0.0, 0.6, 0.9, 1.2, 1.82, 2.5],
+                  np.stack([koti, pulled(koti, 100), pulled(koti, 170), pulled(koti, 215), koti, koti]))
+        with tempfile.TemporaryDirectory() as root:
+            r = walk(root, "s", [step("koti-refresh", kind="load"), step("koti-open")],
+                     {"m-koti-refresh.mov": frames, "m-koti-open.mov": frames})
+        self.assertEqual(r["koti-refresh"]["checks"]["shift_video"], "PASS")
+        # A page jumping up 215 pt is still a shift where no refresh explains it.
+        self.assertEqual(r["koti-open"]["checks"]["shift_video"], "FAIL")
+        self.assertEqual([(x["what"], x["dy_pt"]) for x in r["koti-open"]["shift"]], [("move", -215)])
+
+    # chat-send baseline (M065): the answer replaces the typing dots under the question 1.5 s after
+    # the step went quiet, and nothing above it moves.
+    QUESTION, ANSWER = chat_screens()
+
+    def chat(self, kind, frames):
+        times = [0.0, 0.6, 0.7, 2.2, 2.6, 3.4][:len(frames)]
+        with tempfile.TemporaryDirectory() as root:
+            return walk(root, "s", [step("chat-send", kind=kind)], {"m-chat-send.mov": (times, np.stack(frames))})["chat-send"]
+
+    def test_answer_under_unchanged_content_is_the_arrival(self):
+        q, a = self.QUESTION, self.ANSWER
+        self.assertEqual(self.chat("load", [A, q, q, a, a])["checks"]["shift_video"], "PASS")
+
+    def test_late_content_that_is_not_an_answer_still_fails(self):
+        q, a = self.QUESTION, self.ANSWER
+        # Not a load step: nothing was asked for.
+        self.assertEqual(self.chat("nav", [A, q, q, a, a])["checks"]["shift_video"], "FAIL")
+        # Gone again by the end: not where the step lands.
+        self.assertEqual(self.chat("load", [A, q, q, a, q, q])["checks"]["shift_video"], "FAIL")
+        # The title above changed with it.
+        retitled = a.copy()
+        retitled[90:104, 150:250] = CANVAS
+        retitled[90:104, 120:280] = 40
+        self.assertEqual(self.chat("load", [A, q, q, retitled, retitled])["checks"]["shift_video"], "FAIL")
+
+    # bad-capture-upload (M002): the queue page settles, the reading finishes and the page fades
+    # into the form in 0.4 s, which at ~4 fps lands as 2-4 frames that each read as a pop.
+    QUEUE, FORM = A, B
+
+    def fade(self, times, frames):
+        return analyze([0.0, 0.6, 0.7, *times, 4.4], [screen([]), self.QUEUE, self.QUEUE, *frames, self.FORM])["shift"]
+
+    def test_cross_fade_is_one_transition(self):
+        q, f = self.QUEUE, self.FORM
+        self.assertEqual(self.fade([3.1, 3.2, 3.3, 3.4], [fading(q, f, w) for w in (0.3, 0.6, 0.85)] + [f]), [])
+
+    def test_late_change_that_is_not_one_cross_fade_still_fails(self):
+        q, f = self.QUEUE, self.FORM
+        # A pop: no frame between the two pages.
+        self.assertNotEqual(self.fade([3.1], [f]), [])
+        # Slower than BLEND_S.
+        self.assertNotEqual(self.fade([3.1, 3.4, 3.7, 4.0], [fading(q, f, w) for w in (0.3, 0.6, 0.85)] + [f]), [])
+        # Back and forth.
+        self.assertNotEqual(self.fade([3.1, 3.2, 3.3, 3.4], [fading(q, f, w) for w in (0.6, 0.3, 0.85)] + [f]), [])
+        # A slide in from the right.
+        self.assertNotEqual(self.fade([3.1, 3.2, 3.3], [np.concatenate([q[:, k:], f[:, :k]], axis=1) for k in (140, 280)] + [f]), [])
 
 
 if __name__ == "__main__":
