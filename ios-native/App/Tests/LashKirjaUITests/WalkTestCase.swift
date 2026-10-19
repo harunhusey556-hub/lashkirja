@@ -201,7 +201,15 @@ class WalkTestCase: XCTestCase {
     /// which is then tapped first, as the owner would.
     func openOverdueFromKoti() -> Bool {
         if tapLabel("label CONTAINS %@", "· myöhässä") { return true }
-        guard tapLabel("label BEGINSWITH %@", "Näytä enemmän") else { return false }
+        // The search above scrolled past the task list and left "Näytä enemmän" under the floating
+        // bar, which took the tap (N1 run 39187969883): back up until the button is clear of it.
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä enemmän")).firstMatch
+        for _ in 0..<8 where !(more.exists && more.isHittable && more.frame.minY > 160) {
+            app.windows.firstMatch.swipeDown(velocity: .slow); scrolls += 1
+        }
+        guard more.exists, more.isHittable else { note("MISS Näytä enemmän on Koti"); return false }
+        more.tap(); taps += 1
+        _ = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä vähemmän")).firstMatch.waitForExistence(timeout: 5)
         return tapLabel("label CONTAINS %@", "· myöhässä")
     }
     /// Scrolls the screen (each swipe counted) until `element` sits inside the window, as tapLabel
