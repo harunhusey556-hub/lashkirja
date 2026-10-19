@@ -116,12 +116,15 @@ export function scorePurchasePair(row: PurchaseBankRow, invoice: PurchaseSide): 
   }
 
   const dueGapDays = row.date ? Math.round((row.date.getTime() - invoice.dueDate.getTime()) / DAY_MS) : null;
+  const rounded = round3(score);
   return {
-    score: round3(score),
+    score: rounded,
     eligible: verdict.eligible,
     exactAmount,
     amountDiffCents: diff,
-    reasons,
+    // A row listed only because it falls near the due date has no reason to be picked: under it,
+    // "maksettu eräpäivänä" read as one (X162). The receipt side keeps the gate's own reasons.
+    reasons: rounded > 0 ? reasons : [],
     dueGapDays,
   };
 }

@@ -150,7 +150,7 @@ struct PurchaseLinkConfirmView: View {
     }
 }
 
-/// Ostolasku → "Kohdista pankkitapahtumaan": the bank rows that may have paid it, best first.
+/// Ostolasku → "Kohdista pankkiin": the bank rows that may have paid it, best first.
 struct PurchaseBankLinkSheet: View {
     @Environment(\.dismiss) private var dismiss
     let invoice: PurchaseInvoice
@@ -165,12 +165,15 @@ struct PurchaseBankLinkSheet: View {
                 emptyText: "Lähteviä maksuja, joita ei ole vielä kohdistettu, ei löytynyt laskun ajalta. Hae nimellä tai summalla."
             ) {
                 LabeledContent(invoice.supplierName) { MoneyText(amount: invoice.open).fontWeight(.semibold) }
-            } footer: {
-                Text("Valitse pankkitapahtuma, jolla tämä ostolasku maksettiin. Parhaat osumat ovat ylimpänä.")
+            } footer: { list in
+                // Rows listed only for their dates are not "best matches" (X162).
+                Text(list?.matchesNothing == true
+                     ? "Mikään tapahtuma ei vastaa summaa, viitettä tai nimeä. Hae nimellä tai summalla."
+                     : "Valitse pankkitapahtuma, jolla tämä ostolasku maksettiin. Parhaat osumat ovat ylimpänä.")
             } pick: { candidate in
                 target = PurchaseLinkPair(invoice: invoice, row: candidate)
             }
-            .navigationTitle("Kohdista pankkitapahtumaan")
+            .navigationTitle("Kohdista pankkiin")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Sulje") { dismiss() } }
@@ -187,7 +190,7 @@ struct PurchaseBankLinkSheet: View {
 }
 
 /// The searchable list of bank rows one document can be linked to, a server page at a time: the
-/// ostolasku's "Kohdista pankkitapahtumaan" and the kuitti's "Valitse muu pankkitapahtuma". Owner
+/// ostolasku's "Kohdista pankkiin" and the kuitti's "Valitse muu pankkitapahtuma". Owner
 /// 2026-10-15: 599 rows stopped at 30 here, and a kuitti offered only the matcher's few. The
 /// search and the month chips ask the server, so they reach every row, not only the loaded ones.
 struct BankRowPickerList<Header: View, Footer: View>: View {
@@ -195,7 +198,8 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
     let path: String
     let emptyText: String
     @ViewBuilder let header: () -> Header
-    @ViewBuilder let footer: () -> Footer
+    /// Under the header; given the loaded rows (nil until the first answer), so it can say what they are.
+    @ViewBuilder let footer: (PurchaseBankCandidateList?) -> Footer
     let pick: (PurchaseBankCandidate) -> Void
 
     @State private var state = ScreenLoad<PurchaseBankCandidateList>()
@@ -208,7 +212,7 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
 
     var body: some View {
         List {
-            Section { header() } footer: { footer() }
+            Section { header() } footer: { footer(state.value) }
             switch state.display {
             case .content(let list):
                 if let banner = state.banner {
@@ -665,7 +669,7 @@ struct ReceiptBankPickerSheet: View {
                     if let amount = receipt.totalAmount { MoneyText(amount: amount).fontWeight(.semibold) }
                 }
                 if let failure { Text(failure).font(.subheadline).foregroundStyle(Theme.danger).transition(.opacity) }
-            } footer: {
+            } footer: { _ in
                 Text("Valitse pankkitapahtuma, jolla tämä kuitti maksettiin. Parhaat osumat ovat ylimpänä.")
             } pick: { candidate in
                 picked = candidate

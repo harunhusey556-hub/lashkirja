@@ -630,13 +630,6 @@ struct PurchaseInvoiceDetailView: View {
                 if let reason = invoice.closedReason, !reason.isEmpty {
                     Section("Perustelu") { Text(reason) }
                 }
-                if invoice.canDelete {
-                    Section {
-                        Button(role: .destructive) { confirm = .delete } label: {
-                            Label(invoice.isCreditNote ? "Poista hyvityslasku" : "Poista ostolasku", systemImage: "trash")
-                        }
-                    }
-                }
             } else {
                 ScreenStateView(state: state, retry: load) { (_: PurchaseInvoice) in EmptyView() }
                     .listRowBackground(Color.clear)
@@ -650,6 +643,14 @@ struct PurchaseInvoiceDetailView: View {
             if let invoice = state.value {
                 ToolbarItem(placement: .topBarTrailing) { actions(invoice) }
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            ZStack {
+                if state.value?.canRecordPayment == true { primaryBar }
+            }
+            // Nil counts as open: the bar comes with the bill's first loaded frame, unanimated, and
+            // only fades when the bill itself changes (a payment closes it, a reopen brings it back).
+            .motion(.easeOut(duration: 0.2), value: state.value?.canRecordPayment ?? true)
         }
         .refreshable { await load(force: true) }
         .task { await load() }
@@ -854,10 +855,6 @@ struct PurchaseInvoiceDetailView: View {
                     }
                 }
             }
-            if invoice.canRecordPayment {
-                Button { sheet = .bankLink } label: { Label("Kohdista pankkitapahtumaan", systemImage: "building.columns") }
-                Button { sheet = .payment } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
-            }
         } header: {
             Text("Maksut")
         } footer: {
@@ -867,6 +864,22 @@ struct PurchaseInvoiceDetailView: View {
                 Text("Maksoitko laskun pankista? Kohdista pankkitapahtuma, niin maksu kirjautuu pankin päivällä ja summalla.")
             }
         }
+    }
+
+    /// An open bill's one next step, above the tab bar (X165): linking the bank row books the
+    /// bank's date and amount. Kirjaa maksu and the rest stay in Toiminnot.
+    private var primaryBar: some View {
+        Button { sheet = .bankLink } label: {
+            Text("Kohdista pankkiin").font(.headline).frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.primary)
+        .accessibilityIdentifier("ostolasku-primary")
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        // Canvas from the bar down to the screen's edge: rows scrolling under the bar do not show
+        // through around the button or behind the floating tab bar (X065).
+        .background(Theme.canvas, ignoresSafeAreaEdges: .bottom)
+        .transition(.opacity)
     }
 
     private func actions(_ invoice: PurchaseInvoice) -> some View {
@@ -879,7 +892,7 @@ struct PurchaseInvoiceDetailView: View {
                 Button { sheet = .credit } label: { Label("Hyvitä", systemImage: "arrow.uturn.backward.circle") }
             }
             if invoice.canRecordPayment {
-                Button { sheet = .bankLink } label: { Label("Kohdista pankkitapahtumaan", systemImage: "building.columns") }
+                Button { sheet = .bankLink } label: { Label("Kohdista pankkiin", systemImage: "building.columns") }
                 Button { sheet = .payment } label: { Label("Kirjaa maksu", systemImage: "eurosign.circle") }
             }
             if invoice.canMarkPaid {
