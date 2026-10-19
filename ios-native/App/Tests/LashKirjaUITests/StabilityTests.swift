@@ -80,9 +80,13 @@ final class StabilityTests: WalkTestCase {
         growAndFold("kuitit")
     }
 
+    /// N2: Pankki opens on the rows themselves; the hub's "Näytä kaikki" is gone.
     func test02_BankFeedGrowsAndFolds() {
         openHubRow("Pankki"); sleep(2)
-        tapLabel("label BEGINSWITH %@", "Näytä kaikki"); sleep(3)
+        let all = app.segmentedControls.firstMatch.buttons["Kaikki"]
+        XCTAssertTrue(all.waitForExistence(timeout: 10) && all.isSelected, "Pankki did not open on Kaikki")
+        let row = app.buttons.matching(NSPredicate(format: "label MATCHES %@", Self.bankRow)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "Pankki shows no bank row")
         growAndFold("pankkitapahtumat")
     }
 
@@ -112,7 +116,7 @@ final class StabilityTests: WalkTestCase {
         check("alv", app.state == .runningForeground)
         // The swipe is not taken on trust: in 3 of 9 suite runs it left ALV up (runs 38779539454,
         // 38895961757, 38993875695), "Pankki" was then looked for on ALV and the step passed
-        // without the hub ever opening. The hub's row shows once the pop has finished.
+        // without Pankki ever opening. Its row shows once the pop has finished.
         let hubRow = app.staticTexts["Pankki"].firstMatch
         let popped = hubRow.waitForExistence(timeout: 10)
         if !popped {
@@ -129,6 +133,8 @@ final class StabilityTests: WalkTestCase {
         }
         tap("Pankki")
         XCTAssertTrue(app.navigationBars["Pankki"].waitForExistence(timeout: 10), "Pankki did not open")
+        // The rows' screen (N2), not a screen that is only named Pankki: the hub was one too.
+        XCTAssertTrue(app.navigationBars["Pankki"].buttons["Toiminnot"].waitForExistence(timeout: 10), "Pankki opened without its rows' Toiminnot")
         assertResponsive("pankki")
         // The control for the canvas reads in test03 and test06: Pankki has had the canvas pair all along.
         assertWarmCanvas(app, under: app.navigationBars["Pankki"], "pankki")
@@ -247,6 +253,106 @@ final class StabilityTests: WalkTestCase {
         }
         let sorted = toKoti.sorted()
         note("MARK valid-session launch → Koti ms \(toKoti) median \(sorted.isEmpty ? -1 : sorted[sorted.count / 2])")
+    }
+
+    /// U014, X096, X097 (N2): Pankki's bar shows its title and one item, Toiminnot, from the push
+    /// on, by either way in. Four items crowded the title out, and Valitse came with the rows.
+    /// Toiminnot holds Valitse, Kuukausi and Tiliotteet but not "Hyväksy kuittiehdotukset" (the
+    /// Kuittien kohdistus card's button), and its Kuukausi moves the chips: one month control.
+    func test12_BankBarIsStable() {
+        for entry in ["Pankki", "Kohdista kuitit"] {
+            guard selectTab("Kirjanpito"), app.navigationBars["Kirjanpito"].waitForExistence(timeout: 10) else {
+                XCTFail("\(entry): Kirjanpito is not on top"); return
+            }
+            XCTAssertTrue(tap(entry), "\(entry): no such row on Kirjanpito")
+            let bar = app.navigationBars["Pankki"]
+            guard bar.waitForExistence(timeout: 10) else {
+                dump(app, "stability-12-not-pankki"); XCTFail("\(entry) did not open Pankki"); continue
+            }
+            assertBankBar(bar, "\(entry), at push")
+            let row = app.buttons.matching(NSPredicate(format: "label MATCHES %@", Self.bankRow)).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 15), "\(entry): no bank row arrived")
+            assertBankBar(bar, "\(entry), with rows")
+            checkBankActions(bar, entry)
+            shot("stability-pankki-bar-\(entry)")
+            bar.buttons["BackButton"].firstMatch.tap(); taps += 1
+        }
+    }
+
+    /// A month chip's button: "Syyskuu, 3", or "Joulukuu 2025, 3" for another year (SectionChip).
+    static let monthChip = "[A-ZÄÖÅ][a-zäöå]+( [0-9]{4})?, [0-9]+"
+    /// Any bank row's button, whatever its state. A copy of P1Tests.bankRow: the session gate
+    /// builds this file alone onto an older ref, so it cannot borrow from P1Tests.
+    static let bankRow = ".*, [0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{4} · .*, .*"
+
+    /// Pankki's bar: its title shown, and Toiminnot the one item beside Back, at the trailing end.
+    private func assertBankBar(_ bar: XCUIElement, _ moment: String, file: StaticString = #filePath, line: UInt = #line) {
+        let title = bar.staticTexts["Pankki"].exists
+        // A toolbar Menu is a labelled button around an unlabelled one: each label once.
+        var items: [String] = []
+        for button in bar.buttons.allElementsBoundByIndex where button.identifier != "BackButton" {
+            let label = button.label
+            if !label.isEmpty && !items.contains(label) { items.append(label) }
+        }
+        let actions = bar.buttons["Toiminnot"].firstMatch
+        let trailing = actions.exists && actions.frame.minX > bar.frame.midX
+        check("pankki bar \(moment): title \(title), items \(items), Toiminnot trailing \(trailing)", title && items == ["Toiminnot"] && trailing)
+        XCTAssertTrue(title, "\(moment): the bar does not show the title Pankki", file: file, line: line)
+        XCTAssertEqual(items, ["Toiminnot"], "\(moment): the bar's items besides Back", file: file, line: line)
+        XCTAssertTrue(trailing, "\(moment): Toiminnot is not at the bar's trailing end", file: file, line: line)
+    }
+
+    /// Toiminnot's items; then a month the list does not show, picked from Kuukausi, selects its
+    /// chip and names itself in Kuukausi; then Valitse brings Valitse kaikki and Valmis.
+    private func checkBankActions(_ bar: XCUIElement, _ entry: String) {
+        let chips = app.buttons.matching(NSPredicate(format: "label MATCHES %@ AND NOT (label BEGINSWITH %@)", Self.monthChip, "Päiväämättömät"))
+        // Kohdista kuitit opens on Vaatii toimia, and the --ci seed's open rows are in statements
+        // 0, 4 and 30 days back: one month on a 31st. Kaikki adds the finished month 3 months back.
+        if entry == "Kohdista kuitit" && !chips.allElementsBoundByIndex.contains(where: { !$0.isSelected }) {
+            app.segmentedControls.firstMatch.buttons["Kaikki"].tap(); taps += 1
+            _ = chips.matching(NSPredicate(format: "selected == false")).firstMatch.waitForExistence(timeout: 5)
+        }
+        guard let chip = chips.allElementsBoundByIndex.first(where: { !$0.isSelected }) else {
+            dump(app, "stability-12-chips"); XCTFail("\(entry): one month chip only (the --ci seed has rows in several months)"); return
+        }
+        let name = String(chip.label.prefix { $0 != "," })
+        let menu = bar.buttons["Toiminnot"].firstMatch
+        menu.tap(); taps += 1
+        let valitse = app.buttons["Valitse"].firstMatch
+        XCTAssertTrue(valitse.waitForExistence(timeout: 5) && valitse.isHittable, "\(entry): Toiminnot has no Valitse")
+        XCTAssertTrue(app.buttons["Tiliotteet"].firstMatch.isHittable, "\(entry): Toiminnot has no Tiliotteet")
+        let month = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kuukausi")).firstMatch
+        XCTAssertTrue(month.exists && month.isHittable, "\(entry): Toiminnot has no Kuukausi")
+        // The card's own button stays in the list behind the menu: a menu item shares Valitse's column.
+        let approve = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Hyväksy kuittiehdotukset")).allElementsBoundByIndex
+        let column = valitse.frame
+        let inMenu = approve.contains(where: { (button: XCUIElement) -> Bool in
+            abs(button.frame.minX - column.minX) < 2 && abs(button.frame.width - column.width) < 2
+        })
+        XCTAssertFalse(inMenu, "\(entry): Toiminnot holds Hyväksy kuittiehdotukset")
+        dump(app, "stability-12-menu")
+        guard month.exists else { return }
+        month.tap(); taps += 1
+        // The option ("Syyskuu 2026"), not the chip behind the menu ("Syyskuu, 3").
+        let options = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label CONTAINS %@)", name, ","))
+        _ = options.firstMatch.waitForExistence(timeout: 5)
+        guard let option = options.allElementsBoundByIndex.first(where: { $0.isHittable }) else {
+            dump(app, "stability-12-kuukausi"); XCTFail("\(entry): Kuukausi does not offer \(name)"); return
+        }
+        option.tap(); taps += 1
+        let picked = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name + ",")).firstMatch
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: picked)
+        XCTAssertEqual(XCTWaiter().wait(for: [selected], timeout: 5), .completed, "\(entry): picking \(name) in Kuukausi did not select its chip")
+        menu.tap(); taps += 1
+        XCTAssertTrue(month.waitForExistence(timeout: 5), "\(entry): Toiminnot has no Kuukausi the second time")
+        XCTAssertTrue(month.label.contains(name), "\(entry): Kuukausi says '\(month.label)' while the list shows \(name)")
+        XCTAssertTrue(valitse.isHittable, "\(entry): Toiminnot has no Valitse the second time")
+        valitse.tap(); taps += 1
+        XCTAssertTrue(bar.buttons["Valmis"].waitForExistence(timeout: 5), "\(entry): Valitse did not bring Valmis")
+        XCTAssertTrue(bar.buttons["Valitse kaikki"].exists, "\(entry): Valitse did not bring Valitse kaikki")
+        bar.buttons["Valmis"].tap(); taps += 1
+        XCTAssertTrue(bar.buttons["Toiminnot"].waitForExistence(timeout: 5), "\(entry): Valmis did not bring Toiminnot back")
+        assertBankBar(bar, "\(entry), after Valmis")
     }
 
     /// The marker's moments ("tabs=<ms> signedOut=<ms> …", ms after the process started) once it

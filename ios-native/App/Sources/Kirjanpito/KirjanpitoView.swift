@@ -11,10 +11,10 @@ struct KirjanpitoView: View {
 
     var body: some View {
         List {
-            // Two sections. Pankkitapahtumat, Tiliotteet and Pankkiyhteys open from the Pankki hub
-            // (Vaatii toimia, Viimeisimmät, Tiliotteet, Pankkiyhteys); its row carries the open count.
+            // Pankki opens the bank rows themselves (O2: a hub between them was one tap more);
+            // Tiliotteet and Pankkiyhteys open from there. Its row carries the open count.
             Section("Joka viikko") {
-                NavigationLink(value: Route.bankHub) {
+                NavigationLink(value: Route.bankFeed) {
                     HubRow(title: "Pankki", subtitle: openRows > 0 ? "\(openRows) tapahtumaa vaatii toimia" : "Tapahtumat, saldot ja tiliotteet", symbol: "building.columns.fill")
                 }
                 NavigationLink(value: Route.receipts) {

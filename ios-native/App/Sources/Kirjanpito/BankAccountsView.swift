@@ -29,10 +29,52 @@ struct BankAccountsView: View {
 
     var body: some View {
         List {
-            // First, so a tap on Koti's or the hub's "valitse tilit" notice lands on the button.
+            // First, so a tap on Koti's "valitse tilit" notice lands on the button.
             if let connections {
                 ForEach(BankScope.unscoped(connections.connections)) { connection in
                     Section { unscopedCard(connection) }
+                }
+            }
+            // Above the accounts: Pankki's first row names the consent, and its row opens here.
+            Section("Pankkiyhteys") {
+                if let connections {
+                    if !connections.enabled || !connections.ready {
+                        Text(connections.message ?? "Pankkiyhteys ei ole käytössä.").foregroundStyle(Theme.ink2)
+                    }
+                    ForEach(connections.connections) { connection in
+                        let canSync = BankConsent.canSync(connection)
+                        connectionHeader(connection)
+                        .swipeActions {
+                            Button("Katkaise", role: .destructive) { disconnecting = connection }
+                            if canSync { Button("Päivitä") { Task { await sync(connection) } }.tint(Theme.accentFill) }
+                        }
+                        .contextMenu {
+                            if canSync {
+                                Button { Task { await sync(connection) } } label: { Label("Päivitä", systemImage: "arrow.clockwise") }
+                            }
+                            if BankConsent.reconnect(connection) != nil {
+                                Button { reconnect(connection) } label: { Label("Vahvista uudelleen", systemImage: "arrow.triangle.2.circlepath") }
+                            }
+                            if !BankScope.accounts(connection).isEmpty {
+                                Button { scoping = connection } label: { Label("Valitse tilit", systemImage: "checklist") }
+                            }
+                            Button(role: .destructive) { disconnecting = connection } label: { Label("Katkaise yhteys", systemImage: "xmark.circle") }
+                        }
+                        if let card = BankConsent.reconnect(connection) {
+                            reconnectCard(connection, card)
+                        } else if let problem = BankConsent.activeError(connection) {
+                            // A notice (something waits) is a calm note; only a failure is an alarm.
+                            Text(problem.text).font(.caption).foregroundStyle(problem.isNotice ? Theme.ink2 : Theme.danger)
+                        }
+                        connectionControls(connection)
+                    }
+                    if connections.enabled && connections.ready {
+                        Button { showPicker = true } label: { Label("Yhdistä pankki", systemImage: "plus.circle") }
+                    }
+                } else if loadFailed {
+                    Button("Yritä uudelleen") { Task { await load() } }
+                } else {
+                    ProgressView()
                 }
             }
             if let overview {
@@ -79,47 +121,6 @@ struct BankAccountsView: View {
                     Text("Kirjanpidon tilit")
                 }
             }
-            Section("Pankkiyhteys") {
-                if let connections {
-                    if !connections.enabled || !connections.ready {
-                        Text(connections.message ?? "Pankkiyhteys ei ole käytössä.").foregroundStyle(Theme.ink2)
-                    }
-                    ForEach(connections.connections) { connection in
-                        let canSync = BankConsent.canSync(connection)
-                        connectionHeader(connection)
-                        .swipeActions {
-                            Button("Katkaise", role: .destructive) { disconnecting = connection }
-                            if canSync { Button("Päivitä") { Task { await sync(connection) } }.tint(Theme.accentFill) }
-                        }
-                        .contextMenu {
-                            if canSync {
-                                Button { Task { await sync(connection) } } label: { Label("Päivitä", systemImage: "arrow.clockwise") }
-                            }
-                            if BankConsent.reconnect(connection) != nil {
-                                Button { reconnect(connection) } label: { Label("Vahvista uudelleen", systemImage: "arrow.triangle.2.circlepath") }
-                            }
-                            if !BankScope.accounts(connection).isEmpty {
-                                Button { scoping = connection } label: { Label("Valitse tilit", systemImage: "checklist") }
-                            }
-                            Button(role: .destructive) { disconnecting = connection } label: { Label("Katkaise yhteys", systemImage: "xmark.circle") }
-                        }
-                        if let card = BankConsent.reconnect(connection) {
-                            reconnectCard(connection, card)
-                        } else if let problem = BankConsent.activeError(connection) {
-                            // A notice (something waits) is a calm note; only a failure is an alarm.
-                            Text(problem.text).font(.caption).foregroundStyle(problem.isNotice ? Theme.ink2 : Theme.danger)
-                        }
-                        connectionControls(connection)
-                    }
-                    if connections.enabled && connections.ready {
-                        Button { showPicker = true } label: { Label("Yhdistä pankki", systemImage: "plus.circle") }
-                    }
-                } else if loadFailed {
-                    Button("Yritä uudelleen") { Task { await load() } }
-                } else {
-                    ProgressView()
-                }
-            }
             Section {
                 NavigationLink(value: Route.statements) {
                     Label("Tiliotteet", systemImage: "doc.plaintext")
@@ -162,7 +163,7 @@ struct BankAccountsView: View {
             )
         }
         .refreshable {
-            // Pull-to-refresh asks every screen again, the hub and Koti under this one included.
+            // Pull-to-refresh asks every screen again, Pankki and Koti under this one included.
             app.refreshEverything()
             await load()
         }
