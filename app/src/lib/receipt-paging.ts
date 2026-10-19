@@ -8,6 +8,16 @@ export const DEFAULT_RECEIPT_QUERY = "sort=date_desc&kind=receipt";
 /** The chip counts' query before any filter is applied. */
 export const DEFAULT_RECEIPT_COUNTS_QUERY = "kind=receipt";
 
+/**
+ * The `kind` a Kuitit list or chip-count request sends: the Laskut chip's bills, else the kuitit.
+ * A report figure's list (`drill=1`) sends none, so it shows every document the figure counts,
+ * the bills filed as ostolaskut too (X079); the review queue keeps its own `kind=receipt`.
+ */
+export function receiptKindParam(chip: "receipt" | "invoice", drill: boolean): "receipt" | "invoice" | null {
+  if (chip === "invoice") return "invoice";
+  return drill ? null : "receipt";
+}
+
 /** What the server said about a page; both paging styles are read (cursor, and the older offset+truncated). */
 export interface ReceiptPageResponse<T> {
   receipts?: T[];

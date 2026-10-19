@@ -189,6 +189,48 @@ final class P1Tests: WalkTestCase {
         measure("bank from Koti", reached: onAll, maxTaps: 1)
     }
 
+    /// O3 change 5 (B8): the month's result without a scroll, Kuukausittain right under the year
+    /// (it sat under the year's result, at the foot of the first screen or below it). Then a
+    /// finished month's Kuukauden sulku sends that month's zip with its one primary, 'Lähetä
+    /// kirjanpitäjälle', instead of a link to Raportit where the period was picked again. The --ci
+    /// seed finishes the month three months back.
+    func test17_MonthResultNoScroll() {
+        XCTAssertTrue(selectTab("Raportit"), "Raportit is not selected")
+        // The month row's second line: "Tulot 65,00 € · Menot 137,69 €".
+        let monthRow = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", " · Menot ")).firstMatch
+        let shown = monthRow.waitForExistence(timeout: 15) && reveal(monthRow, scrolls: 0)
+        if !shown { dump(app, "p1-17-month-row") }
+        measure("month result (Raportit)", reached: shown, maxTaps: 1, maxScrolls: 0)
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Helsinki") ?? .current
+        let finished = calendar.dateComponents([.year, .month], from: calendar.date(byAdding: .month, value: -3, to: Date()) ?? Date())
+        let year = finished.year ?? 2026, month = finished.month ?? 1
+        let names = ["Tammikuu", "Helmikuu", "Maaliskuu", "Huhtikuu", "Toukokuu", "Kesäkuu",
+                     "Heinäkuu", "Elokuu", "Syyskuu", "Lokakuu", "Marraskuu", "Joulukuu"]
+        let key = String(format: "%04d-%02d", year, month)
+        guard selectTab("Kirjanpito"), tapLabel("label BEGINSWITH %@", "Kuukauden sulku"),
+              app.navigationBars["Kuukauden sulku"].waitForExistence(timeout: 15) else {
+            XCTFail("Kuukauden sulku did not open"); return
+        }
+        // Back to the finished month, one month at a time as the owner would.
+        let title = app.staticTexts["\(names[month - 1]) \(year)"].firstMatch
+        let previous = app.buttons["Edellinen kuukausi"].firstMatch
+        for _ in 0..<6 where !title.exists {
+            guard previous.waitForExistence(timeout: 5) else { break }
+            previous.tap(); taps += 1
+            _ = title.waitForExistence(timeout: 5)
+        }
+        let send = app.buttons["Lähetä kirjanpitäjälle"].firstMatch
+        guard title.exists, send.waitForExistence(timeout: 15), reveal(send) else {
+            dump(app, "p1-17-finished-month"); XCTFail("\(key) on Kuukauden sulku has no Lähetä kirjanpitäjälle"); return
+        }
+        send.tap(); taps += 1
+        let sheet = app.navigationBars["kirjanpito-\(key).zip"]
+        check("P1 17 Lähetä kirjanpitäjälle opens kirjanpito-\(key).zip", sheet.waitForExistence(timeout: 15))
+        XCTAssertTrue(sheet.exists, "Lähetä kirjanpitäjälle did not open kirjanpito-\(key).zip")
+    }
+
     /// The screen on top is `title`; recorded under `step` and asserted, and a miss keeps the tree.
     private func onTop(_ title: String, _ step: String = "P1 11") -> Bool {
         let shown = app.navigationBars[title].waitForExistence(timeout: 15)

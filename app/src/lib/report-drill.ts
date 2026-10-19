@@ -15,8 +15,10 @@ export function receiptDrillHref(filter: {
   if (filter.category && filter.category !== "Luokittelematon") {
     params.set("category", filter.category);
   }
-  const query = params.toString();
-  return query ? `/kuitit?${query}` : "/kuitit";
+  // A figure counts the bills filed as ostolaskut too, so its list asks for every document, not
+  // Kuitit's own kind=receipt (X079, as the phone's ReceiptListQuery.drill).
+  params.set("drill", "1");
+  return `/kuitit?${params.toString()}`;
 }
 
 export function statementDrillHref(month: string): string {
@@ -116,6 +118,8 @@ export interface DrillFilters {
   type?: "tulo" | "meno";
   category?: string;
   status?: string;
+  /** Opened from a figure: the list holds every document it counts (`receiptKindParam`). */
+  drill?: boolean;
 }
 
 export function drillFromSearch(search: string): DrillFilters {
@@ -129,5 +133,6 @@ export function drillFromSearch(search: string): DrillFilters {
   if (type === "tulo" || type === "meno") filters.type = type;
   if (category) filters.category = category.slice(0, 100);
   if (status) filters.status = status;
+  if (params.get("drill") === "1") filters.drill = true;
   return filters;
 }

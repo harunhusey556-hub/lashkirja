@@ -29,6 +29,7 @@ import {
   appendReceiptPage,
   nextPageParams,
   readReceiptPage,
+  receiptKindParam,
   receiptPageQuery,
   reuseEqualReceipts,
   type ReceiptPageResponse,
@@ -117,6 +118,9 @@ export default function KuititPage() {
   // A bill filed as an ostolasku lives in Ostolaskut; Kuitit lists kuitit and
   // shows the bills only under its Laskut chip ("invoice").
   const [kindFilter, setKindFilter] = usePersistedState<"receipt" | "invoice">("kuitit.kind", "receipt");
+  // Opened from a report figure (`drill=1`): the list holds every document the figure counts, the
+  // bills too. Never remembered, so Kuitit's own entry lists the kuitit again.
+  const [drilled, setDrilled] = useState(false);
   const [showAllReceipts, setShowAllReceipts] = usePersistedState(
     "kuitit.showAllReceipts",
     false
@@ -162,14 +166,16 @@ export default function KuititPage() {
 
   useEffect(() => {
     const drill = drillFromSearch(window.location.search);
-    if (!drill.month && !drill.type && !drill.category) return;
+    if (!drill.drill && !drill.month && !drill.type && !drill.category) return;
     // A report link opens exactly the list it names: month, type and category
     // from the link, and nothing remembered from an earlier visit (search,
-    // other filters, the show-all toggle) (V44).
+    // other filters, the show-all toggle, the Laskut chip) (V44).
     setMonthFilter(drill.month || "");
     setSearchInput("");
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot read of the report link on mount; the filter state is the target, not derived state
     setSearchQuery("");
+    setDrilled(drill.drill === true);
+    setKindFilter("receipt");
     setShowAllReceipts(false);
     const next = {
       ...emptyAdvanced,
@@ -233,10 +239,11 @@ export default function KuititPage() {
       params.set("maxAmount", appliedAdvanced.maxAmount);
     if (appliedAdvanced.sort) params.set("sort", appliedAdvanced.sort);
     if (appliedAdvanced.linkedStatus) params.set("linkedStatus", appliedAdvanced.linkedStatus);
-    params.set("kind", kindFilter === "invoice" ? "invoice" : "receipt");
+    const kind = receiptKindParam(kindFilter, drilled);
+    if (kind) params.set("kind", kind);
 
     return params.toString();
-  }, [monthFilter, searchQuery, appliedAdvanced, kindFilter]);
+  }, [monthFilter, searchQuery, appliedAdvanced, kindFilter, drilled]);
 
   const queryRef = useRef(query);
   queryRef.current = query;
@@ -275,9 +282,11 @@ export default function KuititPage() {
     if (appliedAdvanced.source) params.set("source", appliedAdvanced.source);
     if (appliedAdvanced.minAmount) params.set("minAmount", appliedAdvanced.minAmount);
     if (appliedAdvanced.maxAmount) params.set("maxAmount", appliedAdvanced.maxAmount);
-    params.set("kind", "receipt");
+    // The chips count the list's own documents; the Laskut chip's number comes back in the same answer.
+    const kind = receiptKindParam("receipt", drilled);
+    if (kind) params.set("kind", kind);
     return params.toString();
-  }, [monthFilter, searchQuery, appliedAdvanced.category, appliedAdvanced.source, appliedAdvanced.minAmount, appliedAdvanced.maxAmount]);
+  }, [monthFilter, searchQuery, appliedAdvanced.category, appliedAdvanced.source, appliedAdvanced.minAmount, appliedAdvanced.maxAmount, drilled]);
 
   const counts = useCachedResource<ReceiptTabCounts>(`receipt-counts:${countsQuery}`, async (signal) => {
     const response = await apiFetch(`/api/receipts/counts${countsQuery ? `?${countsQuery}` : ""}`, { signal });

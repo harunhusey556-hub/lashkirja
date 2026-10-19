@@ -415,6 +415,176 @@ final class StabilityTests: WalkTestCase {
         return !appSessions.isEmpty && revoked.count == appSessions.count
     }
 
+    // MARK: Raportit (B8)
+
+    /// M039, M048, X086: 'Edellinen vuosi' swaps the year in place. Once this year's figures have
+    /// painted the year before is warmed, so the swap needs no spinner: the report used to empty
+    /// into a spinner page while Kirjanpitopaketti rode up, then fell back 245-448 pt when the
+    /// figures came. A year with nothing booked says so once, not with a blank chart and a
+    /// 'Joulukuu 0,00 €' row. The hard asserts live here: MotionAuditTests only records.
+    func test11_RaportitYearSwapInPlace() throws {
+        let today = Self.helsinkiMonth()
+        try XCTSkipIf(today.month <= 4, "the --ci seed's rows reach into \(today.year - 1) until May: no empty year before this one")
+        let previous = String(today.year - 1)
+        XCTAssertTrue(selectTab("Raportit"), "Raportit is not selected")
+        let monthly = app.staticTexts["Kuukausittain"].firstMatch
+        guard monthly.waitForExistence(timeout: 15) else {
+            dump(app, "stability-11-no-report"); XCTFail("Raportit shows no Kuukausittain"); return
+        }
+        // X086: the bars' key under the chart before any bar is tapped.
+        let legend = app.descendants(matching: .any)["raportit-legend"]
+        XCTAssertTrue(legend.waitForExistence(timeout: 5), "Kuukausittain has no legend")
+        XCTAssertTrue(legend.label.contains("Tulot") && legend.label.contains("Menot"), "the legend reads '\(legend.label)'")
+        XCTAssertGreaterThan(legend.frame.minY, monthly.frame.maxY, "the legend is not under the Kuukausittain heading")
+        waitStill(monthly)
+
+        let stepper = app.buttons["Edellinen vuosi"].firstMatch
+        let stepperY = stepper.frame.minY
+        let yearShown = app.staticTexts[previous].firstMatch
+        let emptyYear = app.staticTexts["Ei kirjauksia vuodelta \(previous)"].firstMatch
+        stepper.tap(); taps += 1
+        var polls = 0
+        var swapped = false
+        let deadline = Date().addingTimeInterval(20)
+        repeat {
+            polls += 1
+            let spinners = app.activityIndicators.count
+            XCTAssertEqual(spinners, 0, "poll \(polls): a spinner showed while the year swapped")
+            XCTAssertEqual(stepper.frame.minY, stepperY, accuracy: 1, "poll \(polls): the year stepper moved")
+            swapped = yearShown.exists && emptyYear.exists
+            if !swapped { usleep(100_000) }
+        } while !swapped && Date() < deadline
+        check("raportit year swap: \(previous) with its empty state after \(polls) polls", swapped)
+        guard swapped else {
+            dump(app, "stability-11-swap"); XCTFail("\(previous) and 'Ei kirjauksia vuodelta \(previous)' never showed"); return
+        }
+        // The package below took its place in one move: once settled it holds still (the second
+        // pass was the fall back when the figures came).
+        let package = app.staticTexts["Kirjanpitopaketti"].firstMatch
+        XCTAssertTrue(package.waitForExistence(timeout: 5), "Kirjanpitopaketti is not under the empty year")
+        waitStill(package)
+        let packageY = package.frame.minY
+        for poll in 1...8 {
+            usleep(150_000)
+            XCTAssertEqual(package.frame.minY, packageY, accuracy: 1, "Kirjanpitopaketti moved again \(poll * 150) ms after it settled")
+        }
+        XCTAssertEqual(app.activityIndicators.count, 0, "a spinner showed after the swap")
+        XCTAssertFalse(app.staticTexts["Kuukausittain"].exists, "\(previous) still draws Kuukausittain")
+        let december = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Joulukuu", "Joulukuu,")).firstMatch
+        XCTAssertFalse(december.exists, "\(previous) picks a Joulukuu row")
+        shot("stability-raportit-empty-year")
+    }
+
+    /// X078, X085: Raportit keeps one visible action, Lataa zip, drawn as the primary; the six CSV
+    /// exports sit in Toiminnot › Vienti (CSV) instead of six accent rows under the package. Kausi
+    /// names its period as Kuukauden sulku does ('Syyskuu 2026'), not '09/2026'.
+    func test19_RaportitOnePrimary() {
+        XCTAssertTrue(selectTab("Raportit"), "Raportit is not selected")
+        let zip = app.buttons["Lataa zip"].firstMatch
+        guard zip.waitForExistence(timeout: 15), reveal(zip, scrolls: 8) else {
+            dump(app, "stability-19-no-zip"); XCTFail("Lataa zip is not hittable on Raportit"); return
+        }
+        waitStill(zip)
+        // The primary's ink capsule, read beside its label: a plain row is the white card.
+        let fill = screenColours(app, at: [CGPoint(x: zip.frame.minX + zip.frame.width * 0.15, y: zip.frame.midY)]).first ?? nil
+        XCTAssertTrue(fill?.near(RGB(r: 38, g: 34, b: 31), within: 12) == true,
+                      "Lataa zip is not drawn as the primary: \(fill?.description ?? "off screen")")
+        let today = Self.helsinkiMonth()
+        let last = Self.helsinkiMonth(offset: -1)
+        let kausi = last.year == today.year ? "\(Self.monthNames[last.month - 1]) \(last.year)" : "Tammikuu \(today.year)"
+        let picker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kausi")).firstMatch
+        let named = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", kausi)).firstMatch
+        let reads = named.exists || (picker.exists && (picker.label.contains(kausi) || (picker.value as? String)?.contains(kausi) == true))
+        XCTAssertTrue(reads, "Kausi does not read \(kausi) (picker '\(picker.exists ? picker.label : "missing")')")
+        // The end of the page, where the export rows were.
+        for _ in 0..<3 { app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1 }
+        XCTAssertFalse(app.buttons["Tuloslaskelma"].exists, "the page still lists a Tuloslaskelma export")
+        XCTAssertFalse(app.staticTexts["Vienti (CSV)"].exists, "the page still has the Vienti (CSV) section")
+        shot("stability-raportit-end")
+
+        let menu = app.navigationBars["Raportit"].buttons["Toiminnot"].firstMatch
+        guard menu.waitForExistence(timeout: 5) else { XCTFail("Raportit's bar has no Toiminnot"); return }
+        menu.tap(); taps += 1
+        let vienti = app.buttons["Vienti (CSV)"].firstMatch
+        guard vienti.waitForExistence(timeout: 5) else { dump(app, "stability-19-menu"); XCTFail("Toiminnot has no Vienti (CSV)"); return }
+        vienti.tap(); taps += 1
+        for title in ["Tuloslaskelma", "Kuitit", "Myyntilaskut", "Pankkitapahtumat", "Ostolaskut", "Asiakkaat"] {
+            XCTAssertTrue(app.buttons[title].firstMatch.waitForExistence(timeout: 5), "Vienti (CSV) has no \(title)")
+        }
+        dump(app, "stability-19-vienti")
+        app.buttons["Tuloslaskelma"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(app.navigationBars["profit-loss-\(today.year).csv"].waitForExistence(timeout: 15), "Tuloslaskelma did not open its CSV sheet")
+        shot("stability-raportit-csv")
+    }
+
+    /// X079: the list behind Menot holds the rows the figure is made of. The figure and Luokittain
+    /// count the bill the --ci seed files as an ostolasku; the list asked for kuitit only and said
+    /// one fewer (34 kuittia under a Menot of 35).
+    func test20_RaportitMenotListMatchesItsFigure() {
+        XCTAssertTrue(selectTab("Raportit"), "Raportit is not selected")
+        guard app.staticTexts["Kuukausittain"].firstMatch.waitForExistence(timeout: 15) else {
+            dump(app, "stability-20-no-report"); XCTFail("Raportit shows no report"); return
+        }
+        guard let menot = menotFigure() else { dump(app, "stability-20-no-menot"); XCTFail("Raportit has no Menot figure"); return }
+        menot.tap(); taps += 1
+        let kuitit = app.navigationBars["Kuitit"]
+        guard kuitit.waitForExistence(timeout: 15) else { XCTFail("Menot did not open Kuitit"); return }
+        let header = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ kuittia")).firstMatch
+        guard header.waitForExistence(timeout: 15) || reveal(header, scrolls: 4) else {
+            dump(app, "stability-20-no-count"); XCTFail("the Menot list has no count"); return
+        }
+        let listed = Int(header.label.filter(\.isNumber)) ?? -1
+        shot("stability-raportit-menot-list")
+        kuitit.buttons["BackButton"].firstMatch.tap(); taps += 1
+        guard app.navigationBars["Raportit"].waitForExistence(timeout: 10) else { XCTFail("Back did not return to Raportit"); return }
+
+        // Luokittain opens on Menot; each row reads "<category>, <n> kpl, <amount>". Read on the
+        // way down, as a List keeps only the rows on screen.
+        let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", " kpl"))
+        var counted: [String: Int] = [:]
+        for attempt in 0..<5 {
+            for row in rows.allElementsBoundByIndex where row.exists {
+                let label = row.label
+                if let range = label.range(of: "[0-9]+ kpl", options: .regularExpression),
+                   let count = Int(label[range].filter(\.isNumber)) { counted[label] = count }
+            }
+            if attempt < 4 { app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1 }
+        }
+        let figure = counted.values.reduce(0, +)
+        check("raportit menot: Luokittain \(figure) (\(counted.count) rows), list \(listed)", figure > 0 && listed == figure)
+        XCTAssertGreaterThan(figure, 0, "no Luokittain counts read")
+        XCTAssertEqual(listed, figure, "the Menot list says \(listed) kuittia, Luokittain counts \(figure)")
+    }
+
+    /// Raportit's Menot figure, scrolled into view: a "Menot…" button outside Luokittain's
+    /// segmented control, whose segment has the same name.
+    private func menotFigure() -> XCUIElement? {
+        let window = app.windows.firstMatch
+        for attempt in 0...6 {
+            let segments = app.segmentedControls.allElementsBoundByIndex.map(\.frame)
+            let candidates = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Menot")).allElementsBoundByIndex
+            let figure = candidates.first { button in
+                button.isHittable && button.frame.minY > 100 && button.frame.maxY < window.frame.maxY - 90
+                    && !segments.contains { $0.intersects(button.frame) }
+            }
+            if let figure { return figure }
+            if attempt < 6 { window.swipeUp(velocity: .slow); scrolls += 1 }
+        }
+        return nil
+    }
+
+    static let monthNames = ["Tammikuu", "Helmikuu", "Maaliskuu", "Huhtikuu", "Toukokuu", "Kesäkuu",
+                             "Heinäkuu", "Elokuu", "Syyskuu", "Lokakuu", "Marraskuu", "Joulukuu"]
+
+    /// The year and month (1-12) in Helsinki, where the app keeps its months, `offset` months from now.
+    static func helsinkiMonth(offset: Int = 0) -> (year: Int, month: Int) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Helsinki") ?? .current
+        let date = calendar.date(byAdding: .month, value: offset, to: Date()) ?? Date()
+        let parts = calendar.dateComponents([.year, .month], from: date)
+        return (parts.year ?? 2026, parts.month ?? 1)
+    }
+
     /// Opens ALV and then reads nothing for 25 s: the app's own hang watchdog (event log) tells
     /// whether ALV blocks the main thread, without the test's accessibility queries in the way.
     func test07_AlvLeftAlone() {

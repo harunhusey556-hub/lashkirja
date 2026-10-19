@@ -19,6 +19,8 @@ struct RaportitView: View {
     @State private var gate = ReloadGate()
     /// Asks each receipts drill's list once while the screen lives, not again on every reload (row 23).
     @State private var drillWarmer = ReportDrillWarmer()
+    /// The previous year's report has been asked once, after this year's painted (`warmPreviousYear`).
+    @State private var previousWarmed = false
 
     /// `preview` (the app's last painted report of this year) is on screen in the first frame:
     /// painted from `load` instead, after an await on the cache, the tab showed a spinner and then
@@ -31,6 +33,8 @@ struct RaportitView: View {
     }
 
     static var currentYear: Int { Int(MonthKey.current().prefix(4)) ?? 2026 }
+
+    static let path = "/api/reports/profit-loss"
 
     /// The query of a year's report, as `load` and the launch prefetch ask it.
     static func query(year: Int) -> [String: String] { ["from": "\(year)-01", "to": "\(year)-12"] }
@@ -53,6 +57,15 @@ struct RaportitView: View {
                         .accessibilityLabel("Edellinen vuosi")
                     Spacer()
                     Text(String(year)).font(.headline).monospacedDigit()
+                        // Beside the year, over nothing: another year's figures hold the report's
+                        // place until this year's arrive, so no spinner page stands in (M039).
+                        .overlay(alignment: .trailing) {
+                            if swapping {
+                                ProgressView().controlSize(.small)
+                                    .alignmentGuide(.trailing) { $0[.leading] - 8 }
+                            }
+                        }
+                        .motion(.easeOut(duration: 0.2), value: swapping)
                     Spacer()
                     Button { setYear(year + 1) } label: { Image(systemName: "chevron.right").tapTarget() }
                         .accessibilityLabel("Seuraava vuosi")
@@ -66,51 +79,38 @@ struct RaportitView: View {
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
-                let yearKey = String(year)
-                Section("Tulos ilman ALV:ta") {
-                    drillFigure(ReportDrill.incomeTargets(report.total, key: yearKey)) {
-                        LabeledContent("Tulot") { MoneyText(amount: report.total.incomeNet) }
-                    }
-                    drillFigure([ReportDrill.expenseTarget(report.total, key: yearKey)].compactMap { $0 }) {
-                        LabeledContent("Menot") { MoneyText(amount: report.total.expenseNet) }
-                    }
-                    LabeledContent("Tulos") { MoneyText(amount: report.total.profitNet).fontWeight(.semibold) }
-                    // What the figures may be missing; the list has no filter for either, so the rows
-                    // open the year's receipts (undated ones the whole list).
-                    ForEach(ReportDrill.dataQuality(missingVat: report.total.missingVatCount, undated: report.undatedCount, year: yearKey), id: \.self) { row in
-                        NavigationLink(value: Route.forDrill(row.drill)) {
-                            LabeledContent(row.title) {
-                                Text("\(row.count)").monospacedDigit().foregroundStyle(Theme.warning)
-                            }
-                        }
-                    }
-                }
-                monthSection(report.filledMonths(year: yearKey))
-                categorySection(report.total)
+                Group { reportSections(report) }
+                    // Another year's figures while this year's are on their way: kept in place, greyed
+                    // and inert, so nothing below moves until the new report swaps in (M039).
+                    .redacted(reason: swapping ? RedactionReasons.placeholder : RedactionReasons())
+                    .disabled(swapping)
             } else {
                 ScreenStateView(state: state, retry: load) { (_: ProfitLoss) in EmptyView() }.listRowBackground(Color.clear)
             }
             Section {
                 Picker("Kausi", selection: Binding(get: { packagePeriod }, set: { packageChoice = $0 })) {
-                    ForEach(packageOptions, id: \.key) { option in
+                    ForEach(ReportPackage.options(year: year), id: \.key) { option in
                         Text(option.title).tag(option.key)
                     }
                 }
-                Button { showPackage = true } label: { Label("Lataa zip", systemImage: "archivebox") }
+                // The page's one visible action; the CSV exports wait in Toiminnot (X078).
+                Button { showPackage = true } label: {
+                    Label("Lataa zip", systemImage: "archivebox").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.primary)
+                .listRowBackground(Color.clear)
             } header: {
                 Text("Kirjanpitopaketti")
             } footer: {
                 Text("Lähetä kirjanpitäjälle kuun sulun jälkeen. Zip kuukaudelta, neljännekseltä tai koko vuodelta: tuloslaskelma, ALV, CSV, kohdistukset ja kuitit.")
             }
-            Section {
-                ForEach(exports) { kind in
-                    Button { export = kind } label: { Label(kind.title, systemImage: "square.and.arrow.up") }
-                }
-            } header: { Text("Vienti (CSV)") } footer: { Text("Koko vuoden \(String(year)) tiedot kirjanpitäjälle.") }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Raportit")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { actionsMenu }
+        }
         .refreshable {
             // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
             gate.mark(key: String(year), version: app.refreshEverything())
@@ -123,7 +123,7 @@ struct RaportitView: View {
         .task(id: "\(year)|\(app.dataVersion)") {
             let key = String(year)
             guard state.value == nil || gate.isDue(key: key, version: app.dataVersion) else { return }
-            // The report on screen stays while the new one loads (another year clears it in `setYear`).
+            // The report on screen stays while the new one loads (another year's as a placeholder).
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion
             await load()
@@ -152,16 +152,73 @@ struct RaportitView: View {
         packageChoice.hasPrefix(String(year)) ? packageChoice : "\(year)-01"
     }
 
-    private struct PackageOption: Hashable { let key: String; let title: String }
+    /// Another year's figures are on screen: the year just changed and its own are on their way.
+    private var swapping: Bool {
+        guard let report = state.value else { return false }
+        return Self.reportYear(report) != String(year)
+    }
 
-    private var packageOptions: [PackageOption] {
-        let y = String(year)
-        let months = (1...12).map { m -> PackageOption in
-            let mm = String(format: "%02d", m)
-            return PackageOption(key: "\(y)-\(mm)", title: "\(mm)/\(y)")
+    /// The year a report is for ("2026"), as asked by `query(year:)`.
+    private static func reportYear(_ report: ProfitLoss) -> String { String(report.from.prefix(4)) }
+
+    /// Toiminnot: the year's six CSV exports, behind ⋯ so the page keeps one visible action,
+    /// Lataa zip. Nine equal-weight rows took about 700 pt of the page (X078).
+    private var actionsMenu: some View {
+        Menu {
+            Menu {
+                ForEach(exports) { kind in
+                    Button { export = kind } label: { Label(kind.title, systemImage: "square.and.arrow.up") }
+                }
+            } label: {
+                Label("Vienti (CSV)", systemImage: "tablecells")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle").tapTarget()
         }
-        let quarters = (1...4).map { q in PackageOption(key: "\(y)-Q\(q)", title: "Q\(q)/\(y)") }
-        return months + quarters + [PackageOption(key: y, title: "Koko vuosi \(y)")]
+        .accessibilityLabel("Toiminnot")
+    }
+
+    /// The month first (change 5): Kuukausittain right under the year, then the year's result and
+    /// its categories. A year with nothing booked says so once instead (M048). Drawn for the
+    /// report's own year, so another year's figures standing in keep their months and links.
+    @ViewBuilder
+    private func reportSections(_ report: ProfitLoss) -> some View {
+        let yearKey = Self.reportYear(report)
+        // What the figures may be missing; the list has no filter for either, so the rows open
+        // the year's receipts (undated ones the whole list).
+        let quality = ReportDrill.dataQuality(missingVat: report.total.missingVatCount, undated: report.undatedCount, year: yearKey)
+        if report.hasFigures {
+            monthSection(report.filledMonths(year: yearKey))
+            Section("Tulos ilman ALV:ta") {
+                drillFigure(ReportDrill.incomeTargets(report.total, key: yearKey)) {
+                    LabeledContent("Tulot") { MoneyText(amount: report.total.incomeNet) }
+                }
+                drillFigure([ReportDrill.expenseTarget(report.total, key: yearKey)].compactMap { $0 }) {
+                    LabeledContent("Menot") { MoneyText(amount: report.total.expenseNet) }
+                }
+                LabeledContent("Tulos") { MoneyText(amount: report.total.profitNet).fontWeight(.semibold) }
+                qualityRows(quality)
+            }
+            categorySection(report.total)
+        } else {
+            Section {
+                ContentUnavailableView("Ei kirjauksia vuodelta \(yearKey)", systemImage: "chart.bar")
+            }
+            .listRowBackground(Color.clear)
+            if !quality.isEmpty {
+                Section { qualityRows(quality) }
+            }
+        }
+    }
+
+    private func qualityRows(_ rows: [ReportDrill.QualityRow]) -> some View {
+        ForEach(rows, id: \.self) { row in
+            NavigationLink(value: Route.forDrill(row.drill)) {
+                LabeledContent(row.title) {
+                    Text("\(row.count)").monospacedDigit().foregroundStyle(Theme.warning)
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -231,53 +288,64 @@ struct RaportitView: View {
             ?? ReportDrill.defaultMonth(months)
         let picked = months.first { $0.month == key }
         Section {
-            Chart(months) { m in
-                let on = m.month == key
-                BarMark(x: .value("Kuukausi", m.month ?? ""), y: .value("Tulot", NSDecimalNumber(decimal: m.incomeNet).doubleValue))
-                    .foregroundStyle(Theme.success.opacity(on ? 1 : 0.45))
-                    .position(by: .value("Laji", "Tulot"))
-                    .cornerRadius(2)
-                BarMark(x: .value("Kuukausi", m.month ?? ""), y: .value("Menot", NSDecimalNumber(decimal: m.expenseNet).doubleValue))
-                    .foregroundStyle(Theme.ink2.opacity(on ? 0.9 : 0.35))
-                    .position(by: .value("Laji", "Menot"))
-                    .cornerRadius(2)
-            }
-            .chartXAxis {
-                AxisMarks { value in
-                    AxisValueLabel {
-                        if let month = value.as(String.self) {
-                            Text(MonthKey.short(month))
-                                .fontWeight(month == key ? .semibold : .regular)
-                                .foregroundStyle(month == key ? Theme.ink : Theme.ink2)
+            VStack(alignment: .leading, spacing: 8) {
+                Chart(months) { m in
+                    let on = m.month == key
+                    BarMark(x: .value("Kuukausi", m.month ?? ""), y: .value("Tulot", NSDecimalNumber(decimal: m.incomeNet).doubleValue))
+                        .foregroundStyle(Theme.success.opacity(on ? 1 : 0.45))
+                        .position(by: .value("Laji", "Tulot"))
+                        .cornerRadius(2)
+                    BarMark(x: .value("Kuukausi", m.month ?? ""), y: .value("Menot", NSDecimalNumber(decimal: m.expenseNet).doubleValue))
+                        .foregroundStyle(Theme.ink2.opacity(on ? 0.9 : 0.35))
+                        .position(by: .value("Laji", "Menot"))
+                        .cornerRadius(2)
+                }
+                .chartXAxis {
+                    AxisMarks { value in
+                        AxisValueLabel {
+                            if let month = value.as(String.self) {
+                                Text(MonthKey.short(month))
+                                    .fontWeight(month == key ? .semibold : .regular)
+                                    .foregroundStyle(month == key ? Theme.ink : Theme.ink2)
+                            }
                         }
                     }
                 }
-            }
-            .chartYAxis { AxisMarks(values: .automatic(desiredCount: 3)) }
-            // A tap, not a drag, so the list still scrolls over the chart (as Koti's cash-flow card).
-            .chartOverlay { proxy in
-                GeometryReader { geometry in
-                    Rectangle().fill(.clear).contentShape(Rectangle())
-                        .onTapGesture { location in
-                            guard let plot = proxy.plotFrame else { return }
-                            let x = location.x - geometry[plot].origin.x
-                            if let month = proxy.value(atX: x, as: String.self) {
-                                selectedMonth = month
-                                Haptics.selection()
+                .chartYAxis { AxisMarks(values: .automatic(desiredCount: 3)) }
+                // A tap, not a drag, so the list still scrolls over the chart (as Koti's cash-flow card).
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        Rectangle().fill(.clear).contentShape(Rectangle())
+                            .onTapGesture { location in
+                                guard let plot = proxy.plotFrame else { return }
+                                let x = location.x - geometry[plot].origin.x
+                                if let month = proxy.value(atX: x, as: String.self) {
+                                    selectedMonth = month
+                                    Haptics.selection()
+                                }
                             }
-                        }
+                    }
                 }
+                .frame(height: 180)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(chartSummary(picked))
+                .accessibilityHint("Pyyhkäise ylös tai alas vaihtaaksesi kuukautta")
+                .accessibilityAdjustableAction { direction in
+                    guard let key else { return }
+                    let step = direction == .increment ? 1 : -1
+                    if let month = Koti.adjacentMonth(months.compactMap(\.month), from: key, step: step) { selectedMonth = month }
+                }
+                // The bars' key, from the first frame: the colours had none, and only the picked
+                // month's row named Tulot and Menot, without them (X086). One element, read after
+                // the chart's own summary.
+                HStack(spacing: 12) {
+                    ChartLegendItem(title: "Tulot", tint: Theme.success)
+                    ChartLegendItem(title: "Menot", tint: Theme.ink2)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("raportit-legend")
             }
-            .frame(height: 180)
             .padding(.vertical, 6)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(chartSummary(picked))
-            .accessibilityHint("Pyyhkäise ylös tai alas vaihtaaksesi kuukautta")
-            .accessibilityAdjustableAction { direction in
-                guard let key else { return }
-                let step = direction == .increment ? 1 : -1
-                if let month = Koti.adjacentMonth(months.compactMap(\.month), from: key, step: step) { selectedMonth = month }
-            }
             if let picked, let month = picked.month {
                 drillFigure(ReportDrill.monthTargets(picked)) {
                     LabeledContent {
@@ -304,18 +372,23 @@ struct RaportitView: View {
         return "\(head) \(MonthKey.name(month)): tulot \(Money.format(picked.incomeNet)), menot \(Money.format(picked.expenseNet))."
     }
 
-    /// The year's `.task(id:)` loads it and cancels a slower load of the previous year; the old
-    /// year's figures are not shown under the new year's heading meanwhile.
+    /// A year the app has painted (or warmed, `warmPreviousYear`) swaps in within the tap. Emptied
+    /// into a spinner page instead, the report let the package below ride up and fall back (M039).
+    /// Without a copy the old year's figures stay as a placeholder; the year's `.task(id:)` loads
+    /// it and cancels a slower load of the year before.
     private func setYear(_ next: Int) {
-        year = next
-        selectedMonth = nil
-        state.restart()
+        let painted: ProfitLoss? = app.lastPainted(Self.path, query: Self.query(year: next))
+        withMotion(.easeInOut(duration: 0.2)) {
+            year = next
+            selectedMonth = nil
+            if let painted { state.succeed(painted) }
+        }
     }
 
     /// The receipts lists this screen links to, as `ReceiptsView` asks for them: the Tulot and
     /// Menot figures, the data-quality rows and the categories shown.
     private var drillWarms: [ReportDrillWarm.Request] {
-        guard let report = state.value else { return [] }
+        guard let report = state.value, !swapping else { return [] }
         let key = String(year)
         var drills = ReportDrill.incomeTargets(report.total, key: key)
         drills += [ReportDrill.expenseTarget(report.total, key: key)].compactMap { $0 }
@@ -345,23 +418,52 @@ struct RaportitView: View {
         let asked = year
         let timing = ScreenTiming("Raportit")
         let query = Self.query(year: asked)
-        if state.value == nil, let cached: ProfitLoss = await app.cachedValue("/api/reports/profit-loss", query: query), asked == year {
-            state.succeed(cached)
+        if state.value == nil || swapping, let cached: ProfitLoss = await app.cachedValue(Self.path, query: query), asked == year {
+            show(cached)
             timing.painted(fromCache: true)
         }
         state.begin()
         do {
-            let report: ProfitLoss = try await app.cachedGet("/api/reports/profit-loss", query: query)
+            let report: ProfitLoss = try await app.cachedGet(Self.path, query: query)
             try Task.checkCancellation()
             guard asked == year else { return }
-            state.succeed(report)
+            show(report)
             timing.dataReady()
+            if asked == Self.currentYear { warmPreviousYear() }
         }
         catch is CancellationError {}
         catch {
             guard asked == year else { return }
+            // Another year's figures stood in: the failure shows as a first load's would, with its
+            // retry, not under a heading those figures do not belong to.
+            if swapping { state.restart() }
             // A failed reload keeps the figures already shown (as the other gated screens).
             state.fail(error)
+        }
+    }
+
+    /// The year's figures on screen; from another year's they fade in. Kept as the app's painted
+    /// copy, so coming back to this year swaps it in within the tap (`setYear`).
+    private func show(_ report: ProfitLoss) {
+        withMotion(swapping ? Animation.easeInOut(duration: 0.2) : nil) { state.succeed(report) }
+        app.rememberPainted(report, Self.path, query: Self.query(year: year))
+    }
+
+    /// Once this year's figures have painted, the year before is asked once, into the cache and the
+    /// app's painted copies: 'Edellinen vuosi' then swaps it in within the tap (M039).
+    private func warmPreviousYear() {
+        guard !previousWarmed else { return }
+        previousWarmed = true
+        let app = app
+        let query = Self.query(year: Self.currentYear - 1)
+        Task {
+            do {
+                let report: ProfitLoss = try await app.cachedGet(Self.path, query: query)
+                app.rememberPainted(report, Self.path, query: query)
+            } catch {
+                // Asked again after this year's next paint; a swap meanwhile loads the year itself.
+                previousWarmed = false
+            }
         }
     }
 }
