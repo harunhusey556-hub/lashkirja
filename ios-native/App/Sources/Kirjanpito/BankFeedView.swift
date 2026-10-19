@@ -9,6 +9,9 @@ struct BankFeedView: View {
     /// Coming back to the screen does not ask the server again unless something changed.
     @State private var gate = ReloadGate()
     @State private var statements: [Statement] = []
+    /// Each loaded month's "Tulot · Menot" line and whether all its rows are in, added up when the
+    /// rows or their paging change (`groupRows`) so the month header only reads it.
+    @State private var monthLines: [String: BankFeed.MonthLine] = [:]
     @State private var onlyOpen: Bool
     @State private var search = ""
     @State private var month: String?
@@ -68,6 +71,14 @@ struct BankFeedView: View {
     private var confirmable: Int { BankFeed.confirmableSuggestions(statements.flatMap(\.transactions)) }
 
     var body: some View {
+        // The motion gate's timeline (audit builds only): whether Pankki redraws while the walk
+        // scrolls it. N2's pankki-feed-scroll stalled mid-swipe; this and the first row's mark
+        // below tell the next run what the stall follows.
+        let _ = MotionProbe.shared.mark("bankFeed-update")
+        // The month on screen, picked once per update: the list, its chips and Toiminnot's
+        // Kuukausi read this, instead of each filtering every row again.
+        let groups = state.value.map { visibleGroups($0) } ?? []
+        let shownKey = GroupChoice.pick(shownMonth, available: groups.map(\.month))
         List {
             balanceRow
             Section {
@@ -123,9 +134,7 @@ struct BankFeedView: View {
                 }
                 // One month at a time, picked from a chip row (or Toiminnot's Kuukausi), instead of
                 // every month stacked.
-                let groups = visibleGroups(months)
-                if let key = GroupChoice.pick(shownMonth, available: groups.map(\.month)),
-                   let group = groups.first(where: { $0.month == key }) {
+                if let key = shownKey, let group = groups.first(where: { $0.month == key }) {
                     if groups.count > 1 {
                         Section {
                             ScrollView(.horizontal, showsIndicators: false) {
@@ -164,7 +173,7 @@ struct BankFeedView: View {
                                 Spacer()
                                 if group.open > 0 { Text("\(group.open) avoinna").foregroundStyle(Theme.accent) }
                             }
-                            monthTotals(group.month, in: months)
+                            monthTotals(group.month)
                         }
                     }
                 } else if !months.isEmpty {
@@ -198,7 +207,8 @@ struct BankFeedView: View {
                 if selection.isActive {
                     Button("Valmis") { selection.end() }
                 } else {
-                    actionsMenu
+                    // The asked month while its rows load.
+                    actionsMenu(shown: state.value == nil ? month : shownKey ?? month)
                 }
             }
         }
@@ -316,15 +326,20 @@ struct BankFeedView: View {
                 }
                 .padding(.vertical, 2)
             }
+            // Audit builds only: the motion gate's pankki-feed-scroll stalled mid-swipe as this row,
+            // the list's one link row, left the top; the mark puts that moment on its timeline.
+            .onDisappear { MotionProbe.shared.mark("bankFeed-first-row-gone") }
         }
     }
 
     @ViewBuilder private var balanceAmount: some View {
-        if let position, !BankHub.accountLines(position, statements: statements).isEmpty {
-            let lines = BankHub.accountLines(position, statements: statements)
+        // The accounts' balances only: the rows give a line its latest day, which the total does
+        // not use, and walking them here ran on every update of the screen.
+        let lines = position.map(BankHub.balanceLines) ?? []
+        if let position, !lines.isEmpty {
             // A sync's balances show at once, before the accounts are asked again.
             let fresh = app.versions.balances
-            MoneyText(amount: fresh.total(BankHub.total(position), lines: lines.map { (id: $0.id, balance: $0.balance) }))
+            MoneyText(amount: fresh.total(BankHub.total(position), lines: lines))
                 .fontWeight(.semibold)
                 .foregroundStyle(Theme.ink)
         } else if position != nil || positionFailed {
@@ -359,10 +374,12 @@ struct BankFeedView: View {
 
     /// "Tulot X · Menot Y" under the month's name, once every row of the month is in: part of a
     /// month would show part of its money. The line is there from the first frame, unseen until
-    /// then, so nothing below it moves when it shows.
-    private func monthTotals(_ key: String, in months: [BankFeed.Month]) -> some View {
-        let complete = BankFeed.monthComplete(key, in: months, hasMore: paging.hasMore)
-        let totals = BankHub.totals(statements, month: key)
+    /// then, so nothing below it moves when it shows. Read from `monthLines`, added up when the
+    /// rows change, not here on every update.
+    private func monthTotals(_ key: String) -> some View {
+        let line = monthLines[key]
+        let complete = line?.complete ?? false
+        let totals = line?.totals ?? BankHub.MonthTotals()
         return Text("Tulot \(Money.format(totals.income)) · Menot \(Money.format(totals.expenses))")
             .monospacedDigit()
             .opacity(complete ? 1 : 0)
@@ -371,13 +388,14 @@ struct BankFeedView: View {
     }
 
     /// Toiminnot: Valitse, the month, Tiliotteet, then the bank's own actions. "Hyväksy
-    /// kuittiehdotukset" is the Kuittien kohdistus card's button only (one primary).
-    private var actionsMenu: some View {
+    /// kuittiehdotukset" is the Kuittien kohdistus card's button only (one primary). `shown` is the
+    /// month on screen, as `body` picked it.
+    private func actionsMenu(shown: String?) -> some View {
         Menu {
             // Always here, so the menu keeps its shape when the rows arrive; nothing to pick without them.
             Button { selection.begin() } label: { Label("Valitse", systemImage: "checkmark.circle") }
                 .disabled(state.value?.isEmpty != false)
-            monthMenu
+            monthMenu(shown)
             Button { openRoute(.statements) } label: { Label("Tiliotteet", systemImage: "doc.plaintext") }
             // Web Tapahtumat: a refresh per connected bank.
             ForEach(BankConsent.syncable(bankLinks)) { connection in
@@ -398,10 +416,9 @@ struct BankFeedView: View {
 
     /// Kuukausi: the month the chips show, named in its label. The second month control it
     /// replaces said "Kaikki kuukaudet" while one month showed (X096).
-    private var monthMenu: some View {
-        let shown = shownMonthKey
-        return Menu {
-            Picker("Kuukausi", selection: Binding(get: { shownMonthKey }, set: { if let key = $0 { pickMonth(key) } })) {
+    private func monthMenu(_ shown: String?) -> some View {
+        Menu {
+            Picker("Kuukausi", selection: Binding(get: { shown }, set: { if let key = $0 { pickMonth(key) } })) {
                 ForEach(monthOptions(shown), id: \.self) { key in
                     Text(StatementText.month(key)).tag(String?.some(key))
                 }
@@ -411,12 +428,6 @@ struct BankFeedView: View {
             Label(shown.map { "Kuukausi · \($0.isEmpty ? monthTitle($0) : StatementText.month($0))" } ?? "Kuukausi", systemImage: "calendar")
         }
         .disabled(shown == nil)
-    }
-
-    /// The month group on screen, as the chips pick it; the asked month while its rows load.
-    private var shownMonthKey: String? {
-        guard let months = state.value else { return month }
-        return GroupChoice.pick(shownMonth, available: visibleGroups(months).map(\.month)) ?? month
     }
 
     /// The last twelve months (`BankFeed.monthChoices`), and the shown one when it is older.
@@ -450,7 +461,7 @@ struct BankFeedView: View {
             guard requested == month else { return }
             statements = list.statements
             paging.firstPage(next: list.nextCursor)
-            state.succeed(BankFeed.months(list.statements))
+            state.succeed(groupRows())
             remember()
             openPendingFocus()
             // A row asked for from Koti may be further down: the pages are read until it is found.
@@ -477,7 +488,8 @@ struct BankFeedView: View {
               !Task.isCancelled, requested == month, paging.nextCursor == cursor else { return false }
         statements = StatementPaging.merge(statements, page.statements)
         paging.nextPage(next: page.nextCursor)
-        state.update { $0 = BankFeed.months(statements) }
+        let months = groupRows()
+        state.update { $0 = months }
         remember()
         return true
     }
@@ -489,7 +501,7 @@ struct BankFeedView: View {
         if let memory = app.bankFeedMemory[month ?? ""] {
             statements = memory.statements
             paging = memory.paging
-            state.succeed(BankFeed.months(memory.statements))
+            state.succeed(groupRows())
             return
         }
         let requested = month
@@ -497,7 +509,16 @@ struct BankFeedView: View {
               requested == month, state.value == nil else { return }
         statements = list.statements
         paging.firstPage(next: list.nextCursor)
-        state.succeed(BankFeed.months(list.statements))
+        state.succeed(groupRows())
+    }
+
+    /// `statements` by month, as they and `paging` now stand, with each month's line under its name
+    /// (`monthLines`): added up here, once per change of the rows, so the month header does not
+    /// walk every row on each update of the screen.
+    private func groupRows() -> [BankFeed.Month] {
+        let months = BankFeed.months(statements)
+        monthLines = BankFeed.monthLines(statements, months: months, hasMore: paging.hasMore)
+        return months
     }
 
     private func remember() {
