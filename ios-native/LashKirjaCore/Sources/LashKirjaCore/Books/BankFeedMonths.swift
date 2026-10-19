@@ -12,4 +12,13 @@ extension BankFeed {
             return rows.isEmpty ? nil : Month(month: group.month, rows: rows, open: group.open)
         }
     }
+
+    /// Every row of `month` is loaded, so its Tulot and Menot can be told: no page is left, or the
+    /// loaded rows already reach an older month (the server pages by date, newest first). Undated
+    /// rows ("") have no place in that order and wait for the last page.
+    public static func monthComplete(_ month: String, in months: [Month], hasMore: Bool) -> Bool {
+        guard hasMore else { return true }
+        guard !month.isEmpty else { return false }
+        return months.contains { !$0.month.isEmpty && $0.month < month }
+    }
 }

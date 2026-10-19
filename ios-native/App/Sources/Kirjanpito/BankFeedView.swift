@@ -27,10 +27,16 @@ struct BankFeedView: View {
     @State private var openAfterSheet: Route?
     @State private var pushed: Route?
     /// The month group on screen (one at a time); nil follows `GroupChoice` (the newest month).
+    /// The chips and Toiminnot's Kuukausi both set it: one month control, not two (X096).
     @State private var shownMonth: String?
     @State private var limit = ShowMore()
-    /// The bank connections, for "Päivitä" in the menu and the reconnect line.
+    /// The bank connections, for "Päivitä" in the menu and the first row's consent line.
     @State private var bankLinks: [BankConnection] = []
+    /// The connections have answered (or failed) once: until then the consent line is greyed.
+    @State private var linksLoaded = false
+    /// Saldo yhteensä in the first row (`GET /api/bank-accounts`, which the launch prefetch keeps).
+    @State private var position: BankHubPosition?
+    @State private var positionFailed = false
     @State private var syncingBank: String?
     /// The server finishes the sync as a job: "Päivitetään…" until its rows are in.
     @State private var syncWaiting = false
@@ -63,6 +69,7 @@ struct BankFeedView: View {
 
     var body: some View {
         List {
+            balanceRow
             Section {
                 Picker("Näytä", selection: Binding(get: { onlyOpen }, set: { onlyOpen = $0; limit.reset() })) {
                     Text("Kaikki").tag(false)
@@ -72,20 +79,12 @@ struct BankFeedView: View {
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
             }
-            // Tiliotteet stays in the toolbar; the row here only repeated it.
+            // Tiliotteet stays in Toiminnot; the row here only repeated it.
             if let month {
                 Section {
                     Button { showAllMonths() } label: {
                         Label("\(StatementText.month(month)) · näytä kaikki kuukaudet", systemImage: "xmark.circle")
                     }
-                }
-            }
-            if let ended = bankLinks.first(where: { BankConsent.reconnect($0) != nil }) {
-                // The web's compact card on Tapahtumat: one line that leads to "Vahvista uudelleen".
-                Button { pushed = .bankAccounts } label: {
-                    Label("\(ended.aspspName): vaatii uuden vahvistuksen", systemImage: "exclamationmark.triangle.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.warning)
                 }
             }
             if syncingBank != nil {
@@ -122,7 +121,8 @@ struct BankFeedView: View {
                         Button("Yhdistä pankki") { pushed = .bankAccounts }.buttonStyle(.borderless)
                     }
                 }
-                // One month at a time, picked from a chip row, instead of every month stacked.
+                // One month at a time, picked from a chip row (or Toiminnot's Kuukausi), instead of
+                // every month stacked.
                 let groups = visibleGroups(months)
                 if let key = GroupChoice.pick(shownMonth, available: groups.map(\.month)),
                    let group = groups.first(where: { $0.month == key }) {
@@ -158,10 +158,13 @@ struct BankFeedView: View {
                         }
                         ShowMoreButton(limit: $limit, total: group.rows.count)
                     } header: {
-                        HStack {
-                            Text(monthTitle(group.month))
-                            Spacer()
-                            if group.open > 0 { Text("\(group.open) avoinna").foregroundStyle(Theme.accent) }
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(monthTitle(group.month))
+                                Spacer()
+                                if group.open > 0 { Text("\(group.open) avoinna").foregroundStyle(Theme.accent) }
+                            }
+                            monthTotals(group.month, in: months)
                         }
                     }
                 } else if !months.isEmpty {
@@ -180,7 +183,7 @@ struct BankFeedView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .searchable(text: Binding(get: { search }, set: { search = $0; limit.reset() }), prompt: "Hae…")
-        .navigationTitle("Pankkitapahtumat")
+        .navigationTitle("Pankki")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 if selection.isActive {
@@ -189,51 +192,14 @@ struct BankFeedView: View {
                     }
                 }
             }
+            // One item from the first frame: four crowded the title out of the bar (U014), and a
+            // Valitse that came with the rows changed the bar under the owner's thumb.
             ToolbarItem(placement: .topBarTrailing) {
                 if selection.isActive {
                     Button("Valmis") { selection.end() }
-                } else if state.value?.isEmpty == false {
-                    Button("Valitse") { selection.begin() }
+                } else {
+                    actionsMenu
                 }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Picker("Kuukausi", selection: Binding(get: { month }, set: { month = $0; limit.reset() })) {
-                        Text("Kaikki kuukaudet").tag(String?.none)
-                        ForEach(BankFeed.monthChoices(), id: \.self) { key in
-                            Text(StatementText.month(key)).tag(String?.some(key))
-                        }
-                    }
-                } label: {
-                    Image(systemName: month == nil ? "calendar" : "calendar.badge.clock")
-                }
-                .accessibilityLabel("Valitse kuukausi")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    // Web Tapahtumat: a refresh per connected bank.
-                    ForEach(BankConsent.syncable(bankLinks)) { connection in
-                        Button { Task { await syncBank(connection) } } label: {
-                            Label("Päivitä \(connection.aspspName)", systemImage: "arrow.clockwise")
-                        }
-                        .disabled(syncingBank != nil)
-                    }
-                    Button { importing = true } label: { Label("Tuo tiliote", systemImage: "square.and.arrow.down") }
-                    Button { Task { await rerunMatching() } } label: { Label("Etsi kuitteja uudelleen", systemImage: "arrow.triangle.2.circlepath") }
-                        .disabled(bulkBusy)
-                    if confirmable > 0 {
-                        Button { confirmPreview = BankFeed.confirmPreview(statements.flatMap(\.transactions)) } label: { Label(BankFeed.confirmAllLabel(confirmable), systemImage: "link") }
-                            .disabled(bulkBusy)
-                    }
-                    Button { pushed = .bankAccounts } label: { Label("Pankkiyhteys ja tilit", systemImage: "building.columns") }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .accessibilityLabel("Toiminnot")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink(value: Route.statements) { Image(systemName: "doc.plaintext") }
-                    .accessibilityLabel("Tiliotteet")
             }
         }
         .sheet(item: $confirmPreview, onDismiss: { previewForSelection = false }) { preview in
@@ -293,19 +259,25 @@ struct BankFeedView: View {
             // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
             gate.mark(key: month ?? "", version: app.refreshEverything())
             async let links: Void = loadBankLinks()
+            async let balances: Void = loadPosition()
             await load()
             await links
+            await balances
         }
         .perfReady("pankkiFeed", state.value != nil)
         .task(id: loadKey) {
             await restore()
+            await restoreBalance()
             guard state.value == nil || gate.isDue(key: month ?? "", version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
             let version = app.dataVersion
-            // The bank links only fill the menu: they load beside the rows, not after them.
+            // The bank links and the balances only fill the menu and the first row: they load
+            // beside the rows, not after them.
             async let links: Void = loadBankLinks()
+            async let balances: Void = loadPosition()
             await load()
             await links
+            await balances
             if !Task.isCancelled { gate.mark(key: month ?? "", version: version) }
         }
         .motion(.snappy, value: onlyOpen)
@@ -324,6 +296,142 @@ struct BankFeedView: View {
         month = nil
         shownMonth = nil
         limit.reset()
+    }
+
+    // MARK: First row, month header and Toiminnot
+
+    /// Saldo yhteensä and the consent on one row of one height: the hub's balance card and the
+    /// reconnect line folded into the screen that has the rows (O2). It opens Pankkiyhteys ja
+    /// tilit. Until the cached figures are read, a greyed copy of the same size holds its place.
+    private var balanceRow: some View {
+        Section {
+            NavigationLink(value: Route.bankAccounts) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Saldo yhteensä").foregroundStyle(Theme.ink)
+                        Spacer(minLength: 8)
+                        balanceAmount
+                    }
+                    consentLine
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
+    @ViewBuilder private var balanceAmount: some View {
+        if let position, !BankHub.accountLines(position, statements: statements).isEmpty {
+            let lines = BankHub.accountLines(position, statements: statements)
+            // A sync's balances show at once, before the accounts are asked again.
+            let fresh = app.versions.balances
+            MoneyText(amount: fresh.total(BankHub.total(position), lines: lines.map { (id: $0.id, balance: $0.balance) }))
+                .fontWeight(.semibold)
+                .foregroundStyle(Theme.ink)
+        } else if position != nil || positionFailed {
+            // No account yet, or no figure to trust: a dash, not a total of zero.
+            Text("–").fontWeight(.semibold).foregroundStyle(Theme.ink2)
+        } else {
+            Text("0 000,00 €").fontWeight(.semibold).redacted(reason: .placeholder).accessibilityHidden(true)
+        }
+    }
+
+    /// One line under the total: an ended consent (the web's compact card on Tapahtumat), else how
+    /// long the working one lasts, in the warning colour a fortnight ahead (`BankConsent.validity`).
+    @ViewBuilder private var consentLine: some View {
+        let validities = bankLinks.compactMap { BankConsent.validity($0) }
+        Group {
+            if let ended = bankLinks.first(where: { BankConsent.reconnect($0) != nil }) {
+                Label("\(ended.aspspName): vaatii uuden vahvistuksen", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Theme.warning)
+            } else if let validity = validities.first(where: \.warning) ?? validities.first {
+                Text(validity.text).foregroundStyle(validity.warning ? Theme.warning : Theme.ink2)
+            } else if let excluded = position?.combined?.excludedCurrencies, !excluded.isEmpty {
+                Text("Ei sisällä tilejä valuutoissa \(excluded.joined(separator: ", "))").foregroundStyle(Theme.ink2)
+            } else if linksLoaded && (position != nil || positionFailed) {
+                Text("Tilit, saldot ja pankkiyhteys").foregroundStyle(Theme.ink2)
+            } else {
+                Text("Lupa voimassa 1.1.2026 asti").redacted(reason: .placeholder).accessibilityHidden(true)
+            }
+        }
+        .font(.caption)
+        .lineLimitUnlessLarge()
+    }
+
+    /// "Tulot X · Menot Y" under the month's name, once every row of the month is in: part of a
+    /// month would show part of its money. The line is there from the first frame, unseen until
+    /// then, so nothing below it moves when it shows.
+    private func monthTotals(_ key: String, in months: [BankFeed.Month]) -> some View {
+        let complete = BankFeed.monthComplete(key, in: months, hasMore: paging.hasMore)
+        let totals = BankHub.totals(statements, month: key)
+        return Text("Tulot \(Money.format(totals.income)) · Menot \(Money.format(totals.expenses))")
+            .monospacedDigit()
+            .opacity(complete ? 1 : 0)
+            .accessibilityHidden(!complete)
+            .motion(.easeOut(duration: 0.2), value: complete)
+    }
+
+    /// Toiminnot: Valitse, the month, Tiliotteet, then the bank's own actions. "Hyväksy
+    /// kuittiehdotukset" is the Kuittien kohdistus card's button only (one primary).
+    private var actionsMenu: some View {
+        Menu {
+            // Always here, so the menu keeps its shape when the rows arrive; nothing to pick without them.
+            Button { selection.begin() } label: { Label("Valitse", systemImage: "checkmark.circle") }
+                .disabled(state.value?.isEmpty != false)
+            monthMenu
+            Button { openRoute(.statements) } label: { Label("Tiliotteet", systemImage: "doc.plaintext") }
+            // Web Tapahtumat: a refresh per connected bank.
+            ForEach(BankConsent.syncable(bankLinks)) { connection in
+                Button { Task { await syncBank(connection) } } label: {
+                    Label("Päivitä \(connection.aspspName)", systemImage: "arrow.clockwise")
+                }
+                .disabled(syncingBank != nil)
+            }
+            Button { importing = true } label: { Label("Tuo tiliote", systemImage: "square.and.arrow.down") }
+            Button { Task { await rerunMatching() } } label: { Label("Etsi kuitteja uudelleen", systemImage: "arrow.triangle.2.circlepath") }
+                .disabled(bulkBusy)
+            Button { pushed = .bankAccounts } label: { Label("Pankkiyhteys ja tilit", systemImage: "building.columns") }
+        } label: {
+            Image(systemName: "ellipsis.circle").tapTarget()
+        }
+        .accessibilityLabel("Toiminnot")
+    }
+
+    /// Kuukausi: the month the chips show, named in its label. The second month control it
+    /// replaces said "Kaikki kuukaudet" while one month showed (X096).
+    private var monthMenu: some View {
+        let shown = shownMonthKey
+        return Menu {
+            Picker("Kuukausi", selection: Binding(get: { shownMonthKey }, set: { if let key = $0 { pickMonth(key) } })) {
+                ForEach(monthOptions(shown), id: \.self) { key in
+                    Text(StatementText.month(key)).tag(String?.some(key))
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label(shown.map { "Kuukausi · \($0.isEmpty ? monthTitle($0) : StatementText.month($0))" } ?? "Kuukausi", systemImage: "calendar")
+        }
+        .disabled(shown == nil)
+    }
+
+    /// The month group on screen, as the chips pick it; the asked month while its rows load.
+    private var shownMonthKey: String? {
+        guard let months = state.value else { return month }
+        return GroupChoice.pick(shownMonth, available: visibleGroups(months).map(\.month)) ?? month
+    }
+
+    /// The last twelve months (`BankFeed.monthChoices`), and the shown one when it is older.
+    private func monthOptions(_ shown: String?) -> [String] {
+        let recent = BankFeed.monthChoices()
+        guard let shown, !shown.isEmpty, !recent.contains(shown) else { return recent }
+        return recent + [shown]
+    }
+
+    private func pickMonth(_ key: String) {
+        shownMonth = key
+        limit.reset()
+        // Its rows are not loaded (an older month, or one on a later page): asked for that month,
+        // as a drill to it does.
+        if state.value?.contains(where: { $0.month == key }) != true { month = key }
     }
 
     private func load() async {
@@ -394,6 +502,33 @@ struct BankFeedView: View {
 
     private func remember() {
         app.bankFeedMemory[month ?? ""] = BankFeedMemory(statements: statements, paging: paging)
+    }
+
+    /// The first row's balances and consent from the cache (the launch keeps the balances,
+    /// Kirjanpito warms the connections), on screen before they are asked again.
+    private func restoreBalance() async {
+        if position == nil, let cached: BankHubPosition = await app.cachedValue("/api/bank-accounts") { position = cached }
+        if !linksLoaded, let cached: BankConnections = await app.cachedValue("/api/bank/connections") {
+            bankLinks = cached.connections
+            linksLoaded = true
+        }
+    }
+
+    /// Saldo yhteensä, beside the rows. A figure already on screen stays when the answer fails;
+    /// only a first failure shows the dash.
+    private func loadPosition() async {
+        let app = self.app
+        let startedAt = Date()
+        let result = await Result<BankHubPosition, Error>(asyncCatching: { try await app.cachedGet("/api/bank-accounts", persist: true) })
+        if Task.isCancelled { return }
+        switch result {
+        case .success(let value):
+            position = value
+            positionFailed = false
+            app.versions.settleBalances(loadStartedAt: startedAt)
+        case .failure(let error):
+            if !(error is CancellationError) && position == nil { positionFailed = true }
+        }
     }
 
     /// The rows on screen: the shown month's group, as far as "Näytä lisää" has opened it. Bulk
@@ -530,8 +665,10 @@ struct BankFeedView: View {
         limit = next
     }
 
-    /// Best effort: without the connections the menu simply has no "Päivitä".
+    /// Best effort: without the connections the menu simply has no "Päivitä", and the first row
+    /// names the screen it opens instead of a consent.
     private func loadBankLinks() async {
+        defer { if !Task.isCancelled { linksLoaded = true } }
         guard let list: BankConnections = try? await app.cachedGet("/api/bank/connections") else { return }
         bankLinks = list.connections
     }
@@ -619,7 +756,7 @@ struct BankFeedView: View {
     }
 }
 
-/// What Pankkitapahtumat showed last for one month filter (`AppModel.bankFeedMemory`).
+/// What Pankki showed last for one month filter (`AppModel.bankFeedMemory`).
 struct BankFeedMemory {
     let statements: [Statement]
     let paging: CursorPaging

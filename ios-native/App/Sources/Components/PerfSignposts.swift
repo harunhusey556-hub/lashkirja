@@ -92,7 +92,7 @@ extension Route {
     var perfRow: String? {
         switch self {
         case .receipts, .receiptsFiltered, .receiptsCategory, .receiptsMissingVat: "kuitit"
-        case .bankFeed, .bankFeedFiltered: "pankkiFeed"
+        case .bankFeed, .bankFeedFiltered, .bankHub: "pankkiFeed"
         case .bankAccounts: "pankkiTilit"
         case .periods, .monthClose: "kaudet"
         case .alv: "alv"

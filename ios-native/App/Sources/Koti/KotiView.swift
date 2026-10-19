@@ -379,7 +379,7 @@ private struct KotiContent: View {
 
     private func route(_ row: Koti.PositionRow) -> Route {
         switch row.kind {
-        case .bank: row.fixesBank ? Route.bankAccounts : Route.bankHub
+        case .bank: row.fixesBank ? Route.bankAccounts : Route.bankFeed
         case .receivables: .invoices
         // Every status, not the chip left on last time: the open total must not open the paid bills.
         case .payables: .purchaseInvoicesFiltered(status: PurchaseFilter.all.rawValue)
@@ -774,7 +774,7 @@ private struct BalanceCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             // Only the heading is the link: a drag on the chart must never open the bank.
-            NavigationLink(value: Route.bankHub) {
+            NavigationLink(value: Route.bankFeed) {
                 heading.contentShape(Rectangle())
             }
             .buttonStyle(.pressable)

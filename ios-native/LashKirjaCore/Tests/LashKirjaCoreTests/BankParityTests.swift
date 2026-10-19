@@ -27,6 +27,22 @@ private func encodedObject<T: Encodable>(_ value: T) throws -> [String: Any] {
     #expect(BankFeed.query(month: "2026-09") == ["month": "2026-09"])
 }
 
+/// N2: the month header's "Tulot · Menot" shows only for a month whose rows are all in.
+@Test func feedMonthTotalsWaitForTheWholeMonth() {
+    let october = BankFeed.Month(month: "2026-10", rows: [], open: 0)
+    let september = BankFeed.Month(month: "2026-09", rows: [], open: 0)
+    let undated = BankFeed.Month(month: "", rows: [], open: 0)
+    // The last page is in: every month is whole.
+    #expect(BankFeed.monthComplete("2026-09", in: [october, september], hasMore: false))
+    #expect(BankFeed.monthComplete("", in: [october, undated], hasMore: false))
+    // Pages come newest first: October is whole once September has begun, September is not yet.
+    #expect(BankFeed.monthComplete("2026-10", in: [october, september], hasMore: true))
+    #expect(!BankFeed.monthComplete("2026-09", in: [october, september], hasMore: true))
+    // Undated rows are no older month, and are themselves whole only on the last page.
+    #expect(!BankFeed.monthComplete("2026-10", in: [october, undated], hasMore: true))
+    #expect(!BankFeed.monthComplete("", in: [october, september, undated], hasMore: true))
+}
+
 @Test func monthLabelIsCapitalisedFinnish() {
     #expect(StatementText.month("2026-10") == "Lokakuu 2026")
     #expect(StatementText.month(nil) == "Ei kuukautta")

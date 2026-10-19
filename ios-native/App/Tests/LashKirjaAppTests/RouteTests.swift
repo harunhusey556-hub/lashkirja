@@ -21,4 +21,12 @@ final class RouteTests: XCTestCase {
         tab(.invoice("a"))
         XCTAssertEqual(pushed, [.customers, .invoice("a")])
     }
+
+    /// N2: an assistant reply's or a server item's `/pankki` link opens the bank rows, as Pankki on
+    /// Kirjanpito does; the hub it named is gone.
+    func testOldPankkiLinkOpensTheBankRows() {
+        XCTAssertEqual(Route.fromHref("/pankki"), .bankFeed)
+        XCTAssertEqual(Route.fromHref("/pankki/tapahtumat"), .bankFeed)
+        XCTAssertEqual(Route.fromHref("/pankki/tapahtumat?nayta=toimet"), .bankFeedFiltered(month: nil, onlyOpen: true, focus: nil))
+    }
 }

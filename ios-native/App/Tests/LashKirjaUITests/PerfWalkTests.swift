@@ -38,8 +38,9 @@ final class PerfWalkTests: WalkTestCase {
         app.windows.firstMatch.swipeDown(velocity: .fast)
         if openRow("Pankki", exact: true) {
             sleep(2)
-            // Without a bank connection the hub offers "Yhdistä pankki" instead of its links.
-            if press("Yhdistä pankki") || openRow("Pankkiyhteys ja tilit") { sleep(3); back() }
+            // Pankki opens on its rows (N2); its first row, Saldo yhteensä, opens Pankkiyhteys ja
+            // tilit with a bank connection or without one.
+            if openRow("Saldo yhteensä") { sleep(3); back() }
             back()
         }
         // The sheets open from a tab's root, where the toolbar is.
