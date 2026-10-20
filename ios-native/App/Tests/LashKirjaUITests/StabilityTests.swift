@@ -612,10 +612,17 @@ final class StabilityTests: WalkTestCase {
     func test19_RaportitOnePrimary() {
         XCTAssertTrue(selectTab("Raportit"), "Raportit is not selected")
         let zip = app.buttons["Lataa zip"].firstMatch
-        guard zip.waitForExistence(timeout: 15), reveal(zip, scrolls: 8) else {
+        // The package closes the page, under the month and the year's figures: the List builds its
+        // row only once scrolled near, so the wait is for the report and the zip is scrolled to (run
+        // 39334491019 waited 15 s for a row it never scrolled to).
+        guard app.staticTexts["Kuukausittain"].firstMatch.waitForExistence(timeout: 15), reveal(zip, scrolls: 8) else {
             dump(app, "stability-19-no-zip"); XCTFail("Lataa zip is not hittable on Raportit"); return
         }
+        // On to the end of the page, where the owner's scroll stops: a reveal can leave the button
+        // in the tab bar's soft edge, which pales the fill read below.
+        app.windows.firstMatch.swipeUp(velocity: .fast); scrolls += 1
         waitStill(zip)
+        XCTAssertLessThan(zip.frame.maxY, app.tabBars.firstMatch.frame.minY, "Lataa zip sits under the tab bar")
         // The primary's ink capsule, read beside its label: a plain row is the white card.
         let fill = screenColours(app, at: [CGPoint(x: zip.frame.minX + zip.frame.width * 0.15, y: zip.frame.midY)]).first ?? nil
         XCTAssertTrue(fill?.near(RGB(r: 38, g: 34, b: 31), within: 12) == true,
