@@ -250,7 +250,9 @@ struct PurchasePaymentSheet: View {
                     Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Merkitse maksetuksi") { Task { await save() } }.disabled(busy)
+                    // As the sales twin: the wide "Merkitse maksetuksi" pushed the title out of the bar,
+                    // and it also names the menu's other action (X161).
+                    Button("Tallenna") { Task { await save() } }.disabled(busy)
                 }
             }
             .onAppear {
@@ -261,6 +263,7 @@ struct PurchasePaymentSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationBackground(Theme.canvas)
         .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 
@@ -334,6 +337,7 @@ struct PurchaseMarkPaidSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .presentationBackground(Theme.canvas)
         .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 

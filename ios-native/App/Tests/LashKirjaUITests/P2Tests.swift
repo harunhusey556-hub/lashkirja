@@ -1,7 +1,8 @@
 import XCTest
 import UIKit
 
-/// P2 additions: Spotlight routes, receipt thumbnails, next invoice number, dates in Helsinki.
+/// P2 additions: Spotlight routes, receipt thumbnails, next invoice number, dates in Helsinki, and
+/// the invoice form's unit pill and customer card fitting their line.
 final class P2Tests: WalkTestCase {
     /// Reads ids from the demo API the app uses (through the walk proxy), with the demo-seed login.
     func demoJSON(_ path: String) -> [String: Any] {
@@ -293,7 +294,10 @@ final class P2Tests: WalkTestCase {
         let amount = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Summa", "Summa")).firstMatch
         guard amount.waitForExistence(timeout: 5) else { dump(app, "p2e-no-amount"); XCTFail("no Summa in Kirjaa maksu"); return }
         let filled = (amount.value as? String) ?? ""
-        type(amount, String(repeating: XCUIKeyboardKey.delete.rawValue, count: filled.count + 2) + "1")
+        // The sum sits at the trailing edge, as on the purchase sheet: type()'s centre tap put the caret before it.
+        amount.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5)).withOffset(CGVector(dx: -2, dy: 0)).tap(); taps += 1
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: amount)], timeout: 2)
+        amount.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: filled.count + 2) + "1")
         XCTAssertEqual(amount.value as? String, "1", "Summa before Tallenna")
         sheet.buttons["Tallenna"].tap(); taps += 1
         XCTAssertTrue(sheet.waitForNonExistence(timeout: 20), "Kirjaa maksu did not close after Tallenna")
@@ -306,6 +310,54 @@ final class P2Tests: WalkTestCase {
         let shownIso = shown.flatMap(HelsinkiDay.init(shown:))?.iso
         check("P2 E the saved paidDate is the day the picker showed (\(paid ?? "none") vs \(shownIso ?? "none"))", paid != nil && paid == shownIso)
         XCTAssertEqual(paid, shownIso, "paidDate against the day Maksupäivä showed")
+    }
+
+    /// U013 U026 U092 U103: Rivi 1's unit pill reads 'kpl ⌃⌄' on the stepper's line. The row gave the
+    /// stepper and the pill an equal share narrower than the stepper, and the pill became a tall
+    /// empty capsule, about 27 x 73 pt, with only its chevron showing.
+    func testF_UnitMenuFitsTheLine() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        guard tap("Uusi lasku"), app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15) else {
+            XCTFail("Uusi lasku did not open"); return
+        }
+        let unit = app.buttons["Yksikkö kpl"].firstMatch
+        guard reveal(unit) else { dump(app, "p2f-no-unit"); XCTFail("Rivi 1 shows no Yksikkö kpl"); return }
+        waitStill(unit)
+        shot("p2f-unit-menu")
+        let pill = unit.frame
+        XCTAssertLessThanOrEqual(pill.height, 44, "the unit pill is \(pill.height) pt tall")
+        XCTAssertGreaterThanOrEqual(pill.width, 40, "the unit pill is \(pill.width) pt wide")
+        let plus = app.buttons["Lisää määrää"].firstMatch
+        let price = app.textFields["Rivin 1 à-hinta euroina"].firstMatch
+        guard plus.exists, price.exists else { dump(app, "p2f-row"); XCTFail("Rivi 1 has no Lisää määrää or no price field"); return }
+        XCTAssertFalse(overlaps(pill, plus.frame), "the unit pill \(pill) lies over Lisää määrää \(plus.frame)")
+        XCTAssertFalse(overlaps(pill, price.frame), "the unit pill \(pill) lies over the price field \(price.frame)")
+    }
+
+    /// X026: on Lasku 4 > Muokkaa the Asiakas card shows Kauneus Oy's Y-tunnus and e-mail whole. On one
+    /// line beside "Vaihda" the e-mail was cut to 'laskut@kaune…'. Text the audit finds cut on the
+    /// invoice under the form is that screen's, not the card's. Wrapped whole on two lines the detail
+    /// still drew the audit's guess for larger sizes (p2j-customer-card, run 39322642358): that is B5's.
+    func testJ_CustomerCardFits() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        // The seed's draft (demo-seed.ts): Kauneus Oy, Y-tunnus 2454577-7, laskut@kauneus.example.
+        guard tapLabel("label MATCHES %@", ".*Lasku 4(\\D.*)?"), app.navigationBars["Lasku 4"].waitForExistence(timeout: 20) else {
+            dump(app, "p2j-no-draft"); XCTFail("Lasku 4 did not open from Myynti"); return
+        }
+        let under = clippedTexts()
+        guard tap("Muokkaa"), app.navigationBars["Muokkaa laskua"].waitForExistence(timeout: 15) else {
+            dump(app, "p2j-no-form"); XCTFail("Muokkaa did not open Muokkaa laskua"); return
+        }
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Y-tunnus 2454577-7")).firstMatch
+        guard card.waitForExistence(timeout: 15) else { dump(app, "p2j-no-card"); XCTFail("the form has no Asiakas card for Kauneus Oy"); return }
+        waitStill(card)
+        shot("p2j-customer-card")
+        // What the audit says for a real cut is unseen, so the line is measured too: whole, the caption
+        // wraps to two lines (lineLimit 2); cut, it was one line beside Vaihda.
+        let detail = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Y-tunnus 2454577-7")).firstMatch
+        XCTAssertGreaterThanOrEqual(detail.frame.height, UIFont.preferredFont(forTextStyle: .caption1).lineHeight * 1.5, "the Y-tunnus/e-mail line is on one line beside Vaihda, where it was cut: \(detail.frame)")
+        let cut = clippedTexts(within: card.frame).filter { !under.contains($0) }
+        XCTAssertEqual(cut, [], "text cut on the Asiakas card")
     }
 
     /// X037 X053 X062 X070 X082 (B12): the pending row of "Odottaa hyväksyntää" shows the whole
@@ -428,6 +480,38 @@ final class P2Tests: WalkTestCase {
         return true
     }
 
+    /// Two frames share an area, not only an edge.
+    private func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+        let shared = a.intersection(b)
+        return !shared.isNull && shared.width > 0.5 && shared.height > 0.5
+    }
+
+    /// The texts the textClipped audit finds cut on the screen at this text size (within `area` when one
+    /// is given), by label and what the audit said; the audit itself records nothing. Its guesses at
+    /// larger sizes are only noted, as in testI: they belong to B5. StabilityTests has its own copy,
+    /// without the area.
+    private func clippedTexts(within area: CGRect? = nil) -> [String] {
+        let found = ClippedTexts()
+        do {
+            try app.performAccessibilityAudit(for: .textClipped) { issue in
+                if let area {
+                    guard let frame = issue.element?.frame, self.overlaps(frame, area) else { return true }
+                }
+                let label = issue.element?.label ?? ""
+                let text = "\(label.isEmpty ? issue.compactDescription : label): \(issue.detailedDescription)"
+                if "\(issue.compactDescription) \(issue.detailedDescription)".localizedCaseInsensitiveContains("larger") {
+                    self.note("INFO P2 audit at larger sizes: \(text)")
+                } else {
+                    found.labels.append(text)
+                }
+                return true
+            }
+        } catch {
+            XCTFail("the textClipped audit did not run: \(error)")
+        }
+        return found.labels
+    }
+
     private func waitEnabled(_ element: XCUIElement) {
         let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: element)
         _ = XCTWaiter().wait(for: [enabled], timeout: 15)
@@ -448,6 +532,11 @@ final class P2Tests: WalkTestCase {
         let button = bar.buttons["BackButton"].exists ? bar.buttons["BackButton"] : bar.buttons.element(boundBy: 0)
         button.tap(); taps += 1
     }
+}
+
+/// What an audit's handler found; a class, so the handler fills it in place.
+private final class ClippedTexts {
+    var labels: [String] = []
 }
 
 /// A calendar day in Helsinki, the day the app and the server count in.

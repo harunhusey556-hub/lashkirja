@@ -631,6 +631,7 @@ struct CustomerMergeSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .presentationBackground(Theme.canvas)
     }
 
     private func merge() async {
