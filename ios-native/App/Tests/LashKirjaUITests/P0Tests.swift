@@ -93,7 +93,10 @@ final class P0Tests: WalkTestCase {
         // G002 (P4): the send sheet's message starts on its subject's left edge too.
         backToSettings(from: "Sähköpostimallit")
         closeSettings()
-        guard selectTab("Myynti"), tapLabel("label CONTAINS %@", "myöhässä") else { XCTFail("no overdue invoice on Myynti"); return }
+        // Myynti's overdue row: its badge says "Myöhässä", its line the due date (N6, M100).
+        guard selectTab("Myynti"), tapLabel("label CONTAINS 'Myöhässä' AND label CONTAINS %@", "· eräpäivä") else {
+            XCTFail("no overdue invoice on Myynti"); return
+        }
         let send = app.buttons["Lähetä"].firstMatch
         if send.waitForExistence(timeout: 20) {
             send.tap(); taps += 1
