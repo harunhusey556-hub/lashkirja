@@ -6,12 +6,12 @@ import { PageTitle } from "@/components/ds";
 import { PullToRefresh } from "@/components/ds/PullToRefresh";
 import { SkeletonList } from "@/components/AsyncState";
 import { ConnectionNotice, EmptyState } from "@/components/ScreenState";
-import { Button } from "@/components/ui";
 import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } from "@/components/clientFetch";
 import { showToast } from "@/lib/toast";
 import { hapticNotify } from "@/lib/haptics";
 import { helsinkiCalendarDate } from "@/lib/validation";
 import {
+  AcceptAllSureButton,
   PurchaseMatchList,
   isSureSuggestion,
   purchaseMatchRows,
@@ -180,17 +180,12 @@ export default function PurchaseMatchPage() {
       )}
 
       {status === "ready" && rows.length > 0 && (
-        <Button
-          type="button"
-          variant="primary"
-          className="w-full"
-          onClick={() => void acceptAllSure()}
+        <AcceptAllSureButton
+          sureCount={sureCount}
           busy={bulkBusy}
-          busyLabel="Kohdistetaan…"
           disabled={busyId !== null}
-        >
-          {sureCount > 0 ? `Hyväksy kaikki varmat (${sureCount})` : "Hyväksy kaikki varmat"}
-        </Button>
+          onClick={() => void acceptAllSure()}
+        />
       )}
 
       {status === "ready" && rows.length === 0 && (

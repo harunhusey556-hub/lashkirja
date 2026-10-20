@@ -212,14 +212,19 @@ struct EmailTemplateEditor: View {
                                 SectionChip(title: item.token, selected: false) { message += item.token }
                             }
                         }
+                        .padding(.horizontal, ChipRow.inset)
                     }
+                    .accessibilityIdentifier("template-placeholders")
+                    .chipRowScroll()
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
                 } header: {
-                    Text("Paikkamerkit")
+                    // The section's margins hold its header and footer too: they keep the other sections' line.
+                    Text("Paikkamerkit").padding(.horizontal, ChipRow.inset)
                 } footer: {
-                    Text(EmailPlaceholder.help(placeholders) + ".")
+                    Text(EmailPlaceholder.help(placeholders) + ".").padding(.horizontal, ChipRow.inset)
                 }
+                .chipRowSection()
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
             .scrollContentBackground(.hidden)

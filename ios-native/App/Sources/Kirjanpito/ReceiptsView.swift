@@ -161,6 +161,7 @@ struct ReceiptsView: View {
             }
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .chipRowSection()
 
             if receipts.value != nil {
                 if let banner = receipts.banner {
@@ -385,19 +386,22 @@ struct ReceiptsView: View {
                                 .contentTransition(.numericText())
                                 .accessibilityHidden(counts == nil)
                         }
-                        .font(.subheadline.weight(active ? .semibold : .regular))
+                        .chipFont(selected: active)
                         .foregroundStyle(active ? Theme.onInk : Theme.ink)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(active ? Theme.ink : Theme.surface, in: Capsule())
-                        .overlay(Capsule().stroke(Theme.line, lineWidth: active ? 0 : 1))
+                        .overlay(Capsule().strokeBorder(Theme.line, lineWidth: active ? 0 : 1))
                     }
                     .buttonStyle(.pressable)
+                    .accessibilityAddTraits(active ? .isSelected : [])
                     .accessibilityIdentifier("receipt-tab-\(tab.rawValue)")
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ChipRow.inset)
         }
+        .accessibilityIdentifier("receipt-chips")
+        .chipRowScroll()
     }
 
     private var activeFilters: some View {
@@ -422,8 +426,9 @@ struct ReceiptsView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ChipRow.inset)
         }
+        .chipRowScroll()
     }
 
     private func filterChip(_ title: String, clear: @escaping () -> Void) -> some View {

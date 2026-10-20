@@ -149,12 +149,12 @@ struct SectionChip: View {
                     Text("\(count)").monospacedDigit().foregroundStyle(selected ? Theme.onInk.opacity(0.8) : Theme.ink2)
                 }
             }
-            .font(.subheadline.weight(selected ? .semibold : .regular))
+            .chipFont(selected: selected)
             .foregroundStyle(selected ? Theme.onInk : Theme.ink)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(selected ? Theme.ink : Theme.surface, in: Capsule())
-            .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
+            .overlay(Capsule().strokeBorder(Theme.line, lineWidth: selected ? 0 : 1))
         }
         .buttonStyle(.pressable)
         .accessibilityAddTraits(selected ? .isSelected : [])
