@@ -428,8 +428,11 @@ final class OwnerScreensTests: WalkTestCase {
         let list = app.collectionViews.containing(queueRow).firstMatch
         guard list.waitForExistence(timeout: 5) else { tree("c5-no-queue"); XCTFail("the queue is not on the screen after the save"); return }
         let notActions = ["capture-fixture", "capture-queue-fixture", "capture-queue-row"]
+        // A row's insides are the row: its kind Menu shows its label as an unnamed button inside
+        // it (UI suite 39326372755: ["", "Valmis"], the "" at the row's lines, a child of the row).
         func buttonsIn(_ element: XCUIElementSnapshot) -> [XCUIElementSnapshot] {
-            (element.elementType == .button ? [element] : []) + element.children.flatMap(buttonsIn)
+            guard !notActions.contains(element.identifier) else { return [] }
+            return (element.elementType == .button ? [element] : []) + element.children.flatMap(buttonsIn)
         }
         func readActions() -> [XCUIElementSnapshot] {
             ((try? list.snapshot())?.children ?? []).flatMap(buttonsIn)
