@@ -26,6 +26,119 @@ final class P2Tests: WalkTestCase {
         return call(get)
     }
 
+    /// POSTs `body` to `path` on the demo API as the `--ci` seed's second account
+    /// (demo-seed.ts ensureCiOnboardingUser), which holds no receipts. The answer's status; 0 when
+    /// nothing answered or the account was refused.
+    @discardableResult
+    func postAsEmptyAccount(_ path: String, _ body: String) -> Int {
+        func call(_ route: String, _ payload: String, token: String?) -> (status: Int, json: [String: Any]) {
+            var req = URLRequest(url: URL(string: "http://127.0.0.1:3998" + route)!)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "content-type")
+            if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+            req.httpBody = payload.data(using: .utf8)
+            var out: (status: Int, json: [String: Any]) = (status: 0, json: [:])
+            let done = expectation(description: route)
+            URLSession.shared.dataTask(with: req) { data, response, _ in
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let json = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+                out = (status: status, json: json)
+                done.fulfill()
+            }.resume()
+            wait(for: [done], timeout: 30)
+            return out
+        }
+        let login = call("/api/auth/token", #"{"email":"onboarding@lashkirja.fi","password":"demo123"}"#, token: nil)
+        guard let token = login.json["token"] as? String else { return 0 }
+        return call(path, body, token: token).status
+    }
+
+    /// M010 (P4): the review queue says once that its receipts wait. Under "Odottaa hyväksyntää · N"
+    /// stood "Odottavat hyväksyntää ennen kirjanpitoon siirtymistä.", and the rows a Täydennä already
+    /// marks were counted again under them in "N kuittia vaatii täydennyksen.".
+    func testH_ReviewSectionSaysItOnce() {
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        let header = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Odottaa hyväksyntää")).firstMatch
+        guard header.waitForExistence(timeout: 20) else {
+            dump(app, "p2h-no-queue"); XCTFail("no Odottaa hyväksyntää on Kuitit: is the seed demo-seed.ts --ci?"); return
+        }
+        waitStill(header)
+        shot("p2h-review-section"); dump(app, "p2h-review-section")
+        let waiting = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "hyväksyntää")).allElementsBoundByIndex.map(\.label)
+        note("INFO P2 H: \(waiting)")
+        XCTAssertEqual(waiting.count, 1, "the review section says more than once that receipts wait: \(waiting)")
+        let footnote = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "vaatii täydennyksen."))
+        XCTAssertEqual(footnote.count, 0, "the review section counts the incomplete rows again under them")
+    }
+
+    /// X042 (P4): Summarajaus cancels with 'Peruuta', as every sheet and question around it does.
+    func testN_SummarajausCancelsWithPeruuta() {
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        let actions = app.navigationBars["Kuitit"].buttons["Toiminnot"].firstMatch
+        guard actions.waitForExistence(timeout: 10) else { XCTFail("no Toiminnot on Kuitit"); return }
+        actions.tap(); taps += 1
+        let filter = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Suodata")).firstMatch
+        guard filter.waitForExistence(timeout: 5) else { dump(app, "p2n-menu"); XCTFail("Toiminnot has no Suodata"); return }
+        filter.tap(); taps += 1
+        let amount = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Summa\u{2026}")).firstMatch
+        guard amount.waitForExistence(timeout: 5) else { dump(app, "p2n-filter"); XCTFail("Suodata has no Summa\u{2026}"); return }
+        amount.tap(); taps += 1
+        let alert = app.alerts["Summarajaus"]
+        guard alert.waitForExistence(timeout: 5) else { dump(app, "p2n-no-alert"); XCTFail("Summa\u{2026} did not ask for the limits"); return }
+        shot("p2n-summarajaus")
+        let buttons = alert.buttons.allElementsBoundByIndex.map(\.label).sorted()
+        XCTAssertEqual(buttons, ["Käytä", "Peruuta"], "the Summarajaus alert's buttons")
+        alert.buttons["Peruuta"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5), "Peruuta left Summarajaus up")
+    }
+
+    /// X043 (P4): a chip alone is not a search. Tulot (0) said "Ei hakua vastaavia kuitteja." with
+    /// nothing narrowed. The demo account has an income receipt (Korttimaksut, in the finished month),
+    /// so this signs in as the seed's second account, which has none. That account's sessions end with
+    /// the test, so the next launch signs in as the demo account again, as after P0 L.
+    func testO_TulotWithoutIncomeSaysEiTuloja() {
+        defer { postAsEmptyAccount("/api/auth/sessions", #"{"scope":"all"}"#) }
+        // Answered here: the first-sign-in questions would cover the tabs.
+        let answers = #"{"entityType":"toiminimi","vatRegistered":false,"vatPeriod":"month","salesTypes":["ripsipalvelut"],"expenseCategories":["tarvikkeet"]}"#
+        guard postAsEmptyAccount("/api/onboarding", answers) == 200 else {
+            XCTFail("onboarding@lashkirja.fi did not take its answers: is the seed demo-seed.ts --ci?"); return
+        }
+        guard openSignOutQuestion() != nil else {
+            dump(app, "p2o-no-question"); XCTFail("Asetukset > Kirjaudu ulos did not ask"); return
+        }
+        app.buttons["confirm-sheet-confirm"].firstMatch.tap(); taps += 1
+        let email = app.textFields.firstMatch
+        let password = app.secureTextFields.firstMatch
+        guard password.waitForExistence(timeout: 20), email.exists else {
+            dump(app, "p2o-no-form"); XCTFail("signing out did not open the sign-in screen"); return
+        }
+        type(email, "onboarding@lashkirja.fi")
+        type(password, "demo123")
+        app.buttons["Kirjaudu sisään"].firstMatch.tap(); taps += 1
+        guard app.tabBars.firstMatch.waitForExistence(timeout: 30) else {
+            dump(app, "p2o-no-tabs"); XCTFail("onboarding@lashkirja.fi did not sign in"); return
+        }
+        probe { _ = savePasswordPrompt.waitForExistence(timeout: 10) }
+        dismissSystemPrompts()
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        // The device keeps the last Kuitit filters for whoever signs in next; a month would narrow the list.
+        let narrowing = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Poista suodatin")).firstMatch
+        for _ in 0..<4 where narrowing.exists {
+            narrowing.tap(); taps += 1
+            _ = narrowing.waitForNonExistence(timeout: 2)
+        }
+        let tulot = app.buttons["receipt-tab-tulo"].firstMatch
+        guard tulot.waitForExistence(timeout: 10) else { dump(app, "p2o-no-chip"); XCTFail("no Tulot chip on Kuitit"); return }
+        tulot.tap(); taps += 1
+        let said = app.staticTexts["Ei tuloja."].waitForExistence(timeout: 20)
+        shot("p2o-tulot-empty"); dump(app, "p2o-tulot-empty")
+        note("INFO P2 O: \(tulot.label)")
+        XCTAssertTrue(said, "Tulot (0) does not say 'Ei tuloja.'")
+        XCTAssertFalse(app.staticTexts["Ei hakua vastaavia kuitteja."].exists, "Tulot (0) with nothing narrowed says nothing matched")
+        // Back on Kaikki: the tab, too, is kept for whoever signs in next.
+        app.buttons["receipt-tab-all"].firstMatch.tap(); taps += 1
+    }
+
     func testA_SpotlightInvoiceRoute() {
         let invoices = demoJSON("/api/invoices")["invoices"] as? [[String: Any]] ?? []
         guard let sent = invoices.first(where: { $0["status"] as? String == "sent" }), let id = sent["id"] as? String,

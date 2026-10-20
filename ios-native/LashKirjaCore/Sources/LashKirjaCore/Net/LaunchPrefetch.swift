@@ -129,6 +129,15 @@ public enum NextPrefetch {
         [PrefetchRequest(path: "/api/customers", persist: false), PrefetchRequest(path: "/api/catalog", persist: false),
          PrefetchRequest(path: "/api/recurring-invoices", persist: false)]
     }
+
+    /// Asetukset open: Laitteet, Sähköpostimallit and Pääsyavaimet (its list and whether a passkey
+    /// can be made here). Each pushed as a spinner its list then replaced (M053 M054 M057).
+    public static func asetukset() -> [PrefetchRequest] {
+        [PrefetchRequest(path: "/api/auth/sessions", persist: false),
+         PrefetchRequest(path: "/api/invoice-email-templates", query: ["kind": "invoice"], persist: false),
+         PrefetchRequest(path: PasskeyScreen.listPath, persist: false),
+         PrefetchRequest(path: PasskeyScreen.statusPath, persist: false)]
+    }
 }
 
 extension ReceiptCounts {

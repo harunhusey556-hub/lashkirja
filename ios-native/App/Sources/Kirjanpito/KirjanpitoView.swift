@@ -45,7 +45,8 @@ struct KirjanpitoView: View {
                     HubRow(title: "ALV-ilmoitus", subtitle: "Kauden arvonlisävero", symbol: "percent")
                 }
                 NavigationLink(value: Route.ledger) {
-                    HubRow(title: "Kirjanpito", subtitle: "Tuloslaskelma, tase ja päiväkirja", symbol: "book.closed")
+                    // Not "Kirjanpito": that is this tab's own name (X180).
+                    HubRow(title: "Tulos ja tase", subtitle: "Tuloslaskelma, tase ja päiväkirja", symbol: "book.closed")
                 }
             }
         }

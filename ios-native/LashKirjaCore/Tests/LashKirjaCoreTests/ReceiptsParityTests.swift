@@ -308,6 +308,20 @@ import Foundation
         #expect(ReviewGroup.rejected.description == "Eivät ole kirjanpidossa. Voit palauttaa kuitin tarkastettavaksi.")
     }
 
+    @Test func theCaptionSaysOnlyWhatTheHeaderAndChipsDoNot() {
+        // M010: under "Odottaa hyväksyntää · 1", "Odottavat hyväksyntää ennen kirjanpitoon siirtymistä."
+        // said it again.
+        #expect(ReviewGroup.other.caption(chipsShown: false) == nil)
+        #expect(ReviewGroup.other.caption(chipsShown: true) == nil)
+        // Alone, the source is said nowhere else; beside the chips, the chosen chip names it.
+        #expect(ReviewGroup.email.caption(chipsShown: false) == ReviewGroup.email.description)
+        #expect(ReviewGroup.email.caption(chipsShown: true) == nil)
+        #expect(ReviewGroup.bankSales.caption(chipsShown: false) == ReviewGroup.bankSales.description)
+        #expect(ReviewGroup.bankSales.caption(chipsShown: true) == nil)
+        // "Not in the books" is said only here.
+        #expect(ReviewGroup.rejected.caption(chipsShown: true) == ReviewGroup.rejected.description)
+    }
+
     @Test func approvalGaps() throws {
         #expect(ReceiptApproval.gaps(try receipt("a")).isEmpty)
         #expect(ReceiptApproval.gaps(try receipt("a", total: nil)) == [.amount])

@@ -157,7 +157,8 @@ private struct KotiApprovalForm: View {
     @ViewBuilder private func editor(_ field: KotiApproval.Field) -> some View {
         switch field {
         case .vendor:
-            TextField("Myyjä", text: $form.vendor).textContentType(.organizationName)
+            // A name is not a word to correct (U009).
+            TextField("Myyjä", text: $form.vendor).textContentType(.organizationName).autocorrectionDisabled()
             fieldError("vendor")
         case .amount:
             TextField("Summa €", text: Binding(get: { form.totalText }, set: { form.setTotal($0) }))

@@ -278,6 +278,18 @@ private struct Report: Decodable, Equatable { let n: Int; let extra: String? }
         // Toistuvat laskut opens on its active plans: no query, so the screen finds this answer.
         #expect(NextPrefetch.myynti().last?.query == [:])
     }
+
+    @Test func asetuksetWarmsExactlyTheGetsOfItsThreeScreens() {
+        // Laitteet (DevicesView), Sähköpostimallit (EmailTemplatesView, invoice texts only) and
+        // Pääsyavaimet (PasskeyScreen.load): each painted as a spinner its list replaced.
+        #expect(NextPrefetch.asetukset() == [
+            PrefetchRequest(path: "/api/auth/sessions", persist: false),
+            PrefetchRequest(path: "/api/invoice-email-templates", query: ["kind": "invoice"], persist: false),
+            PrefetchRequest(path: "/api/auth/passkey", persist: false),
+            PrefetchRequest(path: "/api/auth/passkey/status", persist: false),
+        ])
+        #expect([PasskeyScreen.listPath, PasskeyScreen.statusPath] == ["/api/auth/passkey", "/api/auth/passkey/status"])
+    }
 }
 
 @Suite struct ResourceDiskTests {

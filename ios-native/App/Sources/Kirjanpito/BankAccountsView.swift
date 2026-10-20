@@ -366,7 +366,7 @@ struct BankAccountsView: View {
     }
 }
 
-/// One tiliote file: title, month · account · rows, and the net amount.
+/// One tiliote file: title, file · account · rows, and the net amount.
 struct StatementFileRow: View {
     let statement: Statement
 

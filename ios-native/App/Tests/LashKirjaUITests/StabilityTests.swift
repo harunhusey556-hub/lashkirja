@@ -92,7 +92,7 @@ final class StabilityTests: WalkTestCase {
 
     func test03_BooksOpenInEveryView() {
         tab("Kirjanpito"); sleep(2)
-        tapLabel("label BEGINSWITH %@", "Kirjanpito, Tuloslaskelma"); sleep(3)
+        tapLabel("label BEGINSWITH %@", "Tulos ja tase, Tuloslaskelma"); sleep(3)
         for part in ["Tase", "Saldot", "Päiväkirja", "Tulos"] {
             if app.buttons[part].waitForExistence(timeout: 10) { app.buttons[part].tap(); taps += 1 }
             sleep(1)
@@ -101,7 +101,7 @@ final class StabilityTests: WalkTestCase {
         XCTAssertFalse(app.staticTexts["Tase ei täsmää. Ilmoita tästä tukeen."].exists, "balance sheet does not balance")
         // U079: the books are on the warm canvas, as Pankki is (test04), not the system grey.
         if app.buttons["Tulos"].exists {
-            assertWarmCanvas(app, under: app.navigationBars["Kirjanpito"], "kirjanpito")
+            assertWarmCanvas(app, under: app.navigationBars["Tulos ja tase"], "kirjanpito")
         } else { XCTFail("kirjanpito: the books did not open") }
         shot("stability-kirjanpito")
     }
@@ -163,6 +163,64 @@ final class StabilityTests: WalkTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Ilmoitus tallennettu")).firstMatch.waitForExistence(timeout: 10),
                       "no confirmation code after sending")
         shot("stability-report")
+    }
+
+    /// X095 (P4): files of one month read apart on Tiliotteet. Each row said its month twice ('Tiliote ·
+    /// Lokakuu 2026' over 'Lokakuu 2026 · Käyttötili · N tapahtumaa'); the line under the title now
+    /// names the file. The --ci seed has three files in the month 0, 2 and 4 days back.
+    func test22_TiliotteetRowsReadApart() {
+        guard selectTab("Kirjanpito"), tap("Pankki"), app.navigationBars["Pankki"].waitForExistence(timeout: 10) else {
+            XCTFail("Pankki did not open"); return
+        }
+        let actions = app.navigationBars["Pankki"].buttons["Toiminnot"].firstMatch
+        guard actions.waitForExistence(timeout: 10) else { XCTFail("Pankki has no Toiminnot"); return }
+        actions.tap(); taps += 1
+        let statements = app.buttons["Tiliotteet"].firstMatch
+        guard statements.waitForExistence(timeout: 5) else { XCTFail("Toiminnot has no Tiliotteet"); return }
+        statements.tap(); taps += 1
+        guard app.navigationBars["Tiliotteet"].waitForExistence(timeout: 10) else { XCTFail("Tiliotteet did not open"); return }
+        let rows = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tiliote · "))
+        guard rows.firstMatch.waitForExistence(timeout: 20) else { dump(app, "stability-22-no-rows"); XCTFail("Tiliotteet lists no files"); return }
+        shot("stability-22-tiliotteet")
+        let labels = rows.allElementsBoundByIndex.map(\.label)
+        note("INFO stability 22: \(labels)")
+        // "Tiliote · Lokakuu 2026, …": the title's month, said once in the row.
+        var byMonth: [String: [String]] = [:]
+        for label in labels {
+            let title = String(label.prefix { $0 != "," })
+            let month = String(title.dropFirst("Tiliote · ".count))
+            byMonth[month, default: []].append(label)
+            XCTAssertEqual(label.components(separatedBy: month).count - 1, 1, "the row says \(month) more than once: \(label)")
+            XCTAssertTrue(label.contains(".csv"), "the row does not name its file: \(label)")
+        }
+        let shared = byMonth.filter { $0.value.count > 1 }
+        XCTAssertFalse(shared.isEmpty, "no month with several files to tell apart (the --ci seed has three): \(labels)")
+        for (month, same) in shared {
+            XCTAssertEqual(Set(same).count, same.count, "files of \(month) read alike: \(same)")
+        }
+    }
+
+    /// X180 (P4): the books are 'Tulos ja tase', not a second 'Kirjanpito' inside the Kirjanpito tab.
+    func test23_LedgerHasItsOwnName() {
+        guard selectTab("Kirjanpito"), app.navigationBars["Kirjanpito"].waitForExistence(timeout: 10) else {
+            XCTFail("Kirjanpito did not open"); return
+        }
+        // Scrolled to: the row is the hub's last, under the tab bar at first.
+        guard let row = firstReachable("label BEGINSWITH %@", "Tulos ja tase, ") else {
+            dump(app, "stability-23-hub"); XCTFail("the Kirjanpito hub has no 'Tulos ja tase' row"); return
+        }
+        let doubles = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kirjanpito, "))
+        XCTAssertEqual(doubles.count, 0, "a row on the Kirjanpito hub is called Kirjanpito: \(doubles.allElementsBoundByIndex.map { $0.label })")
+        row.tap(); taps += 1
+        XCTAssertTrue(app.navigationBars["Tulos ja tase"].waitForExistence(timeout: 10), "the row did not open 'Tulos ja tase'")
+        shot("stability-23-ledger")
+        backToBooks("Tulos ja tase")
+    }
+
+    /// The first element matching, scrolled into the window as `tapLabel` does, without tapping it.
+    private func firstReachable(_ format: String, _ arg: String) -> XCUIElement? {
+        let element = app.descendants(matching: .any).matching(NSPredicate(format: format, arg)).firstMatch
+        return reveal(element, scrolls: 6) ? element : nil
     }
 
     /// A receipt whose bank row has the same amount but another name lists that row and links it

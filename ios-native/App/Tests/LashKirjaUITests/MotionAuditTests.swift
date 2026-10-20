@@ -421,7 +421,7 @@ final class MotionAuditTests: WalkTestCase {
         }
         step("pankki-back", from: "Pankki", to: "Kirjanpito") { press(backButton()) }
         for (id, label) in [("email", "Sähköposti"), ("purchases", "Ostolaskut"), ("match", "Kohdista ostolaskujen maksut"),
-                            ("periods", "Kuukauden sulku"), ("alv", "ALV-ilmoitus"), ("ledger", "Kirjanpito, Tuloslaskelma")] {
+                            ("periods", "Kuukauden sulku"), ("alv", "ALV-ilmoitus"), ("ledger", "Tulos ja tase, Tuloslaskelma")] {
             guard let row = find("label BEGINSWITH %@", label) else { note("SKIP pankki/\(id): no \(label)"); continue }
             step("kirjanpito-\(id)-open", from: "Kirjanpito", to: label, seconds: 5) { press(row) }
             sleep(3)

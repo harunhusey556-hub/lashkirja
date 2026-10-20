@@ -170,7 +170,15 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
         let narrowed = !trimmedSearch.isEmpty || !month.isEmpty || !category.isEmpty
             || source != .all || !minAmount.isEmpty || !maxAmount.isEmpty || missingVat
         if tab == .laskut { return narrowed ? "Ei hakua vastaavia laskuja." : "Ei laskuja." }
-        return isFiltered ? "Ei hakua vastaavia kuitteja." : "Ei kuitteja."
+        if narrowed { return "Ei hakua vastaavia kuitteja." }
+        // A chip alone is not a search: "Tulot (0)" said "Ei hakua vastaavia kuitteja." (X043).
+        switch tab {
+        case .tulo: return "Ei tuloja."
+        case .meno: return "Ei menoja."
+        case .linked: return "Ei kohdistettuja kuitteja."
+        case .unlinked: return "Ei kohdistamattomia kuitteja."
+        case .all, .laskut: return "Ei kuitteja."
+        }
     }
 
     /// The header over the rows: "12 kuittia", "3 laskua".

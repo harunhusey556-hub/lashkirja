@@ -4,6 +4,9 @@ import LashKirjaCore
 /// Asetukset → Sähköpostimallit: the owner's own texts for sending an invoice. The default one
 /// fills the send sheet (and automatic sends); placeholders are filled per invoice by the server.
 struct EmailTemplatesView: View {
+    /// The invoice texts only: the screen and Asetukset's warm-up ask for the same.
+    static let path = "/api/invoice-email-templates"
+    static let query = ["kind": "invoice"]
     @Environment(AppModel.self) private var app
     @State private var state = ScreenLoad<[EmailTemplate]>()
     @State private var placeholders = EmailPlaceholder.all
@@ -11,6 +14,17 @@ struct EmailTemplatesView: View {
     @State private var limit = ShowMore()
     @State private var failure: String?
     @State private var editing: EditTarget?
+
+    /// `preview` (the app's `lastPainted` list, which Asetukset warms) is on screen in the first
+    /// frame: the push slid in a blank spinner page that the whole list replaced (M054). The
+    /// `.task` then refreshes it in place.
+    init(preview: EmailTemplateList? = nil) {
+        guard let preview else { return }
+        var shown = ScreenLoad<[EmailTemplate]>()
+        shown.succeed(preview.templates)
+        _state = State(initialValue: shown)
+        if let server = preview.placeholders, !server.isEmpty { _placeholders = State(initialValue: server) }
+    }
 
     enum EditTarget: Identifiable, Hashable {
         case new, existing(EmailTemplate)
@@ -45,9 +59,13 @@ struct EmailTemplatesView: View {
                             }
                     }
                     ShowMoreButton(limit: $limit, total: rows.count)
-                    Button { editing = .new } label: { Label("Uusi malli", systemImage: "plus") }
+                    // A new one is the bar's "+" only: a "Uusi malli" row here was a second control
+                    // for the same thing (U005).
                 } footer: {
-                    Text("Oletusmalli täyttää lähetyksen aiheen ja viestin. Pyyhkäise vasemmalle asettaaksesi oletuksen tai poistaaksesi.")
+                    // The swipe hint only under rows to swipe.
+                    Text(rows.isEmpty
+                         ? "Oletusmalli täyttää lähetyksen aiheen ja viestin."
+                         : "Oletusmalli täyttää lähetyksen aiheen ja viestin. Pyyhkäise vasemmalle asettaaksesi oletuksen tai poistaaksesi.")
                 }
                 placeholderHelp
             } else {
@@ -105,11 +123,14 @@ struct EmailTemplatesView: View {
     }
 
     private func load() async {
+        let fromSpinner = state.value == nil
         state.begin()
         do {
-            let list: EmailTemplateList = try await app.api.get("/api/invoice-email-templates", query: ["kind": "invoice"])
-            state.succeed(list.templates)
+            let list: EmailTemplateList = try await app.api.get(Self.path, query: Self.query)
+            // Nothing painted yet: the list eases in where the spinner was instead of cutting in.
+            if fromSpinner { withMotion(.snappy) { state.succeed(list.templates) } } else { state.succeed(list.templates) }
             if let server = list.placeholders, !server.isEmpty { placeholders = server }
+            app.rememberPainted(list, Self.path, query: Self.query)
         } catch is CancellationError {
         } catch {
             state.fail(error)
@@ -164,14 +185,24 @@ struct EmailTemplateEditor: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Mallin nimi", text: $name)
+                    // Named in its row: typed into, the field lost its only name, the placeholder (X146).
+                    LabeledContent("Mallin nimi") {
+                        TextField("", text: $name).multilineTextAlignment(.trailing)
+                    }
                     Toggle("Oletusmalli", isOn: $isDefault)
                 } footer: {
                     Text("Oletusmalli täyttää laskun lähetyksen valmiiksi.")
                 }
                 Section("Viesti") {
-                    TextField("Aihe", text: $subject)
-                    TextEditor(text: $message).frame(minHeight: 180).accessibilityLabel("Viesti")
+                    // Its own name over it: unnamed under "Viesti", the subject read as the message's
+                    // first line (X146). Its text keeps the message's left edge.
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Aihe").font(.caption).foregroundStyle(Theme.ink2)
+                        TextField("", text: $subject).accessibilityLabel("Aihe")
+                    }
+                    // The text view's 5 pt line-fragment inset put the message 5 pt right of the
+                    // subject above it (U005, X148).
+                    TextEditor(text: $message).frame(minHeight: 180).padding(.horizontal, -5).accessibilityLabel("Viesti")
                 }
                 Section {
                     // Tap to add at the end of the message: quicker than typing the braces.

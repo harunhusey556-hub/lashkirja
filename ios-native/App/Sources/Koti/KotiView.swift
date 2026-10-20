@@ -181,7 +181,8 @@ private struct KotiContent: View {
     private func statusCard(_ d: Dashboard) -> some View {
         let blocking = max(0, (d.blockingTotal ?? 0) - (d.items.count - model.visibleItems.count))
         let status = Koti.monthStatus(done: d.events?.done ?? d.matching.matched,
-                                      total: d.events?.total ?? d.matching.matchable, blocking: blocking)
+                                      total: d.events?.total ?? d.matching.matchable, blocking: blocking,
+                                      atCurrentMonth: model.atCurrentMonth)
         return Card {
             NavigationLink(value: Route.monthClose(d.month)) {
                 HStack(alignment: .center, spacing: 14) {

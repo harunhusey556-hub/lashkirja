@@ -300,6 +300,17 @@ private func setup(_ json: String) throws -> Dashboard.Setup {
     #expect(all.progress == 1 && all.headline == "Kaikki kunnossa")
 }
 
+@Test func aPastMonthSaysWhatWasLeftOpenNotWhatIsLeftBeforeItsEnd() {
+    // M018: Syyskuu on 18.10. read "2 asiaa ennen kuun loppua", for a month that had ended (web kotiHeadline).
+    let past = Koti.monthStatus(done: 8, total: 9, blocking: 2, atCurrentMonth: false)
+    #expect(past.headline == "2 asiaa kesken")
+    #expect(past.progress == 8.0 / 9.0)
+    #expect(Koti.monthStatus(done: 0, total: 0, blocking: 1, atCurrentMonth: false).headline == "1 asia kesken")
+    #expect(Koti.monthStatus(done: 3, total: 3, blocking: 0, atCurrentMonth: false).headline == "Kaikki kunnossa")
+    // The month on screen keeps its words.
+    #expect(Koti.monthStatus(done: 8, total: 9, blocking: 2, atCurrentMonth: true).headline == "2 asiaa ennen kuun loppua")
+}
+
 // MARK: Greeting (web lib/koti-greeting.test.ts)
 
 @Test func greetingHasTheWebsHourBoundaries() {

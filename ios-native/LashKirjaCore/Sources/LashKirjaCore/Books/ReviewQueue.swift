@@ -26,6 +26,17 @@ public enum ReviewGroup: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// The line under the section's header, only where it says more than the header ("Odottaa
+    /// hyväksyntää · N") and the chips: `.other` only repeated the header, and once the chips show,
+    /// the chosen one names the source (M010). The rejected ones keep theirs: not in the books.
+    public func caption(chipsShown: Bool) -> String? {
+        switch self {
+        case .other: nil
+        case .email, .bankSales: chipsShown ? nil : description
+        case .rejected: description
+        }
+    }
+
     /// The pending group of a receipt (never `.rejected`).
     public static func of(_ receipt: Receipt) -> ReviewGroup {
         switch receipt.source {

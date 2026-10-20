@@ -379,14 +379,15 @@ struct CustomerFormSheet: View {
         NavigationStack {
             Form {
                 Section {
+                    // A name is not a word to correct: 'Testi Oy' came up underlined in red (U009).
                     TextField("Nimi", text: $draft.name)
-                        .textContentType(.organizationName).textInputAutocapitalization(.words)
+                        .textContentType(.organizationName).textInputAutocapitalization(.words).autocorrectionDisabled()
                         .focused($focus, equals: .name).submitLabel(.next).onSubmit { focus = .businessId }
                     TextField("Y-tunnus (valinnainen)", text: $draft.businessId)
                         .codeInput(.never)
                         .focused($focus, equals: .businessId).submitLabel(.next).onSubmit { focus = .contact }
                     TextField("Yhteyshenkilö (valinnainen)", text: $draft.contactPerson)
-                        .textContentType(.name).textInputAutocapitalization(.words)
+                        .textContentType(.name).textInputAutocapitalization(.words).autocorrectionDisabled()
                         .focused($focus, equals: .contact).submitLabel(.next).onSubmit { focus = .email }
                 }
                 Section {

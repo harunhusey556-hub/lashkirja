@@ -713,7 +713,8 @@ struct ReceiptEditSheet: View {
                     .listRowInsets(EdgeInsets())
                 }
                 Section {
-                    TextField("Myyjä", text: $form.vendor).textContentType(.organizationName)
+                    // A name is not a word to correct (U009).
+                    TextField("Myyjä", text: $form.vendor).textContentType(.organizationName).autocorrectionDisabled()
                     fieldError("vendor")
                     DatePicker("Päivä", selection: dateBinding, displayedComponents: .date)
                     fieldError("date")

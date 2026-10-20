@@ -33,6 +33,30 @@ import Foundation
     #expect(ReceiptSort.createdDesc.title == "Lisätty (uusin)")
 }
 
+@Test func anEmptyChipSaysWhatIsMissingAndOnlyASearchSaysNoMatch() {
+    // X043: Tulot (0) and Kohdistettu (0) said "Ei hakua vastaavia kuitteja." with nothing searched.
+    let plain: [ReceiptTab: String] = [
+        .all: "Ei kuitteja.", .tulo: "Ei tuloja.", .meno: "Ei menoja.", .linked: "Ei kohdistettuja kuitteja.",
+        .unlinked: "Ei kohdistamattomia kuitteja.", .laskut: "Ei laskuja.",
+    ]
+    for tab in ReceiptTab.allCases {
+        var q = ReceiptListQuery()
+        q.tab = tab
+        #expect(q.emptyText == plain[tab], "\(tab)")
+        // Anything that narrows the list (a search, a month, a category, a source, an amount, the
+        // VAT drill) makes it a no-match.
+        let narrowings: [(inout ReceiptListQuery) -> Void] = [
+            { $0.search = "kesko" }, { $0.month = "2026-10" }, { $0.category = "tarvikkeet" }, { $0.source = .ai },
+            { $0.minAmount = "10" }, { $0.maxAmount = "50" }, { $0.missingVat = true },
+        ]
+        for narrow in narrowings {
+            var narrowed = q
+            narrow(&narrowed)
+            #expect(narrowed.emptyText == (tab == .laskut ? "Ei hakua vastaavia laskuja." : "Ei hakua vastaavia kuitteja."), "\(tab)")
+        }
+    }
+}
+
 @Test func pageAppendDropsDuplicates() throws {
     func r(_ id: String) throws -> Receipt {
         try JSONDecoder().decode(Receipt.self, from: Data(#"{"id":"\#(id)","createdAt":"a","updatedAt":"b"}"#.utf8))

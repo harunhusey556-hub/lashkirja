@@ -1074,8 +1074,10 @@ struct SendInvoiceSheet: View {
                 }
                 TextField("Aihe", text: $subject)
                     .textInputAutocapitalization(.sentences)
+                // The text view's 5 pt line-fragment inset put the message right of the subject (G002).
                 TextEditor(text: $message)
                     .frame(minHeight: 160)
+                    .padding(.horizontal, -5)
                     .accessibilityLabel("Viesti")
                 Button { templateName = ""; askName = true } label: {
                     Label("Tallenna mallina", systemImage: "square.and.arrow.down")

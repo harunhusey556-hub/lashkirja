@@ -48,6 +48,8 @@ final class P0Tests: WalkTestCase {
         sleep(2)
         guard tap("Uusi malli") else { return }
         sleep(2); shot("c2-editor-clean"); dump(app, "c2-editor")
+        // X148 (P4): the message's text starts on the subject's left edge, not 5 pt right of it.
+        assertTextColumns("c2 Uusi malli")
         swipeSheetDown("Uusi malli"); sleep(2); shot("c3-clean-swipe")
         check("P0.4 clean template editor closes without asking", !discardDialog.exists && !app.buttons["Tallenna"].exists)
         guard tap("Uusi malli") else { return }
@@ -62,6 +64,48 @@ final class P0Tests: WalkTestCase {
         if app.buttons["Jatka muokkausta"].exists { app.buttons["Jatka muokkausta"].tap(); sleep(1) }
         if app.buttons["Peruuta"].exists { app.buttons["Peruuta"].tap(); sleep(1); shot("c5-dirty-peruuta")
             check("P0.4 dirty template Peruuta asks", discardDialog.exists) }
+
+        // U005 (P4): one control for a new template (the bar's +), and the swipe hint only under rows.
+        if discardDialog.exists { app.buttons["Hylkää muutokset"].firstMatch.tap(); taps += 1 }
+        XCTAssertTrue(app.navigationBars["Uusi malli"].waitForNonExistence(timeout: 10), "the template editor did not close")
+        let bar = app.navigationBars["Sähköpostimallit"]
+        let inList = app.buttons.matching(NSPredicate(format: "label == %@", "Uusi malli")).allElementsBoundByIndex
+            .filter { !bar.frame.contains(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) }
+        XCTAssertTrue(bar.buttons["Uusi malli"].exists, "Sähköpostimallit has no + in its bar")
+        XCTAssertTrue(inList.isEmpty, "Sähköpostimallit has a 'Uusi malli' of its own beside the bar's +: \(inList.map { $0.frame })")
+        let hint = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Pyyhkäise vasemmalle"))
+        let empty = app.staticTexts["Ei malleja vielä. Laskun lähetyksessä käytetään vakiotekstiä."]
+        if empty.waitForExistence(timeout: 10) {
+            shot("c6-empty-list")
+            XCTAssertEqual(hint.count, 0, "the swipe hint shows under an empty list")
+            // One template, so there is a row to swipe; it is deleted again before the test ends.
+            if makeTemplate("P0 C malli") {
+                XCTAssertTrue(hint.firstMatch.waitForExistence(timeout: 10), "no swipe hint under a template row")
+                shot("c7-one-row")
+                deleteTemplate("P0 C malli")
+                XCTAssertTrue(empty.waitForExistence(timeout: 10), "the template made here is still listed")
+            }
+        } else {
+            XCTAssertEqual(hint.count, 1, "no swipe hint under the templates")
+            note("INFO P0 C the list had templates already: the empty-list half was not checked")
+        }
+
+        // G002 (P4): the send sheet's message starts on its subject's left edge too.
+        backToSettings(from: "Sähköpostimallit")
+        closeSettings()
+        guard selectTab("Myynti"), tapLabel("label CONTAINS %@", "myöhässä") else { XCTFail("no overdue invoice on Myynti"); return }
+        let send = app.buttons["Lähetä"].firstMatch
+        if send.waitForExistence(timeout: 20) {
+            send.tap(); taps += 1
+        } else {
+            app.buttons["Toiminnot"].firstMatch.tap(); taps += 1
+            app.buttons["Lähetä sähköpostilla"].firstMatch.tap(); taps += 1
+        }
+        let sheet = app.navigationBars["Lähetä lasku"]
+        guard sheet.waitForExistence(timeout: 10) else { dump(app, "c8-no-send-sheet"); XCTFail("the invoice's send sheet did not open"); return }
+        assertTextColumns("c8 Lähetä lasku")
+        shot("c8-send-sheet")
+        sheet.buttons["Peruuta"].tap(); taps += 1
     }
 
     // P0.4 #1 + #3: customer form Return chain and keyboard Valmis.
@@ -225,6 +269,65 @@ final class P0Tests: WalkTestCase {
         assertWarmCanvas(app, under: app.navigationBars["Uusi kuitti"], "Uusi kuitti, lomake")
     }
 
+    // M053 M054 (B7): Laitteet and Sähköpostimallit land on their content, online and offline. Each
+    // slid in a spinner that its list replaced 0.45–0.9 s later, and offline it was a failure page.
+    // Asserted.
+    func testJ_SettingsPushesPaintAtOnce() {
+        // Top to bottom of Asetukset: tapLabel scrolls down only, so each round opens the sheet anew.
+        let screens: [(title: String, content: XCUIElement)] = [
+            ("Sähköpostimallit", app.staticTexts["Paikkamerkit"].firstMatch),
+            ("Laitteet", app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "(tämä laite)")).firstMatch),
+        ]
+        // The first visit only fills what the next ones paint: on CI the demo API's first answer for a
+        // route can come after the push (a cold route), the case of a first visit right after sign-in.
+        openSettings()
+        for screen in screens {
+            guard tap(screen.title) else { XCTFail("Asetukset has no \(screen.title)"); continue }
+            XCTAssertTrue(screen.content.waitForExistence(timeout: 30), "\(screen.title) never showed its content")
+            backToSettings(from: screen.title)
+        }
+        closeSettings()
+        for online in [true, false] {
+            if !online { goOffline() }
+            openSettings()
+            for screen in screens {
+                guard tap(screen.title) else { XCTFail("Asetukset has no \(screen.title)"); continue }
+                assertPaintedAtOnce(screen.title, screen.content, online: online)
+                backToSettings(from: screen.title)
+            }
+            closeSettings()
+        }
+        goOnline()
+    }
+
+    // U004 X146 (P4): a field's name stays in its row once typed into. The placeholder was the only
+    // name and went with the first character: a filled profile read as bare values, and three rows of
+    // dots in Vaihda salasana read alike. Asserted.
+    func testK_SellerFieldsKeepLabels() {
+        openSettings()
+        // Top to bottom of Asetukset: tapLabel scrolls down only, and a pop keeps the list's offset.
+        if tap("Laskuttajan tiedot") {
+            for name in ["Yrityksen nimi", "Y-tunnus", "Puhelin", "Katuosoite", "Postinumero", "Kaupunki", "IBAN", "BIC", "Maksuehdot laskulla"] {
+                assertNameStays(name, in: app.textFields)
+            }
+            shot("k1-seller-typed")
+            leaveDiscarding("Laskuttajan tiedot")
+        } else { XCTFail("Asetukset has no Laskuttajan tiedot") }
+        if tap("Sähköpostimallit"), tap("Uusi malli") {
+            for name in ["Mallin nimi", "Aihe"] { assertNameStays(name, in: app.textFields) }
+            shot("k2-template-typed")
+            closeSheet("Uusi malli")
+            backToSettings(from: "Sähköpostimallit")
+        } else { XCTFail("Sähköpostimallit > Uusi malli did not open") }
+        if tap("Vaihda salasana") {
+            for name in ["Nykyinen salasana", "Uusi salasana", "Uusi salasana uudelleen"] {
+                assertNameStays(name, in: app.secureTextFields)
+            }
+            shot("k3-password-typed")
+            leaveDiscarding("Vaihda salasana")
+        } else { XCTFail("Asetukset has no Vaihda salasana") }
+    }
+
     // X123 X124: a refused sign-in is said under the password, as the web says it, without moving the
     // fields the owner is about to retype (a card above the form pushed them down about 81 pt), and
     // the words go once the password is edited. The e-mail placeholder is the quiet grey of the
@@ -336,6 +439,96 @@ final class P0Tests: WalkTestCase {
             usleep(250_000)
         } while Date() < deadline
         return last ?? fields.map { _ -> RGB? in nil }
+    }
+
+    /// X148 G002: where the subject's text and the message's text start. A text field draws its text
+    /// from its frame's edge; a text view 5 pt in, its line-fragment padding, which the editor's `-5`
+    /// padding takes back.
+    private func assertTextColumns(_ step: String, file: StaticString = #filePath, line: UInt = #line) {
+        let subject = app.textFields.matching(NSPredicate(format: "label == %@ OR placeholderValue == %@", "Aihe", "Aihe")).firstMatch
+        let message = app.textViews["Viesti"].firstMatch
+        guard subject.waitForExistence(timeout: 20), message.waitForExistence(timeout: 5) else {
+            dump(app, "p0-columns"); XCTFail("\(step): no Aihe field or no Viesti editor", file: file, line: line); return
+        }
+        waitStill(message)
+        let subjectText = subject.frame.minX, messageText = message.frame.minX + 5
+        note("INFO P0 \(step): Aihe \(subject.frame), Viesti \(message.frame)")
+        XCTAssertLessThanOrEqual(abs(subjectText - messageText), 1,
+                                 "\(step): the subject's text starts at x \(subjectText), the message's at \(messageText)", file: file, line: line)
+    }
+
+    /// Uusi malli with `name` and the editor's own subject and message, saved; true once its row is listed.
+    private func makeTemplate(_ name: String) -> Bool {
+        guard tap("Uusi malli") else { XCTFail("no Uusi malli"); return false }
+        let field = app.textFields.matching(NSPredicate(format: "label == %@", "Mallin nimi")).firstMatch
+        guard field.waitForExistence(timeout: 10) else { XCTFail("Uusi malli has no Mallin nimi"); return false }
+        type(field, name)
+        app.navigationBars["Uusi malli"].buttons["Tallenna"].tap(); taps += 1
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+        let listed = row.waitForExistence(timeout: 20)
+        XCTAssertTrue(listed, "the saved template is not listed")
+        return listed
+    }
+
+    /// Swipes the template's row and deletes it.
+    private func deleteTemplate(_ name: String) {
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+        guard row.exists else { XCTFail("no row for \(name)"); return }
+        row.swipeLeft()
+        let delete = app.buttons["Poista"].firstMatch
+        // A long swipe deletes at once (the first action's full swipe).
+        if delete.waitForExistence(timeout: 5) { delete.tap(); taps += 1 } else if row.exists { XCTFail("swiping \(name) shows no Poista") }
+    }
+
+    /// M053 M054: as the push lands, the content is there, with no spinner and no failure page; offline,
+    /// once the refresh has failed, it is still there under the banner.
+    private func assertPaintedAtOnce(_ title: String, _ content: XCUIElement, online: Bool,
+                                     file: StaticString = #filePath, line: UInt = #line) {
+        let step = "\(title) \(online ? "online" : "offline")"
+        let bar = app.navigationBars[title]
+        guard bar.waitForExistence(timeout: 10) else { XCTFail("\(step): did not open", file: file, line: line); return }
+        // Read at once: a spinner now is what the owner saw slide in.
+        let spinner = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Ladataan")).firstMatch
+        let failurePage = app.buttons["Yritä uudelleen"].firstMatch
+        let painted = content.exists, loading = spinner.exists, failed = failurePage.exists
+        shot("j-\(title)-\(online ? "online" : "offline")")
+        note("INFO P0 J \(step): content \(painted), spinner \(loading), failure page \(failed)")
+        XCTAssertTrue(painted, "\(step): the push landed without its content", file: file, line: line)
+        XCTAssertFalse(loading, "\(step): the push landed on a spinner", file: file, line: line)
+        XCTAssertFalse(failed, "\(step): the push landed on a failure page", file: file, line: line)
+        guard !online else { return }
+        let banner = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                                                           "Ei verkkoyhteyttä", "Palvelimeen ei saada yhteyttä", "Palvelin ei vastannut ajoissa")).firstMatch
+        if !banner.waitForExistence(timeout: 20) { note("INFO P0 J \(step): no refresh banner within 20 s") }
+        XCTAssertTrue(content.exists, "\(step): the failed refresh took the content away", file: file, line: line)
+        XCTAssertFalse(failurePage.exists, "\(step): the failed refresh replaced the content with a failure page", file: file, line: line)
+    }
+
+    /// Types into the field named `name`, then reads its name in its row: beside the value, or over it.
+    private func assertNameStays(_ name: String, in fields: XCUIElementQuery, file: StaticString = #filePath, line: UInt = #line) {
+        let field = fields.matching(NSPredicate(format: "label == %@", name)).firstMatch
+        guard reveal(field) else { dump(app, "k-no-field"); XCTFail("no field named \(name)", file: file, line: line); return }
+        type(field, "1")
+        if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap(); taps += 1 }
+        let label = app.staticTexts.matching(NSPredicate(format: "label == %@", name)).firstMatch
+        let inRow = label.exists && field.exists && label.frame.maxY > field.frame.minY - 24 && label.frame.minY < field.frame.maxY
+        note("INFO P0 K \(name): field \(field.frame), name \(label.exists ? "\(label.frame)" : "not drawn")")
+        XCTAssertTrue(inRow, "\(name): typed into, its row no longer says '\(name)'", file: file, line: line)
+    }
+
+    /// Back from a pushed form typed into: its back button asks, and the changes are let go.
+    private func leaveDiscarding(_ title: String) {
+        let back = app.buttons["Takaisin"].firstMatch
+        if back.exists { back.tap() } else { app.navigationBars[title].buttons.firstMatch.tap() }
+        taps += 1
+        if discardDialog.waitForExistence(timeout: 5) { app.buttons["Hylkää muutokset"].firstMatch.tap(); taps += 1 }
+        XCTAssertTrue(app.navigationBars["Asetukset"].waitForExistence(timeout: 10), "\(title): did not return to Asetukset")
+    }
+
+    /// The Asetukset sheet's Valmis, back to the tab under it.
+    private func closeSettings() {
+        app.navigationBars["Asetukset"].buttons["Valmis"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(app.navigationBars["Asetukset"].waitForNonExistence(timeout: 10), "Asetukset did not close")
     }
 
     /// Back from a screen pushed inside the Asetukset sheet, by its bar's back button.
