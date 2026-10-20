@@ -165,6 +165,28 @@ private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
     #expect(list.candidates.last?.id == "t600")
 }
 
+// X162: an overdue 139,00 € bill was offered Tokmanni 8,33 € and Lidl 16,10 € as "best matches",
+// each explained only by "maksettu eräpäivänä". The server now sends such rows without reasons.
+@Test func purchaseBankCandidatesSayWhenNoRowMatches() throws {
+    let dated = try decode(PurchaseBankCandidateList.self, """
+    {"candidates":[{"transactionId":"t1","date":"2026-10-16","counterparty":"Tokmanni 4","amount":8.33,"score":0,"reasons":[]},
+      {"transactionId":"t2","date":"2026-10-16","counterparty":"Lidl 11","amount":16.1,"score":0,"reasons":[]}],"total":2,"months":[]}
+    """)
+    #expect(dated.matchesNothing)
+    #expect(dated.candidates.allSatisfy { $0.why == nil })
+
+    let matched = try decode(PurchaseBankCandidateList.self, """
+    {"candidates":[{"transactionId":"t0","date":"2026-09-28","counterparty":"Ripsitukku Oy","amount":139,"score":0.85,
+       "reasons":["summa sama","nimi vastaa"]},
+      {"transactionId":"t1","date":"2026-10-16","counterparty":"Tokmanni 4","amount":8.33,"score":0,"reasons":[]}],"total":2,"months":[]}
+    """)
+    #expect(!matched.matchesNothing)
+
+    // No rows at all is the empty state's to say, not the footer's.
+    let empty = try decode(PurchaseBankCandidateList.self, #"{"candidates":[],"total":0,"months":[]}"#)
+    #expect(!empty.matchesNothing)
+}
+
 @Test func purchaseInvoiceCandidatesPageToo() throws {
     func invoice(_ id: Int) -> String {
         #"{"invoice":{"id":"pi\#(id)","supplierName":"T","issueDate":"2026-01-10","dueDate":"2026-01-24","gross":1,"open":1},"score":0,"reasons":[]}"#
