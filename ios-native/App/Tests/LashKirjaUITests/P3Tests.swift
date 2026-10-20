@@ -132,9 +132,13 @@ final class P3Tests: WalkTestCase {
         shot("p3b-copy-offline-pill")
         assertBannerClear("the invoice", of: [("the title", invoiceBar.staticTexts[invoiceBar.identifier].firstMatch),
                                               ("Toiminnot", invoiceBar.buttons["Toiminnot"].firstMatch)])
+        // The pill's own words are listed under its combined element too, so its "Ei verkkoyhteyttä"
+        // matched as the failure (UI suite 39488072765: a 134 pt text inside the 242 pt pill). The
+        // failure is a text outside the pill's frame.
         let toast = app.staticTexts.matching(NSPredicate(format: "(label BEGINSWITH %@ OR label BEGINSWITH %@) AND identifier != %@",
-                                                         "Yhteys katkesi", "Ei verkkoyhteyttä", "offline-banner")).firstMatch
-        if banner.exists && toast.exists {
+                                                         "Yhteys katkesi", "Ei verkkoyhteyttä", "offline-banner"))
+            .allElementsBoundByIndex.first { $0.exists && !banner.frame.contains($0.frame) }
+        if banner.exists, let toast {
             XCTAssertFalse(banner.frame.intersects(toast.frame), "the offline pill \(banner.frame) covers the failure \(toast.frame): \(toast.label)")
         }
         goOnline(); sleep(10)
