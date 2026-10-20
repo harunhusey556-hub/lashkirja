@@ -172,12 +172,16 @@ struct WorkQueueView: View {
                             .buttonStyle(.pressable)
                         }
                     }
+                    .padding(.horizontal, ChipRow.inset)
                 }
+                .chipRowScroll()
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             } header: {
-                Text("Korjattavat")
+                // The section's margins hold its header too: it keeps the other sections' line.
+                Text("Korjattavat").padding(.horizontal, ChipRow.inset)
             }
+            .chipRowSection()
             Section {
                 let visible = JobsQueue.filter(items, kind: filter)
                 if visible.isEmpty {

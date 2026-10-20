@@ -1,5 +1,6 @@
 import { ListRow, Section } from "@/components/ds";
 import { tintedButtonClass } from "@/components/control-styles";
+import { Button } from "@/components/ui";
 import { formatDate, formatDayMonth, formatEur } from "@/lib/format";
 
 /** An open ostolasku as GET /api/purchase-invoices returns it (only what this page reads). */
@@ -51,6 +52,37 @@ export function purchaseMatchRows(invoices: OpenPurchase[], suggestions: Payment
         Number(Boolean(b.suggestion)) - Number(Boolean(a.suggestion)) ||
         a.invoice.dueDate.localeCompare(b.invoice.dueDate)
     );
+}
+
+/**
+ * "Hyväksy kaikki varmat (n)", only while sure proposals wait: shown with nothing to accept, it read
+ * as the page's next step and did nothing (X168).
+ */
+export function AcceptAllSureButton({
+  sureCount,
+  busy,
+  disabled,
+  onClick,
+}: {
+  sureCount: number;
+  busy: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  if (sureCount <= 0) return null;
+  return (
+    <Button
+      type="button"
+      variant="primary"
+      className="w-full"
+      onClick={onClick}
+      busy={busy}
+      busyLabel="Kohdistetaan…"
+      disabled={disabled}
+    >
+      {`Hyväksy kaikki varmat (${sureCount})`}
+    </Button>
+  );
 }
 
 function invoiceLine(invoice: OpenPurchase): string {
@@ -134,7 +166,7 @@ export function PurchaseMatchList({
           {waiting.map(({ invoice }) => (
             <ListRow
               key={invoice.id}
-              // That ostolasku itself (its "Kohdista pankkitapahtumaan"), not the list to search again.
+              // That ostolasku itself (its "Kohdista pankkiin"), not the list to search again.
               href={`/kirjanpito/ostolaskut?id=${encodeURIComponent(invoice.id)}`}
               title={invoice.supplierName}
               amount={formatEur(invoice.open)}

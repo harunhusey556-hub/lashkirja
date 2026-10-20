@@ -168,16 +168,17 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
         creditNotes = (try? c.decodeIfPresent([CreditNoteRef].self, forKey: .creditNotes)) ?? []
     }
 
-    /// The list row's second line, as the web's `rowSecondary`: "A-12 · eräpäivä 15.9. · avoinna 100,00 €".
+    /// The list row's second line: "A-12 · eräpäivä 15.9.2026 · avoinna 100,00 €". The web's
+    /// `rowSecondary` writes "15.9."; here the day carries its year as Myynti's rows do, and an
+    /// overdue bill is said so by its badge alone (X133, X134).
     public var rowSecondary: String {
-        // A credit note has no due date: "A-12 · Hyvityslasku 3.10.".
+        // A credit note has no due date: "A-12 · Hyvityslasku 3.10.2026".
         if isCreditNote {
-            let date = "Hyvityslasku \(Self.dayMonth(issueDate))"
+            let date = "Hyvityslasku \(APIDate.displayDay(issueDate))"
             if let number = invoiceNumber, !number.isEmpty { return "\(number) · \(date)" }
             return date
         }
-        let phrase = displayStatus == .overdue ? "myöhässä, eräpäivä" : "eräpäivä"
-        let dateText = "\(phrase) \(Self.dayMonth(dueDate))"
+        let dateText = "eräpäivä \(APIDate.displayDay(dueDate))"
         let base: String
         if let number = invoiceNumber, !number.isEmpty {
             base = "\(number) · \(dateText)"
@@ -187,13 +188,6 @@ public struct PurchaseInvoice: Decodable, Sendable, Identifiable, Hashable {
         let partiallyPaid = paid > 0 && open > 0
         if credited > 0 && displayStatus != .credited { return "\(base) · hyvitetty \(Money.format(credited)), avoinna \(Money.format(open))" }
         return partiallyPaid ? "\(base) · avoinna \(Money.format(open))" : base
-    }
-
-    /// "15.9." from "2026-09-15".
-    static func dayMonth(_ day: String) -> String {
-        let parts = day.prefix(10).split(separator: "-")
-        guard parts.count == 3, let month = Int(parts[1]), let dayNumber = Int(parts[2]) else { return "–" }
-        return "\(dayNumber).\(month)."
     }
 
     // Server rules (`updatePurchaseInvoice`, `deletePurchaseInvoice`).
