@@ -527,7 +527,16 @@ final class OwnerScreensTests: WalkTestCase {
         guard tapLabel("label CONTAINS %@", "ABC Prisma Kotka") else {
             capture("g0-no-row"); XCTFail("seed receipt ABC Prisma Kotka is not listed"); return
         }
-        let actions = app.buttons["Toiminnot"].firstMatch
+        // The receipt's own Toiminnot, in its page's bar: a tap while Kuitit still moved stayed on the
+        // list, whose Toiminnot (Suodata, Valitse kuitteja) has no Muokkaa (UI suite 39384548360).
+        let page = app.navigationBars["Kuitti"]
+        if !page.waitForExistence(timeout: 8) {
+            capture("g0-no-push")
+            guard tapLabel("label CONTAINS %@", "ABC Prisma Kotka"), page.waitForExistence(timeout: 15) else {
+                capture("g0-no-detail"); XCTFail("ABC Prisma Kotka did not open its page"); return
+            }
+        }
+        let actions = page.buttons["Toiminnot"].firstMatch
         guard actions.waitForExistence(timeout: 20) else { capture("g0-no-detail"); XCTFail("the receipt did not load"); return }
         actions.tap()
         let edit = app.buttons["Muokkaa"].firstMatch
