@@ -74,6 +74,9 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
     public var maxAmount = ""
     /// Only receipts with no VAT breakdown (Raportit's "Ilman ALV-erittelyä"); never remembered.
     public var missingVat = false
+    /// A figure's list: every document the figure counts, the bills filed as ostolaskut too (no
+    /// `kind`). Raportit's Menot counted 35 and its list showed 34 kuittia (X079); never remembered.
+    public var drill = false
 
     public init() {}
 
@@ -84,6 +87,7 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
         query.tab = tab
         query.category = category
         query.missingVat = missingVat
+        query.drill = true
         return query
     }
 
@@ -111,10 +115,11 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
 
     private var trimmedSearch: String { String(search.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100)) }
 
-    /// The month/search/category scope shared by the list and the tab counts. The counts always
-    /// count the kuitit (`kind=receipt`); the Laskut chip's own number comes back in the same answer.
+    /// The month/search/category scope shared by the list and the tab counts. Kuitit counts the
+    /// kuitit (`kind=receipt`), a drill every document; the Laskut chip's own number comes back in
+    /// the same answer.
     public func countsQuery() -> [String: String] {
-        var q: [String: String] = ["kind": "receipt"]
+        var q: [String: String] = drill ? [:] : ["kind": "receipt"]
         if !trimmedSearch.isEmpty { q["q"] = trimmedSearch }
         if !month.isEmpty { q["month"] = month }
         if !category.isEmpty { q["category"] = category }
@@ -323,6 +328,8 @@ public struct ReceiptRowText: Sendable, Equatable {
     public let amount: Decimal?
     public let isIncome: Bool
     public let linked: Bool
+    /// "Ostolasku" on a bill filed as one, nil on a kuitti.
+    public let kindTag: String?
 
     public init(_ receipt: Receipt) {
         title = receipt.title
@@ -332,5 +339,7 @@ public struct ReceiptRowText: Sendable, Equatable {
         isIncome = receipt.isIncome
         // W27: a bill paid from the bank through its ostolasku shows the link mark too.
         linked = receipt.isBankMatched
+        // A figure's list (`drill`) shows the bills among the kuitit, so a bill says what it is (X079).
+        kindTag = receipt.kind == .invoice ? ReceiptDocumentKind.invoice.title : nil
     }
 }

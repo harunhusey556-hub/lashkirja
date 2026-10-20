@@ -510,8 +510,10 @@ final class MotionAuditTests: WalkTestCase {
         }
         sleep(2)
         // A figure of the report, looked for in its list: over the whole app "Myynti" found the tab
-        // bar's button, and the step measured a tab switch instead of a drill-down.
-        if let drill = find("label BEGINSWITH %@", "Menot", scrolls: 2, in: app.collectionViews.firstMatch) {
+        // bar's button, and the step measured a tab switch instead of a drill-down. Its link (a
+        // button, 9): with Kuukausittain first (B8) the chart's Menot bar came first and the tap
+        // picked a month (gate run 39334500321).
+        if let drill = find("elementType == 9 AND label BEGINSWITH %@", "Menot", scrolls: 2, in: app.collectionViews.firstMatch) {
             step("raportit-drill-open", from: "Raportit", to: "drill-down", seconds: 5,
                  // Raportit's own bar covered: on Raportit's toolbar buttons 'a back button' was true.
                  reached: { self.gone(self.app.navigationBars["Raportit"])() && self.app.tabBars.buttons["Raportit"].isSelected },
