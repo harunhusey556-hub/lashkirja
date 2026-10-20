@@ -622,24 +622,15 @@ struct BankAccountDetailSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Text(BankAccountText.subtitle(account)).font(.caption).foregroundStyle(Theme.ink2)
+                    if let caption = BankAccountText.detailCaption(account) {
+                        Text(caption).font(.caption).foregroundStyle(Theme.ink2)
+                            .accessibilityIdentifier("bank-account-caption")
+                    }
                     if let iban = account.iban {
                         LabeledContent("IBAN") { Text(BankIBAN.format(iban)).textSelection(.enabled) }
                     }
                     if let balance = account.balance {
                         LabeledContent("Saldo") { MoneyText(amount: balance).fontWeight(.semibold) }
-                    }
-                }
-                Section {
-                    Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
-                    if account.isDefault != true && account.archivedAt == nil {
-                        Button { Task { await patch(isDefault: true) } } label: { Label("Aseta oletukseksi", systemImage: "star") }
-                    }
-                    if account.archivedAt != nil {
-                        Button { Task { await patch(archived: false) } } label: { Label("Palauta käyttöön", systemImage: "arrow.uturn.backward") }
-                    }
-                    if !(account.archivedAt != nil && (account.statementCount ?? 0) > 0) {
-                        Button(role: .destructive) { confirmRemove = true } label: { Label("Poista", systemImage: "trash") }
                     }
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
@@ -680,7 +671,13 @@ struct BankAccountDetailSheet: View {
             .formKeyboard()
             .navigationTitle(account.name)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Valmis") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Valmis") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu { actions } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Toiminnot")
+                }
+            }
             .disabled(busy)
             .sheet(isPresented: $editing) {
                 BankAccountFormSheet(account: account) { message in
@@ -702,6 +699,21 @@ struct BankAccountDetailSheet: View {
             .task { await load() }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// Toiminnot (X093): Muokkaa and a red Poista were two plain rows, one above the other, in the
+    /// body. Poista still asks first.
+    @ViewBuilder private var actions: some View {
+        Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
+        if account.isDefault != true && account.archivedAt == nil {
+            Button { Task { await patch(isDefault: true) } } label: { Label("Aseta oletukseksi", systemImage: "star") }
+        }
+        if account.archivedAt != nil {
+            Button { Task { await patch(archived: false) } } label: { Label("Palauta käyttöön", systemImage: "arrow.uturn.backward") }
+        }
+        if !(account.archivedAt != nil && (account.statementCount ?? 0) > 0) {
+            Button(role: .destructive) { confirmRemove = true } label: { Label("Poista", systemImage: "trash") }
+        }
     }
 
     private func excludedNote(_ r: BankRollforward) -> String? {

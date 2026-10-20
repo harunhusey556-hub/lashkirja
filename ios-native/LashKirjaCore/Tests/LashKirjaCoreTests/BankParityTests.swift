@@ -214,6 +214,25 @@ private func encodedObject<T: Encodable>(_ value: T) throws -> [String: Any] {
     #expect(BankAccountText.subtitle(a) == "Ei IBANia · Oletus · 1 kk ei täsmää · Saldo täsmää Elokuu 2026 · 2 tiliotetta")
 }
 
+/// X093 (N9): the account sheet's caption stood over its IBAN row repeating the list row word for
+/// word, masked IBAN included. Without an IBAN row "Ei IBANia" still says so.
+@Test func accountSheetCaptionLeavesTheIbanToItsRow() throws {
+    let a = try decode(BankAccount.self, #"{"id":"a","name":"Käyttötili","bankName":"Nordea","iban":"FI2112345600000785","bic":null,"currency":"EUR","openingBalance":2500,"openingDate":"2026-06-01","isDefault":true,"archivedAt":null,"currentBalance":2410,"statementCount":4,"mismatchCount":1,"lastReconciledMonth":null}"#)
+    #expect(BankAccountText.subtitle(a) == "Nordea · FI•••• 0785 · Oletus · 1 kk ei täsmää · 4 tiliotetta")
+    #expect(BankAccountText.detailCaption(a) == "Nordea · Oletus · 1 kk ei täsmää · 4 tiliotetta")
+
+    let bare = try decode(BankAccount.self, #"{"id":"b","name":"Tili","bankName":null,"iban":"FI2112345600000785","currency":"EUR"}"#)
+    #expect(BankAccountText.subtitle(bare) == "FI•••• 0785")
+    #expect(BankAccountText.detailCaption(bare) == nil)
+
+    let usd = try decode(BankAccount.self, #"{"id":"c","name":"Dollaritili","bankName":null,"iban":"FI2112345600000785","currency":"USD","statementCount":1}"#)
+    #expect(BankAccountText.detailCaption(usd) == "USD · 1 tiliote")
+
+    let cash = try decode(BankAccount.self, #"{"id":"d","name":"Kassa","bankName":null,"iban":null,"currency":"EUR","statementCount":0}"#)
+    #expect(BankAccountText.detailCaption(cash) == BankAccountText.subtitle(cash))
+    #expect(BankAccountText.detailCaption(cash) == "Ei IBANia · 0 tiliotetta")
+}
+
 @Test func accountRemovalCopy() throws {
     let archived = try decode(BankAccountRemoval.self, #"{"ok":true,"deleted":false,"archived":true,"statementCount":3}"#)
     #expect(archived.message == "Tilillä on 3 tiliotetta, joten se arkistoitiin poiston sijaan.")
