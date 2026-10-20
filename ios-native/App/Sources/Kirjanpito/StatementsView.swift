@@ -118,6 +118,8 @@ struct StatementsView: View {
             statements.fail(error)
         }
         if let overview {
+            // Pankkiyhteys ja tilit, linked below, opens on it (its `init`).
+            app.rememberPainted(overview, "/api/bank-accounts")
             // Accounts a tiliote can be imported to: the ones in use. Keep what was picked.
             let usable = overview.accounts.filter { $0.archivedAt == nil }
             accounts = usable

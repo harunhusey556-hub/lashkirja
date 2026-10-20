@@ -83,6 +83,15 @@ enum UITestHooks {
             }
         }
     }
+
+    static let statementFixtureName = "testitiliote.csv"
+
+    /// A bank statement for Lisää's import, since a test cannot pick a file in the system's picker:
+    /// one expense on `day` (the Helsinki day, "YYYY-MM-DD"). A fresh counterparty each time, as the
+    /// server keeps a day, an amount and a counterparty once and refuses a file of rows it has.
+    static func fixtureStatement(day: String) -> Data {
+        Data("Kirjauspäivä;Summa;Saaja/Maksaja;Viesti\n\(day);-3,17;Tiliotetesti \(UUID().uuidString.prefix(4));Testitiliote\n".utf8)
+    }
 }
 
 #if DEBUG || LK_UITEST_HOOKS

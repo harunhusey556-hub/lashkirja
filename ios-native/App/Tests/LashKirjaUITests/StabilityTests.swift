@@ -146,7 +146,8 @@ final class StabilityTests: WalkTestCase {
         tab("Lisää"); sleep(1)
         XCTAssertTrue(tap("Lisää tiedosto"), "Lisää tiedosto missing from the + sheet")
         sleep(2)
-        XCTAssertTrue(app.navigationBars["Uusi kuitti"].waitForExistence(timeout: 10), "receipt page did not open")
+        // X140 (N7): the page is named by the row that opened it.
+        XCTAssertTrue(app.navigationBars["Lisää tiedosto"].waitForExistence(timeout: 10), "receipt page did not open")
         XCTAssertTrue(app.buttons["Valitse kuvista"].exists || app.staticTexts["Valitse kuvista"].exists, "picker buttons missing")
         shot("stability-lisaa-kuitti")
         tap("Peruuta"); sleep(1)
@@ -593,10 +594,17 @@ final class StabilityTests: WalkTestCase {
         XCTAssertEqual(chips.frame.minY, before, accuracy: 1, "the chips moved when picking ended")
         backToBooks("Kuitit")
 
-        // Ostolaskut: the CI seed's rent bill, filed as an ostolasku.
+        // Ostolaskut: the CI seed's rent bill, filed as an ostolasku. Valitse is in Toiminnot from
+        // the first frame (B6) and picks once the bills are in, which the Toistuvat row's count comes with.
         openHubRow("Ostolaskut")
-        let pick = app.navigationBars["Ostolaskut"].buttons["Valitse"].firstMatch
-        guard pick.waitForExistence(timeout: 15) else { dump(app, "stability-14-ostolaskut"); XCTFail("Ostolaskut has no Valitse"); return }
+        let purchases = app.navigationBars["Ostolaskut"]
+        let purchaseActions = purchases.buttons["Toiminnot"].firstMatch
+        guard purchaseActions.waitForExistence(timeout: 15), purchasesLoaded(under: purchases) else {
+            dump(app, "stability-14-ostolaskut"); XCTFail("Ostolaskut has no Toiminnot, or its bills did not arrive"); return
+        }
+        purchaseActions.tap(); taps += 1
+        let pick = app.buttons["Valitse"].firstMatch
+        guard pick.waitForExistence(timeout: 5), pick.isEnabled else { dump(app, "stability-14-ostolaskut"); XCTFail("Ostolaskut has no Valitse"); return }
         pick.tap(); taps += 1
         guard tapLabel("label CONTAINS %@", "Kiinteistö Oy Kauppakatu 1") else {
             dump(app, "stability-14-ostolaskut-no-row"); XCTFail("Ostolaskut: no Kiinteistö Oy Kauppakatu 1 row to pick"); return
@@ -786,6 +794,127 @@ final class StabilityTests: WalkTestCase {
         app.scrollViews.matching(identifier: "purchase-chips").firstMatch.buttons.element(boundBy: 0).tap(); taps += 1
     }
 
+    /// M072 M074 (B6): Ostolaskut's bar holds '+' and Toiminnot from the push to the settled page. It
+    /// held Valitse, which came with the bills and moved the bar, and a repeat icon that opened the
+    /// screen the 'Toistuvat ostolaskut' row opens; that row came with the list and pushed it down.
+    /// Toiminnot holds Valitse and 'Hae ostolaskujen maksut pankista', which is no longer a row.
+    func test28_PurchasesBarIsFixed() {
+        openHubRow("Ostolaskut")
+        let bar = app.navigationBars["Ostolaskut"]
+        // At push, read first: the row is in the list (under the bar), not a bar item.
+        let recurring = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Toistuvat ostolaskut"))
+        let rowAtPush = recurring.allElementsBoundByIndex.contains { $0.frame.minY >= bar.frame.maxY - 1 }
+        assertPurchasesBar(bar, "at push")
+        XCTAssertTrue(rowAtPush, "at push: no Toistuvat ostolaskut row in the list")
+        guard purchasesLoaded(under: bar) else {
+            dump(app, "stability-28-not-loaded"); XCTFail("the Toistuvat ostolaskut row never showed its count"); return
+        }
+        assertPurchasesBar(bar, "after the load")
+        shot("stability-ostolaskut-bar")
+        XCTAssertFalse(app.buttons["Hae ostolaskujen maksut pankista"].exists, "the list still has its own Hae ostolaskujen maksut pankista row")
+        bar.buttons["Toiminnot"].firstMatch.tap(); taps += 1
+        let valitse = app.buttons["Valitse"].firstMatch
+        XCTAssertTrue(valitse.waitForExistence(timeout: 5) && valitse.isHittable, "Toiminnot has no Valitse")
+        XCTAssertTrue(valitse.isEnabled, "Valitse is off with the bills in")
+        XCTAssertTrue(app.buttons["Hae ostolaskujen maksut pankista"].firstMatch.isHittable, "Toiminnot has no Hae ostolaskujen maksut pankista")
+        dump(app, "stability-28-menu")
+    }
+
+    /// M071 (B6): Pankkiyhteys ja tilit opens in its final shape. It opened on a spinner, and 'Saldo
+    /// yhteensä' and 'Kirjanpidon tilit' came in a beat later and pushed the page down 226 pt: too
+    /// soon for a look from here, so the app says what its first frame was built from (`-LKUITest`).
+    /// The first visit may draw the greyed shape; the second opens on what the first painted.
+    func test29_BankAccountsFirstFrame() {
+        app.terminate()
+        app.launchArguments.append("-LKUITest")
+        launchSignedIn()
+        dismissSystemPrompts()
+        openHubRow("Pankki")
+        guard let first = openBankAccounts(1) else { return }
+        XCTAssertTrue(["valmis", "paikka"].contains(first), "visit 1: the first frame did not show Saldo yhteensä (\(first))")
+        guard let settled = assertTotalHolds(1) else { return }
+        shot("stability-pankkiyhteys")
+        app.navigationBars["Pankkiyhteys ja tilit"].buttons["BackButton"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(app.navigationBars["Pankki"].waitForExistence(timeout: 10), "Back did not return to Pankki")
+        guard let second = openBankAccounts(2) else { return }
+        XCTAssertEqual(second, "valmis", "visit 2: the first frame was not the accounts and connections painted on visit 1")
+        _ = assertTotalHolds(2, opensAt: settled)
+    }
+
+    /// Ostolaskut's bar: '+' and Toiminnot beside Back, and no Toistuvat ostolaskut item (M074).
+    private func assertPurchasesBar(_ bar: XCUIElement, _ moment: String, file: StaticString = #filePath, line: UInt = #line) {
+        let items = barItems(bar).sorted()
+        check("ostolaskut bar \(moment): items \(items)", items == ["Toiminnot", "Uusi ostolasku"])
+        XCTAssertEqual(items, ["Toiminnot", "Uusi ostolasku"], "\(moment): the bar's items besides Back", file: file, line: line)
+        XCTAssertFalse(bar.buttons["Toistuvat ostolaskut"].exists, "\(moment): the bar has a Toistuvat ostolaskut item", file: file, line: line)
+    }
+
+    /// Ostolaskut's bills are in: the Toistuvat ostolaskut row, in the list under the bar, shows its
+    /// count, which comes in the same update as the bills.
+    private func purchasesLoaded(under bar: XCUIElement, timeout: TimeInterval = 20) -> Bool {
+        let counted = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Toistuvat ostolaskut, "))
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if counted.allElementsBoundByIndex.contains(where: { $0.frame.minY >= bar.frame.maxY - 1 }) { return true }
+            usleep(250_000)
+        } while Date() < deadline
+        return false
+    }
+
+    /// From Pankki: its first row, once it shows its figure and its consent line (both answers are then
+    /// in hand), opens Pankkiyhteys ja tilit. Returns what the screen's first frame was built from
+    /// ("valmis": the accounts and the connections; "paikka": the greyed shape).
+    private func openBankAccounts(_ visit: Int) -> String? {
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Saldo yhteensä")).firstMatch
+        // "Saldo yhteensä, 1 234,00 €, Tilit, saldot ja pankkiyhteys": the figure (or a dash), then the line.
+        let painted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label MATCHES %@", "Saldo yhteensä, .*(€|–), .+"), object: row)
+        guard row.waitForExistence(timeout: 15), XCTWaiter().wait(for: [painted], timeout: 20) == .completed else {
+            dump(app, "stability-29-pankki-\(visit)"); XCTFail("visit \(visit): Pankki's first row shows no figure and consent line (\(row.exists ? row.label : "no row"))"); return nil
+        }
+        row.tap(); taps += 1
+        guard app.navigationBars["Pankkiyhteys ja tilit"].waitForExistence(timeout: 10) else {
+            dump(app, "stability-29-no-screen-\(visit)"); XCTFail("visit \(visit): Pankkiyhteys ja tilit did not open"); return nil
+        }
+        let opening = app.descendants(matching: .any).matching(identifier: "bank-accounts-opening").firstMatch
+        guard opening.waitForExistence(timeout: 5) else {
+            dump(app, "stability-29-no-marker-\(visit)")
+            XCTFail("visit \(visit): the screen did not say what its first frame was (a Debug build launched with -LKUITest?)"); return nil
+        }
+        note("INFO stability 29 visit \(visit): first frame \(opening.label)")
+        return opening.label
+    }
+
+    /// Saldo yhteensä on Pankkiyhteys ja tilit (its LabeledContent row, not Pankki's first row).
+    private func bankAccountsTotal() -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "bank-accounts-total").firstMatch
+    }
+
+    /// Saldo yhteensä is on screen now (at `opensAt`, where an earlier visit left it) and stays at the
+    /// same height once the server's accounts and connections are in. Returns its settled minY.
+    private func assertTotalHolds(_ visit: Int, opensAt expected: CGFloat? = nil,
+                                  file: StaticString = #filePath, line: UInt = #line) -> CGFloat? {
+        let total = bankAccountsTotal()
+        guard total.exists else {
+            dump(app, "stability-29-no-total-\(visit)")
+            XCTFail("visit \(visit): no Saldo yhteensä on Pankkiyhteys ja tilit", file: file, line: line); return nil
+        }
+        let before = total.frame.minY
+        if let expected {
+            XCTAssertEqual(before, expected, accuracy: 1, "visit \(visit): Saldo yhteensä opened at \(before), an earlier visit ended at \(expected)",
+                           file: file, line: line)
+        }
+        let opening = app.descendants(matching: .any).matching(identifier: "bank-accounts-opening").firstMatch
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ladattu"), object: opening)
+        XCTAssertEqual(XCTWaiter().wait(for: [loaded], timeout: 20), .completed, "visit \(visit): the accounts and the connections did not load",
+                       file: file, line: line)
+        waitStill(total)
+        let after = total.frame.minY
+        note("INFO stability 29 visit \(visit): Saldo yhteensä at \(before) on opening, \(after) once loaded")
+        XCTAssertEqual(after, before, accuracy: 1, "visit \(visit): Saldo yhteensä moved from \(before) to \(after) when the connections loaded",
+                       file: file, line: line)
+        return after
+    }
+
     /// The first picked-mode row of a list on screen below `top`, not under the bottom of the
     /// screen: a row's button names a day ("15.10.2026").
     private func firstListRow(below top: XCUIElement) -> XCUIElement? {
@@ -883,6 +1012,197 @@ final class StabilityTests: WalkTestCase {
         done.tap(); taps += 1
         XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "\(screen): Valmis left the bulk bar up", file: file, line: line)
         XCTAssertFalse(app.buttons["Valitse kaikki"].exists, "\(screen): Valmis left the mode on", file: file, line: line)
+    }
+
+    /// X138 (N7): Lisää keeps its height. The mailbox screen grew the sheet to full height by code
+    /// and Back left it there; each way out of ⋯ now returns the sheet to where it stood.
+    func test23_LisaaKeepsItsHeight() {
+        tab("Lisää")
+        let bar = app.navigationBars["Lisää"]
+        guard bar.waitForExistence(timeout: 10) else { dump(app, "stability-23-no-lisaa"); XCTFail("Lisää did not open"); return }
+        waitStill(bar)
+        let top = bar.frame.minY
+
+        // The CI seed connects no mailbox, so ⋯ offers to connect one.
+        if pickFromAddMenu(bar, "Yhdistä sähköposti") {
+            let mail = app.navigationBars["Sähköpostien tuonti"]
+            if mail.waitForExistence(timeout: 10) {
+                waitStill(mail)
+                shot("stability-23-mailbox")
+                mail.buttons["BackButton"].firstMatch.tap(); taps += 1
+                XCTAssertTrue(mail.waitForNonExistence(timeout: 10), "Back did not leave Sähköpostien tuonti")
+                waitStill(bar)
+                note("INFO stability 23: Lisää bar at \(top), back from the mailbox screen at \(bar.frame.minY)")
+                XCTAssertEqual(bar.frame.minY, top, accuracy: 1, "Lisää changed its height around the mailbox screen")
+            } else {
+                dump(app, "stability-23-no-mailbox"); XCTFail("Yhdistä sähköposti did not open Sähköpostien tuonti")
+            }
+        } else { XCTFail("Lisää's ⋯ has no Yhdistä sähköposti") }
+
+        if pickFromAddMenu(bar, "Tuo tiliote") {
+            // The system's file picker, in whichever language it chose. Close and Sulje too: an icon
+            // button, or the dimmed edge around the picker, leaves it as Cancel does.
+            let cancel = app.buttons.matching(NSPredicate(format: "label IN %@", ["Cancel", "Kumoa", "Peruuta", "Close", "Sulje"]))
+            let covered = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == false"), object: bar)
+            if let button = hittable(cancel, last: true, timeout: 10) {
+                button.tap(); taps += 1
+            } else if XCTWaiter().wait(for: [covered], timeout: 2) == .completed {
+                dump(app, "stability-23-picker")
+                note("INFO stability 23: no Cancel found in the file picker; drawn down as a thumb would")
+                let window = app.windows.firstMatch
+                window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
+                    .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+            } else {
+                dump(app, "stability-23-no-picker"); XCTFail("Tuo tiliote did not open the file picker over Lisää")
+            }
+            let back = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: bar)
+            XCTAssertEqual(XCTWaiter().wait(for: [back], timeout: 10), .completed, "the file picker did not leave Lisää")
+            waitStill(bar)
+            note("INFO stability 23: Lisää bar at \(top), after the file picker at \(bar.frame.minY)")
+            XCTAssertEqual(bar.frame.minY, top, accuracy: 1, "Lisää changed its height around the file picker")
+        } else { XCTFail("Lisää's ⋯ has no Tuo tiliote") }
+        shot("stability-23-lisaa")
+    }
+
+    /// X139 (N7): a new invoice from Lisää closes in one movement. The form went down onto Lisää,
+    /// which then went down too, and its actions showed between the two. Peruuta and Luo lasku now
+    /// close through Lisää, which takes the form with it.
+    func test24_LisaaInvoiceClosesOnce() {
+        if openInvoiceFromAdd("Peruuta") {
+            app.navigationBars["Uusi lasku"].buttons["Peruuta"].firstMatch.tap(); taps += 1
+            // A form with changes asks first; Hylkää muutokset then closes it.
+            assertClosesOnce(onto: app.tabBars.buttons["Koti"].firstMatch, within: 3,
+                             answering: app.buttons["confirm-sheet-confirm"].firstMatch, "Peruuta")
+        }
+
+        guard openInvoiceFromAdd("Luo lasku"), fillNewInvoice() else { return }
+        app.buttons["Luo lasku"].firstMatch.tap(); taps += 1
+        let myynti = app.tabBars.buttons["Myynti"].firstMatch
+        // The form waits for the server's answer before anything closes.
+        assertClosesOnce(onto: myynti, within: 20, "Luo lasku")
+        XCTAssertTrue(myynti.isSelected, "Luo lasku did not end on Myynti")
+        let invoice = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10), "Luo lasku did not open the new invoice")
+        shot("stability-24-invoice")
+    }
+
+    /// N7: a statement imported from Lisää's ⋯ links to its rows. "Näytä tapahtumat ›" opens
+    /// Kirjanpito > Pankki with the new row, and Lisää goes. A test cannot pick a file in the system's
+    /// picker, so ⋯ has a statement fixture under `-LKUITest`. Last of the class: the row it brings is
+    /// one more bank row without a receipt for any test after it.
+    func test25_StatementImportLinksToItsRows() {
+        app.terminate()
+        app.launchArguments += ["-LKUITest", "-notifications.asked.v1", "YES"]
+        launchSignedIn()
+        dismissSystemPrompts()
+        tab("Lisää")
+        let bar = app.navigationBars["Lisää"]
+        guard bar.waitForExistence(timeout: 10) else { dump(app, "stability-25-no-lisaa"); XCTFail("Lisää did not open"); return }
+        guard pickFromAddMenu(bar, "Testitiliote") else {
+            XCTFail("Lisää's ⋯ has no Testitiliote: is the app a Debug build launched with -LKUITest?"); return
+        }
+        let link = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Näytä tapahtumat ›")).firstMatch
+        guard link.waitForExistence(timeout: 30) else {
+            dump(app, "stability-25-no-link"); XCTFail("the import did not offer Näytä tapahtumat ›"); return
+        }
+        note("INFO stability 25: \(link.label)")
+        XCTAssertTrue(link.label.hasPrefix("Tuotiin 1 tapahtumaa."), "the link reads \(link.label)")
+        shot("stability-25-imported")
+        link.tap(); taps += 1
+        let pankki = app.navigationBars["Pankki"]
+        XCTAssertTrue(pankki.waitForExistence(timeout: 15), "Näytä tapahtumat did not open Pankki")
+        // The rows' screen (N2), not a screen that is only named Pankki.
+        XCTAssertTrue(pankki.buttons["Toiminnot"].waitForExistence(timeout: 10), "Pankki opened without its rows' Toiminnot")
+        XCTAssertTrue(bar.waitForNonExistence(timeout: 10), "Lisää stayed up over Pankki")
+        XCTAssertTrue(app.tabBars.buttons["Kirjanpito"].firstMatch.isSelected, "Pankki opened outside Kirjanpito")
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tiliotetesti ")).firstMatch
+        let shown = row.waitForExistence(timeout: 15) || reveal(row, scrolls: 4)
+        if !shown { dump(app, "stability-25-no-row") }
+        XCTAssertTrue(shown, "Pankki does not show the imported row")
+        shot("stability-25-pankki")
+    }
+
+    /// Taps `item` in Lisää's ⋯. The mailbox item reads "Hae sähköpostista" until the sheet has read
+    /// that none is connected, so the menu is looked into up to three times.
+    private func pickFromAddMenu(_ bar: XCUIElement, _ item: String) -> Bool {
+        let menu = bar.buttons["Toiminnot"].firstMatch
+        guard menu.waitForExistence(timeout: 10) else { dump(app, "stability-lisaa-no-menu"); note("MISS Lisää has no Toiminnot"); return false }
+        for _ in 0..<3 {
+            menu.tap(); taps += 1
+            if let button = hittable(app.buttons.matching(NSPredicate(format: "label == %@", item)), last: true, timeout: 5) {
+                button.tap(); taps += 1
+                return true
+            }
+            // Closed by a tap on the bar left of its title, clear of the menu under the trailing button.
+            bar.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
+            _ = menu.waitForExistence(timeout: 2)
+        }
+        dump(app, "stability-lisaa-menu")
+        note("MISS \(item) in Lisää's Toiminnot")
+        return false
+    }
+
+    /// Lisää > Uusi myyntilasku from the tab showing, once the form has risen.
+    private func openInvoiceFromAdd(_ step: String) -> Bool {
+        app.tabBars.buttons["Lisää"].firstMatch.tap(); taps += 1
+        guard app.navigationBars["Lisää"].waitForExistence(timeout: 10),
+              let new = hittable(app.buttons.matching(NSPredicate(format: "label == %@", "Uusi myyntilasku")), timeout: 10) else {
+            dump(app, "stability-24-no-lisaa"); XCTFail("\(step): Lisää did not open with Uusi myyntilasku"); return false
+        }
+        new.tap(); taps += 1
+        let form = app.navigationBars["Uusi lasku"]
+        guard form.waitForExistence(timeout: 15) else {
+            dump(app, "stability-24-no-form"); XCTFail("\(step): Uusi myyntilasku did not open the form"); return false
+        }
+        waitStill(form)
+        return true
+    }
+
+    /// Anna Asiakas and one priced line, as P2Tests fills the form; the tap on Luo lasku is the caller's.
+    private func fillNewInvoice() -> Bool {
+        app.buttons["Valitse asiakas"].firstMatch.tap(); taps += 1
+        let picker = app.navigationBars["Valitse asiakas"]
+        guard picker.waitForExistence(timeout: 10) else { XCTFail("Valitse asiakas did not open"); return false }
+        // Rows under the sheets can carry the same name; only the picker's row can be tapped.
+        guard let anna = hittable(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Anna Asiakas")), timeout: 10) else {
+            dump(app, "stability-24-customers"); XCTFail("no Anna Asiakas to pick"); return false
+        }
+        anna.tap(); taps += 1
+        _ = picker.waitForNonExistence(timeout: 10)
+        let description = app.textViews["Rivin 1 kuvaus"].exists ? app.textViews["Rivin 1 kuvaus"] : app.textFields["Rivin 1 kuvaus"]
+        type(description, "Ripsienpidennys")
+        // The keyboard's bar lies over the price field under the description: the keyboard goes first.
+        if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap() }
+        let price = app.textFields["Rivin 1 à-hinta euroina"]
+        if !price.isHittable { app.swipeUp() }
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: price)], timeout: 5)
+        type(price, "10")
+        if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap() }
+        let create = app.buttons["Luo lasku"].firstMatch
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: create)
+        guard XCTWaiter().wait(for: [enabled], timeout: 15) == .completed else { XCTFail("Luo lasku is not enabled"); return false }
+        return true
+    }
+
+    /// From a tap that closes the form: samples every 0.05 s until `done` (a tab) can be tapped or
+    /// `seconds` pass, and no sample may find Lisää's bar on top. Under the form it is in the tree
+    /// all along, covered, so a sample counts it only when it can be hit. `answer` (a question the
+    /// close asks) is tapped when it comes up, and the sampling goes on.
+    private func assertClosesOnce(onto done: XCUIElement, within seconds: TimeInterval, answering answer: XCUIElement? = nil,
+                                  _ step: String, file: StaticString = #filePath, line: UInt = #line) {
+        let lisaa = app.navigationBars["Lisää"]
+        var samples = 0, seen = 0, reached = false
+        let deadline = Date().addingTimeInterval(seconds)
+        repeat {
+            samples += 1
+            if lisaa.exists && lisaa.isHittable { seen += 1 }
+            if let answer, answer.exists, answer.isHittable { answer.tap(); taps += 1 }
+            if done.exists && done.isHittable { reached = true; break }
+            usleep(50_000)
+        } while Date() < deadline
+        note("INFO stability 24 \(step): \(samples) samples, Lisää on top in \(seen), the tab bar back \(reached)")
+        XCTAssertTrue(reached, "\(step): the tab bar was not back within \(Int(seconds)) s", file: file, line: line)
+        XCTAssertEqual(seen, 0, "\(step): Lisää showed again while the form closed (\(seen) of \(samples) samples)", file: file, line: line)
     }
 }
 

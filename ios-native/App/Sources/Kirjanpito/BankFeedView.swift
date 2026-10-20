@@ -535,7 +535,11 @@ struct BankFeedView: View {
         if !linksLoaded, let cached: BankConnections = await app.cachedValue("/api/bank/connections") {
             bankLinks = cached.connections
             linksLoaded = true
+            app.rememberPainted(cached, "/api/bank/connections")
         }
+        // What this row shows is what Pankkiyhteys ja tilit, the screen it opens, paints first (M071).
+        // After both reads, so the row itself is not held back.
+        if position != nil { await app.rememberBankAccounts() }
     }
 
     /// Saldo yhteensä, beside the rows. A figure already on screen stays when the answer fails;
@@ -550,6 +554,7 @@ struct BankFeedView: View {
             position = value
             positionFailed = false
             app.versions.settleBalances(loadStartedAt: startedAt)
+            await app.rememberBankAccounts()
         case .failure(let error):
             if !(error is CancellationError) && position == nil { positionFailed = true }
         }
@@ -695,6 +700,7 @@ struct BankFeedView: View {
         defer { if !Task.isCancelled { linksLoaded = true } }
         guard let list: BankConnections = try? await app.cachedGet("/api/bank/connections") else { return }
         bankLinks = list.connections
+        app.rememberPainted(list, "/api/bank/connections")
     }
 
     /// `POST /api/bank/connections/[id]/sync`, told as "Haettiin N tapahtumaa." The balances it
