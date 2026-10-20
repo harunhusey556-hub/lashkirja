@@ -372,20 +372,28 @@ struct PasswordView: View {
 
     var body: some View {
         Form {
-            // Named in their rows: three rows of dots read alike once typed into (X146).
+            // Named in their rows: three rows of dots read alike once typed into (X146). A tap on a row's
+            // name opens its field too: the field starts after the name, and 'Uusi salasana uudelleen'
+            // covered the row's middle, where a tap went nowhere (P0 K, run 39374559226).
             Section {
                 LabeledContent("Nykyinen salasana") {
                     SecureField("", text: $current).textContentType(.password).multilineTextAlignment(.trailing)
                         .focused($focus, equals: .current).submitLabel(.next).onSubmit { focus = .new }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { focus = .current }
                 LabeledContent("Uusi salasana") {
                     SecureField("", text: $next).textContentType(.newPassword).multilineTextAlignment(.trailing)
                         .focused($focus, equals: .new).submitLabel(.next).onSubmit { focus = .again }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { focus = .new }
                 LabeledContent("Uusi salasana uudelleen") {
                     SecureField("", text: $again).textContentType(.newPassword).multilineTextAlignment(.trailing)
                         .focused($focus, equals: .again).submitLabel(.done).onSubmit { focus = nil }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { focus = .again }
             } footer: { Text("Vähintään 8 merkkiä.") }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }

@@ -345,6 +345,11 @@ final class P0Tests: WalkTestCase {
             backToSettings(from: "Sähköpostimallit")
         } else { XCTFail("Sähköpostimallit > Uusi malli did not open") }
         if tap("Vaihda salasana") {
+            // The field starts after its name: 'Uusi salasana uudelleen' covered the row's middle, and
+            // a tap there never gave the field the keyboard (run 39374559226).
+            for name in ["Nykyinen salasana", "Uusi salasana", "Uusi salasana uudelleen"] {
+                assertNameFocuses(name, in: app.secureTextFields)
+            }
             for name in ["Nykyinen salasana", "Uusi salasana", "Uusi salasana uudelleen"] {
                 assertNameStays(name, in: app.secureTextFields)
             }
@@ -514,7 +519,9 @@ final class P0Tests: WalkTestCase {
         guard bar.waitForExistence(timeout: 10) else { XCTFail("\(step): did not open", file: file, line: line); return }
         // Read at once: a spinner now is what the owner saw slide in.
         let spinner = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Ladataan")).firstMatch
-        let failurePage = app.buttons["Yritä uudelleen"].firstMatch
+        // The failure page's own retry: by its label, this was the banner's "Yritä uudelleen" over the
+        // painted list (run 39374559226: content and a 'failure page' at once, the shot list + banner).
+        let failurePage = app.buttons["load-failure-retry"].firstMatch
         let painted = content.exists, loading = spinner.exists, failed = failurePage.exists
         shot("j-\(title)-\(online ? "online" : "offline")")
         note("INFO P0 J \(step): content \(painted), spinner \(loading), failure page \(failed)")
@@ -539,6 +546,18 @@ final class P0Tests: WalkTestCase {
         let inRow = label.exists && field.exists && label.frame.maxY > field.frame.minY - 24 && label.frame.minY < field.frame.maxY
         note("INFO P0 K \(name): field \(field.frame), name \(label.exists ? "\(label.frame)" : "not drawn")")
         XCTAssertTrue(inRow, "\(name): typed into, its row no longer says '\(name)'", file: file, line: line)
+    }
+
+    /// Taps the name drawn in the field's row, not the field, and waits for the field to take the keyboard.
+    private func assertNameFocuses(_ name: String, in fields: XCUIElementQuery, file: StaticString = #filePath, line: UInt = #line) {
+        let field = fields.matching(NSPredicate(format: "label == %@", name)).firstMatch
+        let label = app.staticTexts.matching(NSPredicate(format: "label == %@", name)).firstMatch
+        guard reveal(field), label.exists else { dump(app, "k-no-name"); XCTFail("no field or no name for \(name)", file: file, line: line); return }
+        label.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); taps += 1
+        let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
+        let opened = XCTWaiter().wait(for: [focused], timeout: 3) == .completed
+        note("INFO P0 K \(name): name \(label.frame), field \(field.frame), tap on the name focused it: \(opened)")
+        XCTAssertTrue(opened, "\(name): a tap on its name did not give the field the keyboard", file: file, line: line)
     }
 
     /// Back from a pushed form typed into: its back button asks, and the changes are let go.
