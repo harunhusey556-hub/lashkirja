@@ -568,16 +568,25 @@ final class OwnerScreensTests: WalkTestCase {
             found = tapLabel("label CONTAINS %@", "Audit Hyvitys Oy,")
         }
         guard found else { capture("j0-no-row"); XCTFail("Kuitit lists no Audit Hyvitys Oy"); return }
-        let offer = app.staticTexts["Onko tämä ostolaskun hyvitys?"].firstMatch
-        let bill = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "maksetaan myöhemmin")).firstMatch
-        // The notice comes with its own request, after the receipt.
+        // The offer is Toiminnot's item since N3 (U098): the page's body asks nothing of an unfiled
+        // receipt. The notice comes with its own request after the receipt, so Toiminnot is opened
+        // until it carries the item, and closed by its own button in between.
+        let menu = app.navigationBars["Kuitti"].buttons["Toiminnot"].firstMatch
+        guard menu.waitForExistence(timeout: 20) else { capture("j1-no-page"); XCTFail("the credit note's page did not open"); return }
+        let credit = app.buttons["Merkitse ostolaskun hyvitykseksi"].firstMatch
         let deadline = Date().addingTimeInterval(20)
-        while !offer.exists && !bill.exists && Date() < deadline { usleep(250_000) }
+        repeat {
+            menu.tap()
+            if credit.waitForExistence(timeout: 3) { break }
+            menu.tap()
+            usleep(500_000)
+        } while Date() < deadline
         capture("j1-credit-note")
-        if !offer.exists { tree("j1-credit-note") }
+        if !credit.exists { tree("j1-credit-note") }
+        let bill = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "maksetaan myöhemmin")).firstMatch
         XCTAssertFalse(bill.exists, "the credit note is asked whether it is a bill paid later")
-        XCTAssertTrue(offer.exists, "the credit note is not offered as an ostolasku's credit")
-        XCTAssertTrue(app.buttons["Merkitse ostolaskun hyvitykseksi"].exists, "no 'Merkitse ostolaskun hyvitykseksi'")
+        XCTAssertTrue(credit.exists, "the credit note is not offered as an ostolasku's credit: no 'Merkitse ostolaskun hyvitykseksi'")
+        XCTAssertFalse(app.buttons["Merkitse ostolaskuksi"].exists, "the credit note is offered as a bill to pay")
     }
 
     // X165 X164 X133 X134 X162 X168, on the seed's overdue Ripsitukku Oy bill: its list row says
