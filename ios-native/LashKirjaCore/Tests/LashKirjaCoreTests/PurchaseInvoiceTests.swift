@@ -96,10 +96,13 @@ private func invoice(status: String = "open", display: String = "open", paid: De
     #expect(PurchaseFilter.groups(rows, filter: .open).first?.items.count == 1)
 }
 
-@Test func purchaseRowSecondaryMatchesTheWeb() throws {
-    #expect(try invoice(display: "open").rowSecondary == "A-12 · eräpäivä 15.9.")
-    #expect(try invoice(display: "overdue", number: nil).rowSecondary == "Myöhässä, eräpäivä 15.9.")
-    #expect(try invoice(paid: 24, open: 100).rowSecondary == "A-12 · eräpäivä 15.9. · avoinna 100,00\u{00A0}€")
+// X133 X134: the day with its year, as Myynti's rows print it, and no "myöhässä": the row's
+// badge already says it.
+@Test func purchaseRowSecondaryCarriesTheYearAndNoOverdueWord() throws {
+    #expect(try invoice(display: "open").rowSecondary == "A-12 · eräpäivä 15.9.2026")
+    #expect(try invoice(display: "overdue", number: nil).rowSecondary == "Eräpäivä 15.9.2026")
+    #expect(try invoice(display: "overdue").rowSecondary == "A-12 · eräpäivä 15.9.2026")
+    #expect(try invoice(paid: 24, open: 100).rowSecondary == "A-12 · eräpäivä 15.9.2026 · avoinna 100,00\u{00A0}€")
 }
 
 @Test func purchaseStatusLabels() {

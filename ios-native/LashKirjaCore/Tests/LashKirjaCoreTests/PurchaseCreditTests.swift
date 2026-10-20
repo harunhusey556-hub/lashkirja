@@ -73,7 +73,7 @@ private func purchase(
     let note = try purchase(status: "paid", display: "credited", gross: -62, open: 0, isCreditNote: true, creditsInvoiceId: "pi0")
     #expect(note.creditTag == .creditNote)
     #expect(PurchaseCreditTag.creditNote.label == "Hyvityslasku")
-    #expect(note.rowSecondary == "A-12 · Hyvityslasku 1.9.")
+    #expect(note.rowSecondary == "A-12 · Hyvityslasku 1.9.2026")
     #expect(!note.canCredit && !note.canReopen)
     // A cancelled credit note is just cancelled.
     let cancelled = try purchase(status: "cancelled", display: "cancelled", gross: -62, open: 0, isCreditNote: true)
@@ -82,7 +82,7 @@ private func purchase(
     let partly = try purchase(credited: 62, open: 62)
     #expect(partly.creditTag == .partlyCredited)
     #expect(PurchaseCreditTag.partlyCredited.label == "Osittain hyvitetty")
-    #expect(partly.rowSecondary == "A-12 · eräpäivä 15.9. · hyvitetty 62,00\u{00A0}€, avoinna 62,00\u{00A0}€")
+    #expect(partly.rowSecondary == "A-12 · eräpäivä 15.9.2026 · hyvitetty 62,00\u{00A0}€, avoinna 62,00\u{00A0}€")
     // Overdue keeps its own badge.
     #expect(try purchase(display: "overdue", credited: 62, open: 62).creditTag == nil)
     #expect(try purchase().creditTag == nil)

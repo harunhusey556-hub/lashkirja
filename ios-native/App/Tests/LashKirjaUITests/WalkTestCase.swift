@@ -19,7 +19,7 @@ class WalkTestCase: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label IN %@", ["Not Now", "Ei nyt"])).firstMatch
     }
 
-    override func tearDown() { goOnline(); super.tearDown() }
+    override func tearDown() { goOnline(); keepAnswers(); super.tearDown() }
 
     override func setUp() {
         continueAfterFailure = true
@@ -255,6 +255,10 @@ class WalkTestCase: XCTestCase {
     /// The walk's API proxy drops every connection while this file exists (scripts/sim/api-proxy.py).
     func goOffline() { FileManager.default.createFile(atPath: "\(shotDir)/offline.flag", contents: nil) }
     func goOnline() { try? FileManager.default.removeItem(atPath: "\(shotDir)/offline.flag") }
+    /// While this file exists each request still reaches the API, but the proxy closes the app's
+    /// connection instead of passing the answer on: the work is done and the app cannot know.
+    func loseAnswers() { FileManager.default.createFile(atPath: "\(shotDir)/lose-answer.flag", contents: nil) }
+    func keepAnswers() { try? FileManager.default.removeItem(atPath: "\(shotDir)/lose-answer.flag") }
     func tab(_ name: String) { app.tabBars.buttons[name].firstMatch.tap(); taps += 1; sleep(2) }
     /// Taps a tab until it reports itself selected. The first tap after sign-in can land while the
     /// passkey offer or a system prompt is still leaving, and is then lost (CI round 1: still on Koti).

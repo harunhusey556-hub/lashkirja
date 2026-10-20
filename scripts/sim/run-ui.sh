@@ -73,10 +73,11 @@ rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
     sleep 0.3
   done ) &
 W=$!
-# The app talks to the API through a proxy the tests can switch off (offline.flag in the shot dir).
+# The app talks to the API through a proxy the tests can switch off (offline.flag in the shot dir)
+# or have lose its answers (lose-answer.flag). Its line per request goes to api-proxy.log there.
 pkill -f "api-proxy.py $PROXY_PORT" 2>/dev/null
 ulimit -n 4096
-python3 "$REPO/scripts/sim/api-proxy.py" $PROXY_PORT $UPSTREAM_PORT "$SH/offline.flag" &
+python3 "$REPO/scripts/sim/api-proxy.py" $PROXY_PORT $UPSTREAM_PORT "$SH/offline.flag" > "$SH/api-proxy.log" 2>&1 &
 P=$!
 trap 'kill $W $P 2>/dev/null; xcrun simctl ui "$U" content_size large >/dev/null 2>&1' EXIT
 

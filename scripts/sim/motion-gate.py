@@ -4,7 +4,8 @@ one noisy run neither fails nor clears a row; it is listed for the PR's review a
 the job, as its summary line says. FIXED = a real FAIL in the baseline and PASS in both
 PR runs: a check that saw nothing (NO-MOTION, UNREACHED, SKIPPED, 'n/a (no settle)', no row) never
 fixes anything. NEW MISS = judged (PASS or FAIL) in the baseline and judged in neither PR run: the
-branch lost what the gate could see, so the gate exits 1.
+branch lost what the gate could see, so the gate exits 1. So does a walk with no step at all: three
+empty reports compare as equal (F003, run 39355446040: the scripts stopped at once, the job passed).
 usage: motion-gate.py <baseline.json> <pr-run1.json> <pr-run2.json>"""
 import json, sys
 KS = ['intermediate', 'flash', 'shift_video', 'shift_probe', 'stall']
@@ -39,6 +40,9 @@ def main(argv):
     print(f"\nNEW FAIL (PASS in baseline, FAIL in both PR runs; listed for review, the job does not fail on it): {len(new)}")
     print(f"FIXED (FAIL in baseline, PASS in both PR runs): {len(fixed)}")
     print(f"NEW MISS (judged in baseline, in neither PR run): {len(miss)}\n")
+    empty = [name for name, d in (('baseline', b), ('pr-run1', p1), ('pr-run2', p2)) if not d]
+    if empty:
+        print(f"NO WALK: {', '.join(empty)} judged no step, so there is nothing to compare\n")
     print("| suite | step | check | baseline | pr-run1 | pr-run2 | gate |\n|---|---|---|---|---|---|---|")
     for k in keys:
         vals = [d.get(k, '-') for d in (b, p1, p2)]
@@ -46,7 +50,7 @@ def main(argv):
             continue
         mark = 'NEW FAIL' if k in new else 'fixed' if k in fixed else 'NEW MISS' if k in miss else ''
         print(f"| {k[0]} | {k[1]} | {k[2]} | " + " | ".join(vals) + f" | {mark} |")
-    return 1 if miss else 0
+    return 1 if miss or empty else 0
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv))

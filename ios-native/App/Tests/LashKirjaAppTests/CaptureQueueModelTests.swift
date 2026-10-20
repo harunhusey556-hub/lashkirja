@@ -69,6 +69,21 @@ final class CaptureQueueModelTests: XCTestCase {
         XCTAssertNil(model.notice)
     }
 
+    // N4 (X052): the owner checked and saved it in the form, so neither the row nor the summary of a
+    // longer queue calls it approved "automaattisesti"; the row names the bill on one short line.
+    func testABillSavedFromTheFormIsTheOwnersSave() throws {
+        let model = CaptureQueueModel()
+        model.restore([reading("a"), reading("b")])
+        model.openForm(try XCTUnwrap(model.queue.row("a")))
+        model.saved("a", autoApproved: true, invoiceNote: "ostolasku luotu, eräpäivä 1.11.2026", receiptId: "r1", kind: .invoice)
+        let row = try XCTUnwrap(model.queue.row("a"))
+        XCTAssertTrue(row.savedByHand)
+        XCTAssertEqual(row.slotText, "Tallennettu")
+        XCTAssertEqual(row.detailText, "Ostolasku · eräpäivä 1.11.2026")
+        XCTAssertEqual(model.queue.summaryLine, "Tallennettiin 1 · 1 odottaa tarkistusta")
+        guard case .queue = model.step else { return XCTFail("the saved row is shown on the queue") }
+    }
+
     func testAPlainLastSaveStillClosesTheScreen() throws {
         let model = CaptureQueueModel()
         model.restore([reading("a")])

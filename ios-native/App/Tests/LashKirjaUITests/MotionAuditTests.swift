@@ -862,12 +862,13 @@ final class MotionAuditTests: WalkTestCase {
             note("calibration: no capture fixture under the queue"); dump(app, "calibration-second-fixture"); return
         }
         fixture.tap()
-        // The row's own line ("Odottaa tarkistusta", or the duplicate's): the summary under the
-        // queue says "1 odottaa tarkistusta" already for the first, unsaved row.
-        let pending = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
-                                                           "Odottaa tarkistusta", "Samanlainen kuitti on jo tallennettu")).firstMatch
+        // The summary under the settled queue: the first, unsaved row waits for its check, so the
+        // second saved and left for review (a look-alike too) makes two. The rows themselves no
+        // longer tell: the first row's own slot says "Odottaa tarkistusta" from the start (N4), and
+        // the approval is said by the summary alone.
+        let pending = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "2 odottaa tarkistusta")).firstMatch
         let refused = app.buttons["Avaa lomake"].firstMatch
-        let approved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Hyväksytty automaattisesti")).firstMatch
+        let approved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Hyväksyttiin automaattisesti")).firstMatch
         guard let outcome = firstOf([pending, refused, approved], timeout: 90) else {
             note("calibration: the second fixture was not read"); dump(app, "calibration-second-fixture"); return
         }
@@ -910,9 +911,10 @@ final class MotionAuditTests: WalkTestCase {
             return value.isEmpty || value == placeholder
         }
         if blank(vendor, "Myyjä") { type(vendor, "Testikauppa Oy") }
-        let total = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Summa €", "Summa €")).firstMatch
+        // "Summa" beside the field, "0,00" in it while empty; the field is named "Summa euroina".
+        let total = app.textFields.matching(NSPredicate(format: "label BEGINSWITH %@ OR placeholderValue == %@", "Summa", "0,00")).firstMatch
         // Whole euros: the decimal key follows the simulator's region, not the app's Finnish.
-        if total.exists && blank(total, "Summa €") { type(total, "12") }
+        if total.exists && blank(total, "0,00") { type(total, "12") }
         // The keyboard's Valmis: the queue's own Valmis is not on screen while the form is.
         let done = app.buttons["Valmis"].firstMatch
         if done.exists { done.tap(); _ = done.waitForNonExistence(timeout: 3) }
@@ -924,7 +926,10 @@ final class MotionAuditTests: WalkTestCase {
             let choice = app.buttons["Tarvikkeet & ostot"].firstMatch
             if choice.waitForExistence(timeout: 5) { choice.tap() }
         }
-        guard tap("Tallenna kuitti") else { note("calibration: no Tallenna kuitti"); dump(app, "calibration-no-save"); return false }
+        // Pinned under the form (N4): tapped where it is, as `tap` scrolls for anything near the bottom edge.
+        let save = app.buttons["Tallenna kuitti"].firstMatch
+        guard save.waitForExistence(timeout: 5) else { note("calibration: no Tallenna kuitti"); dump(app, "calibration-no-save"); return false }
+        save.tap()
         return true
     }
 }

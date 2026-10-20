@@ -38,7 +38,8 @@ struct AssistantView: View {
                     Button { showConversations = true } label: { Image(systemName: "bubble.left.and.bubble.right") }
                         .accessibilityLabel("Keskustelut")
                 }
-                ToolbarItem(placement: .topBarTrailing) { Button("Valmis") { dismiss() } }
+                // The keyboard first: left to the closing sheet it stayed over Koti for 1.5 s (M064).
+                ToolbarItem(placement: .topBarTrailing) { Button("Valmis") { focused = false; Keyboard.dismiss(); dismiss() } }
             }
             .appDestinations()
             .sheet(isPresented: $showConversations) {
@@ -68,6 +69,9 @@ struct AssistantView: View {
             }
         }
         .environment(\.openRoute, OpenRouteAction(stack: "assistant") { path.append($0) })
+        // A swipe down ends editing as it starts: the keyboard sits in its own window, and the
+        // sheet slid away behind it, leaving it over Koti with the tab bar hidden (M064).
+        .background(SwipeDismissObserver { focused = false; Keyboard.dismiss() })
         .perfReady("chat", model?.historyLoaded == true)
         .task {
             guard model == nil else { return }
@@ -80,12 +84,21 @@ struct AssistantView: View {
     private func conversation(_ model: ChatModel) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                // The notice and the greeting above the lazy stack, not in it: a lazy stack is an
+                // accessibility container that still lists its hidden children, and their sparkles
+                // stayed in the tree as 'Säihke' (U057). Out of it, hidden symbols leave the tree.
+                VStack(alignment: .leading, spacing: 14) {
+                    // With the conversation, in its fade-in (ChatModel.ready): in the composer it came
+                    // in after the sheet had settled and grew the composer by two lines (M012 M068).
+                    // On top, so a question sent below it scrolls as it did without it (chat-send).
+                    if model.aiAvailable == false {
+                        note(AssistantCooldown.unavailableNote, symbol: "sparkles", tint: Theme.ink2)
+                    }
                     // Not while the stored conversation is still on its way: the greeting would
                     // flash and then give way to the messages.
                     if model.messages.isEmpty, model.historyLoaded || model.failure != nil {
                         VStack(spacing: 8) {
-                            Image(systemName: "sparkles").font(.largeTitle).foregroundStyle(Theme.accent)
+                            Image(systemName: "sparkles").font(.largeTitle).foregroundStyle(Theme.accent).accessibilityHidden(true)
                             Text("Miten voin auttaa?").font(.headline).foregroundStyle(Theme.ink)
                             Text(AssistantCooldown.intro(available: model.aiAvailable))
                                 .font(.subheadline)
@@ -96,34 +109,36 @@ struct AssistantView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
                     }
-                    ForEach(model.messages) { message in
-                        MessageRow(message: message, streaming: model.streaming && message.id == model.messages.last?.id, model: model)
-                            .id(message.id)
-                    }
-                    // Limited mode: the shortcuts that still work stay at hand after each reply.
-                    let row = AssistantCooldown.shortcutRow(available: model.aiAvailable, messageCount: model.messages.count,
-                                                            replying: model.streaming, lastRole: model.messages.last?.role)
-                    if row != .none {
-                        shortcuts(model)
-                            .opacity(row == .shown ? 1 : 0)
-                            .allowsHitTesting(row == .shown)
-                            .accessibilityHidden(row != .shown)
-                            .motion(.linear(duration: 0.3), value: row)
-                    }
-                    if let failure = model.failure {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(failure).font(.footnote).foregroundStyle(Theme.danger)
-                            if model.turn.retryText != nil {
-                                Button { Haptics.selection(); model.retry() } label: {
-                                    Label("Yritä uudelleen", systemImage: "arrow.clockwise")
-                                        .font(.subheadline.weight(.medium))
-                                        .padding(.horizontal, 14)
-                                        .frame(minHeight: 36)
-                                        .background(Theme.accentSoft, in: Capsule())
-                                        .foregroundStyle(Theme.accentDark)
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(model.messages) { message in
+                            MessageRow(message: message, streaming: model.streaming && message.id == model.messages.last?.id, model: model)
+                                .id(message.id)
+                        }
+                        // Limited mode: the shortcuts that still work stay at hand after each reply.
+                        let row = AssistantCooldown.shortcutRow(available: model.aiAvailable, messageCount: model.messages.count,
+                                                                replying: model.streaming, lastRole: model.messages.last?.role)
+                        if row != .none {
+                            shortcuts(model)
+                                .opacity(row == .shown ? 1 : 0)
+                                .allowsHitTesting(row == .shown)
+                                .accessibilityHidden(row != .shown)
+                                .motion(.linear(duration: 0.3), value: row)
+                        }
+                        if let failure = model.failure {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(failure).font(.footnote).foregroundStyle(Theme.danger)
+                                if model.turn.retryText != nil {
+                                    Button { Haptics.selection(); model.retry() } label: {
+                                        Label("Yritä uudelleen", systemImage: "arrow.clockwise")
+                                            .font(.subheadline.weight(.medium))
+                                            .padding(.horizontal, 14)
+                                            .frame(minHeight: 36)
+                                            .background(Theme.accentSoft, in: Capsule())
+                                            .foregroundStyle(Theme.accentDark)
+                                    }
+                                    .buttonStyle(.pressable)
+                                    .disabled(!model.canSendShortcut)
                                 }
-                                .buttonStyle(.pressable)
-                                .disabled(!model.canSendShortcut)
                             }
                         }
                     }
@@ -228,27 +243,37 @@ struct AssistantView: View {
                     .disabled(model.streaming || !model.canSendShortcut)
                 }
             }
+            .padding(.horizontal, 16)
         }
+        // Out through the conversation's 16 pt padding to the screen's edges: the row was cut
+        // mid-word inside it ('Tämän kuur', U016 U053). The chips start 16 pt in all the same.
+        .padding(.horizontal, -16)
+        .accessibilityIdentifier("assistant-shortcuts")
     }
 
     private func composer(_ model: ChatModel) -> some View {
         VStack(spacing: 6) {
-            if model.cooldownUntil != nil {
-                Label(AssistantCooldown.cooldownNote, systemImage: "hourglass")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.warning)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else if model.aiAvailable == false {
-                Label(AssistantCooldown.unavailableNote, systemImage: "sparkles")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.ink2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            // Not before the conversation is shown: the composer keeps one height while the sheet opens.
+            if model.ready, model.cooldownUntil != nil {
+                note(AssistantCooldown.cooldownNote, symbol: "hourglass", tint: Theme.warning)
             }
             composerRow(model)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.bar)
+    }
+
+    /// One element for VoiceOver, read as its words: the symbol was a second one ('Säihke', U057).
+    private func note(_ text: String, symbol: String, tint: Color) -> some View {
+        Label {
+            Text(text)
+        } icon: {
+            Image(systemName: symbol).accessibilityHidden(true)
+        }
+        .font(.footnote)
+        .foregroundStyle(tint)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func composerRow(_ model: ChatModel) -> some View {
@@ -599,5 +624,56 @@ extension AppModel {
         chat = model
         model.startPrefetch()
         return model
+    }
+}
+
+/// UIKit's word that a swipe down has started (`presentationControllerWillDismiss`), which SwiftUI
+/// has no hook for. As `SwipeAttemptObserver` does, it wraps the sheet's presentation-controller
+/// delegate and forwards every call to SwiftUI's own, so the swipe and the `isPresented` binding
+/// keep working unchanged.
+private struct SwipeDismissObserver: UIViewControllerRepresentable {
+    let onWillDismiss: () -> Void
+
+    func makeUIViewController(context: Context) -> Probe { Probe() }
+    func updateUIViewController(_ probe: Probe, context: Context) { probe.onWillDismiss = onWillDismiss }
+
+    final class Probe: UIViewController, UIAdaptivePresentationControllerDelegate {
+        var onWillDismiss: () -> Void = {}
+        // Strong: UIKit holds delegates weakly, and once replaced nothing else may keep SwiftUI's alive.
+        private var original: UIAdaptivePresentationControllerDelegate?
+        private weak var hooked: UIPresentationController?
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            guard let pc = sheetController()?.presentationController, pc !== hooked else { return }
+            if !(pc.delegate is Probe) { original = pc.delegate }
+            pc.delegate = self
+            hooked = pc
+        }
+
+        private func sheetController() -> UIViewController? {
+            var vc: UIViewController? = self
+            while let current = vc {
+                if current.presentingViewController != nil && current.parent == nil { return current }
+                vc = current.parent
+            }
+            return nil
+        }
+
+        // Called for a swipe only, as it starts (also one the owner then takes back); "Valmis"
+        // ends editing itself.
+        func presentationControllerWillDismiss(_ pc: UIPresentationController) {
+            original?.presentationControllerWillDismiss?(pc)
+            onWillDismiss()
+        }
+
+        override func responds(to aSelector: Selector!) -> Bool {
+            if aSelector == #selector(presentationControllerWillDismiss(_:)) { return true }
+            return super.responds(to: aSelector) || (original?.responds(to: aSelector) ?? false)
+        }
+        override func forwardingTarget(for aSelector: Selector!) -> Any? {
+            if let original, original.responds(to: aSelector) { return original }
+            return super.forwardingTarget(for: aSelector)
+        }
     }
 }

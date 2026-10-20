@@ -255,6 +255,8 @@ private struct Report: Decodable, Equatable { let n: Int; let extra: String? }
         #expect(requests.contains(PrefetchRequest(path: "/api/receipts/counts", query: ReceiptListQuery.pendingCountQuery, persist: false)))
         #expect(requests.contains(PrefetchRequest(path: "/api/reports/profit-loss", query: ["from": "2026-01", "to": "2026-12"], persist: false)))
         #expect(requests.contains(PrefetchRequest(path: "/api/ai/chat", persist: false)))
+        // The assistant opens on its status too (M068), kept in memory only.
+        #expect(requests.contains(PrefetchRequest(path: "/api/ai/status", persist: false)))
         // "+" → "Uusi myyntilasku" opens from Koti on these (InvoiceFormPreview), not only from Myynti.
         #expect(requests.contains(PrefetchRequest(path: "/api/customers", persist: false)))
         #expect(requests.contains(PrefetchRequest(path: "/api/catalog", persist: false)))
@@ -271,6 +273,18 @@ private struct Report: Decodable, Equatable { let n: Int; let extra: String? }
         #expect(requests.contains(PrefetchRequest(path: "/api/period-lock", persist: false)))
         #expect(requests.contains(PrefetchRequest(path: "/api/alv", query: ["period": "2026-Q3"], persist: false)))
         #expect(NextPrefetch.kirjanpito(month: "2026-10", alvPeriod: nil).allSatisfy { $0.path != "/api/alv" })
+    }
+
+    @Test func kirjanpitoWarmsEverythingOstolaskutPaintsFrom() {
+        let requests = NextPrefetch.kirjanpito(month: "2026-10", alvPeriod: nil)
+        // The list as Ostolaskut asks for it on Kaikki (no status), and the three answers its cached
+        // first paint needs beside it: the chips' counts, Toistuvat ostolaskut and the suggestions.
+        #expect(requests.contains(PrefetchRequest(path: "/api/purchase-invoices", persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/purchase-invoices/counts", persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/recurring-purchases", persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/purchase-invoices/match", persist: false)))
+        // Kept in memory only, as every request warmed when a tab is chosen.
+        #expect(requests.allSatisfy { !$0.persist })
     }
 
     @Test func myyntiWarmsTheNewInvoiceForm() {
