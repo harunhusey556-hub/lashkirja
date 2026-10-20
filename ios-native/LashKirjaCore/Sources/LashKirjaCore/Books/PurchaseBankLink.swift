@@ -90,6 +90,10 @@ public struct PurchaseBankCandidateList: Decodable, Sendable {
     /// Month chips only help when there are many rows across several months.
     public var showsMonthChips: Bool { months.count > 1 && months.reduce(0) { $0 + $1.count } > ShowMore.defaultStep }
 
+    /// Rows are listed, yet none shares the amount, the viite or the name: they are there only for
+    /// their dates. The server ranks every scored row first, so the first page tells (X162).
+    public var matchesNothing: Bool { !candidates.isEmpty && !candidates.contains { $0.score > 0 } }
+
     /// Said under the list only when an older server left rows out with no way to page to them.
     public var cappedNote: String? {
         !hasMore && total > candidates.count ? "Näytetään \(candidates.count) parasta \(total) tapahtumasta. Tarkenna hakua tai valitse kuukausi." : nil

@@ -8,6 +8,8 @@ final class P4Tests: WalkTestCase {
     func testA_UnavailableStateIsCalm() {
         openAssistant(); shot("p4-assistant"); dump(app, "p4-assistant")
         check("P4 assistant opens with a composer", composer.waitForExistence(timeout: 10))
+        // U016 U053 (B11): the shortcuts were cut mid-word at the conversation's margin ('Tämän kuur').
+        assertChipRowEdge("assistant-shortcuts", "P4 assistant shortcuts")
     }
 
     func testB_RetryDoesNotDuplicate() {

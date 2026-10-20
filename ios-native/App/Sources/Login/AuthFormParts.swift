@@ -6,6 +6,9 @@ struct AuthField<Content: View>: View {
     let label: String
     var problem: String? = nil
     var focused = false
+    /// Keeps the problem's room under the box from the first frame, for a field whose problem
+    /// comes back from the server while the owner looks at the form (a refused sign-in).
+    var holdsProblem = false
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -21,7 +24,20 @@ struct AuthField<Content: View>: View {
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(problem != nil ? Theme.danger : (focused ? Theme.accent : Theme.line),
                             lineWidth: problem != nil || focused ? 1.5 : 1))
-            if let problem {
+            if holdsProblem {
+                // Two footnote lines are held even while empty (the 401 wraps to two at phone
+                // width), so the words fade in without pushing down what sits under the field.
+                ZStack(alignment: .topLeading) {
+                    Text(verbatim: "\u{00A0}\n\u{00A0}").font(.footnote).hidden()
+                    Label(problem ?? "", systemImage: "exclamationmark.circle")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .opacity(problem == nil ? 0 : 1)
+                        .accessibilityHidden(problem == nil)
+                        .motion(.snappy, value: problem)
+                }
+            } else if let problem {
                 Label(problem, systemImage: "exclamationmark.circle")
                     .font(.footnote)
                     .foregroundStyle(Theme.danger)

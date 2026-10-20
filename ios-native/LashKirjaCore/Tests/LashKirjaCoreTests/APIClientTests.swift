@@ -118,6 +118,34 @@ private actor FailureLog {
     #expect(await log.items.sorted() == ["GET /api/c 200 true", "POST /api/a 500 false"])
 }
 
+@Test func theAppsOwn503IsNotUnexpected() {
+    #expect(!APIClient.reportsUnexpected(status: 503, fromApp: true))
+    #expect(APIClient.reportsUnexpected(status: 500, fromApp: true))
+    #expect(APIClient.reportsUnexpected(status: 503, fromApp: false))
+    #expect(APIClient.reportsUnexpected(status: 502, fromApp: false))
+}
+
+@Test func aFeatureSwitch503IsNotReportedButAGateway503Is() async throws {
+    let log = FailureLog()
+    let gateway = HTTPResponse(status: 503, headers: [:], body: Data("service unavailable".utf8))
+    let t = FakeTransport([
+        HTTPResponse(status: 503, headers: ["x-lashkirja-api-version": "1"], body: Data(#"{"error":"Korttimaksut eivät ole käytössä tällä palvelimella."}"#.utf8)),
+        HTTPResponse(status: 500, headers: ["x-lashkirja-api-version": "1"], body: Data()),
+        gateway, gateway, gateway,
+    ])
+    let c = APIClient(baseURL: base, transport: t, tokens: FixedToken(value: "abc"), sleep: noSleep)
+    await c.setOnUnexpectedFailure { method, path, status, decodeError in
+        await log.add("\(method) \(path) \(status) \(decodeError)")
+    }
+    // The feature switch goes first, so its report (if any) is sent before the two that must come.
+    let _: Me? = try? await c.get("/api/pos/status")
+    let _: Me? = try? await c.send("POST", "/api/a", body: EmptyBody())
+    let _: Me? = try? await c.get("/api/b")
+    #expect(t.requests.count == 5)
+    for _ in 0..<50 where await log.items.count < 2 { try await Task.sleep(nanoseconds: 20_000_000) }
+    #expect(await log.items.sorted() == ["GET /api/b 503 false", "POST /api/a 500 false"])
+}
+
 @Test func aDuplicateDocumentNamesTheReceiptItAlreadyIs() {
     let body = Data(#"{"error":"Tämä kuitti on jo tallennettu","code":"DUPLICATE_DOCUMENT","receiptId":"r-42"}"#.utf8)
     let error = APIErrorDecoder.decode(status: 409, data: body)
