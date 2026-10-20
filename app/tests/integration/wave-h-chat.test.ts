@@ -68,6 +68,30 @@ describe("conversations", () => {
     expect(stored?.title).toBe("Hei");
   });
 
+  it("answers the retry of a new chat's lost first answer in that chat, once", async () => {
+    // The lost answer carried the new conversation's id too, so the retry names none.
+    const first = await postMessage("Hei", { clientId: "client-lost-1" });
+    expect(first.response.status).toBe(200);
+    const again = await postMessage("Hei", { clientId: "client-lost-1" });
+    expect(again.response.status).toBe(200);
+    expect(again.body.conversationId).toBe(first.body.conversationId);
+    expect(again.body.id).toBe(first.body.id);
+    expect(await prisma.conversation.count({ where: { userId: user.id } })).toBe(1);
+    expect(await prisma.chatMessage.count({ where: { userId: user.id, role: "user" } })).toBe(1);
+    expect(await prisma.chatMessage.count({ where: { userId: user.id, role: "assistant" } })).toBe(1);
+
+    const other = await readJson<{ id: string }>(
+      await createConversation(buildRequest("POST", "/api/ai/conversations", {}, { cookie }))
+    );
+    const reused = await postMessage("Hei", { conversationId: other.id, clientId: "client-lost-1" });
+    expect(reused.response.status).toBe(409);
+    const changed = await postMessage("Moi", { clientId: "client-lost-1" });
+    expect(changed.response.status).toBe(409);
+    expect(await prisma.chatMessage.count({ where: { userId: user.id } })).toBe(2);
+    // A refused send opens no conversation of its own.
+    expect(await prisma.conversation.count({ where: { userId: user.id } })).toBe(2);
+  });
+
   it("renames, searches, archives, and deletes with undo", async () => {
     const created = await readJson<{ id: string }>(
       await createConversation(buildRequest("POST", "/api/ai/conversations", {}, { cookie }))
