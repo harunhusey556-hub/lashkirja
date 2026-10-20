@@ -58,23 +58,48 @@ final class P3Tests: WalkTestCase {
         tab("Myynti")
         let drafts = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Luonnokset'")).firstMatch
         let before = drafts.waitForExistence(timeout: 10) ? drafts.label : "?"
+        // Myynti's overdue row: its badge says "Myöhässä", its line the due date (N6, M100).
+        guard tapLabel("label CONTAINS 'Myöhässä' AND label CONTAINS %@", "· eräpäivä")
+                || { tab("Koti"); return tapLabel("label CONTAINS %@", "· myöhässä") }() else { return }
+        _ = app.navigationBars.buttons["Toiminnot"].firstMatch.waitForExistence(timeout: 30)
+        // U045: the failure is said without moving the screen. Its card was inserted above the tabs
+        // and pushed them 94 pt down once the screen had settled.
+        let tabs = app.buttons["Rivit"].firstMatch
+        _ = tabs.waitForExistence(timeout: 10)
+        waitStill(tabs)
+        let tabsBefore = tabs.frame.minY
+        goOffline(); sleep(1)
+        // Kopioi luonnokseksi is in Toiminnot (N6): the Kopioi tile is gone.
+        guard invoiceAction("Kopioi luonnokseksi") else { return }
+        sleep(4); shot("p3b-copy-offline"); dump(app, "p3b-copy-offline")
+        let message = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Kopio' OR label CONTAINS 'yhteys' OR label CONTAINS 'Yhteys'")).firstMatch
+        check("P3 failed copy explains what happened (\(message.exists ? message.label : "no message"))", message.exists)
+        let failure = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Yhteys katkesi' OR label BEGINSWITH 'Ei verkkoyhteyttä'")).firstMatch
+        if failure.waitForExistence(timeout: 20) {
+            let moved = tabs.frame.minY - tabsBefore
+            note("INFO P3 tabs at \(tabsBefore), after the failure \(tabs.frame.minY)")
+            XCTAssertLessThanOrEqual(abs(moved), 1, "the failure moved the tabs \(moved) pt: \(failure.label)")
+        } else {
+            XCTFail("the offline copy said no Yhteys katkesi or Ei verkkoyhteyttä")
+        }
+        goOnline(); sleep(10)
+        // H4 (U101): a copy whose answer is lost. The request went out, so the app cannot say the copy
+        // was not made (WriteFailureCopy); the server holds one draft, and the next try keeps the key
+        // (InvoiceDetailView.runKeyed), so it gets that draft back and opens it.
         guard let stored = serverDrafts() else { XCTFail("the demo API gave no draft count"); return }
-        guard tapLabel("label CONTAINS %@", "· myöhässä") || { tab("Koti"); return tapLabel("label CONTAINS %@", "· myöhässä") }() else { return }
-        _ = app.buttons["Kopioi"].waitForExistence(timeout: 30)
         loseAnswers()
-        guard tap("Kopioi") else { return }
-        // The request went out, so the app cannot say the copy was not made (WriteFailureCopy).
-        let message = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Kopio on voinut'")).firstMatch
-        let explained = message.waitForExistence(timeout: 30)
+        guard invoiceAction("Kopioi luonnokseksi") else { return }
+        let lost = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Kopio on voinut'")).firstMatch
+        let explained = lost.waitForExistence(timeout: 30)
         shot("p3b-copy-lost"); dump(app, "p3b-copy-lost")
-        check("P3 lost copy says it may have been saved (\(explained ? message.label : "no message"))", explained)
+        check("P3 lost copy says it may have been saved (\(explained ? lost.label : "no message"))", explained)
         var copies = serverDrafts()
         for _ in 0..<10 where copies != stored + 1 { sleep(1); copies = serverDrafts() }
         XCTAssertEqual(copies, stored + 1, "the copy whose answer was lost is not one draft on the server (before: \(stored))")
         keepAnswers()
-        // The retry gets the first copy back, and the app opens it (a draft: Muokkaa, not Kopioi).
-        guard tap("Kopioi") else { return }
-        let opened = app.buttons["Muokkaa"].firstMatch.waitForExistence(timeout: 30)
+        // The copy is a draft: its one primary is Lähetä lasku (N6), the overdue invoice's is not.
+        guard invoiceAction("Kopioi luonnokseksi") else { return }
+        let opened = app.buttons["Lähetä lasku"].firstMatch.waitForExistence(timeout: 30)
         shot("p3b-copy-retried")
         XCTAssertTrue(opened, "the retry did not open the copy")
         XCTAssertEqual(serverDrafts(), stored + 1, "the retry made a second draft (before: \(stored))")

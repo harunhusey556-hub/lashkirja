@@ -209,7 +209,7 @@ struct RouteScreen: View {
         case .receipts: ReceiptsView()
         case .receipt(let id): ReceiptDetailView(receiptId: id)
         case .bankFeed, .bankHub: BankFeedView()
-        case .bankAccounts: BankAccountsView()
+        case .bankAccounts: BankAccountsView(overview: app.lastPainted("/api/bank-accounts"), connections: app.lastPainted("/api/bank/connections"))
         case .alv(let period): AlvView(period: period)
         case .settings: SettingsView()
         case .purchaseInvoices: PurchaseInvoicesView()

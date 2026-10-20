@@ -113,8 +113,7 @@ final class P0Tests: WalkTestCase {
         app.tabBars.buttons["Myynti"].tap(); sleep(2)
         guard tap("Asiakkaat") else { return }
         sleep(3); shot("d1-customers"); dump(app, "d1-customers")
-        guard tap("Lisää asiakkaita") else { return }
-        sleep(1)
+        // "+" is Uusi asiakas itself (X029): it opened a menu with Tuo CSV beside it.
         guard tap("Uusi asiakas") else { return }
         sleep(2); shot("d2-form"); dump(app, "d2-form")
         let name = app.textFields.firstMatch
@@ -131,17 +130,17 @@ final class P0Tests: WalkTestCase {
     func testE_PaymentSheet() {
         // A miss fails: it returned quietly before, and the sheet checks below never ran (N1 run 39180264585).
         guard openOverdueFromKoti() else { XCTFail("no overdue invoice on Koti"); return }
-        _ = app.buttons["Maksu"].waitForExistence(timeout: 30)
+        _ = app.navigationBars.buttons["Toiminnot"].firstMatch.waitForExistence(timeout: 30)
         sleep(1); shot("e2-invoice"); dump(app, "e2-invoice")
-        let pay = app.buttons["Kirjaa maksu"].firstMatch
-        guard tap("Maksu") else { return }
+        // Kirjaa maksu is the primary or in Toiminnot (N6): the Maksu tile is gone.
+        guard invoiceAction("Kirjaa maksu") else { XCTFail("the overdue invoice offers no Kirjaa maksu"); return }
         sleep(2); shot("e3-payment-clean")
         dump(app, "e3-payment")
         // The open sum is filled in at once, so a placeholder alone left the amount unnamed.
         XCTAssertTrue(app.staticTexts["Summa (€)"].waitForExistence(timeout: 5), "the clean payment sheet does not name its amount Summa (€)")
         swipeSheetDown("Kirjaa maksu"); sleep(2); shot("e4-clean-swipe")
         check("P0.5 clean payment sheet closes without asking", !discardDialog.exists && !app.navigationBars["Kirjaa maksu"].exists)
-        guard tap("Maksu") else { return }
+        guard invoiceAction("Kirjaa maksu") else { XCTFail("Kirjaa maksu did not open a second time"); return }
         sleep(2)
         let amount = app.textFields.firstMatch
         type(amount, "1")
@@ -218,8 +217,6 @@ final class P0Tests: WalkTestCase {
         app.tabBars.buttons["Myynti"].tap(); sleep(2)
         guard tap("Asiakkaat") else { return }
         sleep(3)
-        guard tap("Lisää asiakkaita") else { return }
-        sleep(1)
         guard tap("Uusi asiakas") else { return }
         sleep(2)
         type(app.textFields.firstMatch, "Testi Oy")
@@ -267,7 +264,7 @@ final class P0Tests: WalkTestCase {
             assertWarmCanvas(app, under: app.navigationBars["Uusi lasku"], "Uusi lasku")
             closeSheet("Uusi lasku")
         } else { XCTFail("Myynti has no Uusi lasku") }
-        if tap("Asiakkaat"), tap("Lisää asiakkaita"), tap("Uusi asiakas") {
+        if tap("Asiakkaat"), tap("Uusi asiakas") {
             assertWarmCanvas(app, under: app.navigationBars["Uusi asiakas"], "Uusi asiakas")
             closeSheet("Uusi asiakas")
         } else { XCTFail("Asiakkaat > Uusi asiakas did not open") }

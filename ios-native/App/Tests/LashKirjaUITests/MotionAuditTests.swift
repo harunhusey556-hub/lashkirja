@@ -144,6 +144,15 @@ final class MotionAuditTests: WalkTestCase {
         return b.exists && b.isHittable ? b : nil
     }
     func scrollToTop() { app.statusBars.firstMatch.exists ? app.statusBars.firstMatch.tap() : (); sleep(1) }
+    /// An item of the bar's Toiminnot, the menu opened before the recording; nil, the menu closed
+    /// again, when it has no such item. The invoice's actions live there besides its primary (N6).
+    func menuItem(_ label: String) -> XCUIElement? {
+        guard press(find("label == %@", "Toiminnot", scrolls: 0)) else { return nil }
+        if let item = find("label == %@", label, scrolls: 0) { return item }
+        // At the leading edge, which the trailing menu never reaches.
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap()
+        return nil
+    }
 
     /// Tab switch as a recorded step.
     func tabStep(_ id: String, from: String, _ name: String) {
@@ -283,8 +292,10 @@ final class MotionAuditTests: WalkTestCase {
         }
         sleep(2)
         // A figure of the report, looked for in its list: over the whole app "Myynti" found the tab
-        // bar's button, and the step measured a tab switch instead of a drill-down.
-        if let drill = find("label BEGINSWITH %@", "Menot", scrolls: 2, in: app.collectionViews.firstMatch) {
+        // bar's button, and the step measured a tab switch instead of a drill-down. Its link (a
+        // button, 9): with Kuukausittain first (B8) the chart's Menot bar came first and the tap
+        // picked a month (gate run 39334500321).
+        if let drill = find("elementType == 9 AND label BEGINSWITH %@", "Menot", scrolls: 2, in: app.collectionViews.firstMatch) {
             step("raportit-drill-open", from: "Raportit", to: "drill-down", seconds: 5,
                  reached: { self.app.tabBars.buttons["Raportit"].isSelected && self.backButton() != nil }) { press(drill) }
             sleep(2)
@@ -384,12 +395,14 @@ final class MotionAuditTests: WalkTestCase {
         if let invoice = find("label CONTAINS %@", "Lasku ", scrolls: 4) {
             step("lasku-open", from: "Myynti", to: "Lasku", seconds: 5) { press(invoice) }
             sleep(2)
-            if let pay = find("label == %@", "Maksu", scrolls: 3) {
+            // The primary when the invoice waits for its payment, else a Toiminnot item: the Maksu and
+            // Kopioi tiles are gone (N6).
+            if let pay = find("label == %@", "Kirjaa maksu", scrolls: 0) ?? menuItem("Kirjaa maksu") {
                 step("lasku-payment-sheet", from: "Lasku", to: "Kirjaa maksu", kind: "sheet", seconds: 5) { press(pay) }
                 sleep(1)
                 step("lasku-payment-cancel", from: "Kirjaa maksu", to: "Lasku", kind: "sheet") { press(find("label == %@", "Peruuta", scrolls: 0)) }
             }
-            if let copy = find("label == %@", "Kopioi", scrolls: 3) {
+            if let copy = menuItem("Kopioi luonnokseksi") {
                 step("lasku-copy", from: "Lasku", to: "Uusi lasku (copy)", kind: "sheet", seconds: 5) { press(copy) }
                 sleep(2)
                 step("lasku-copy-cancel", from: "Uusi lasku (copy)", to: "Lasku", kind: "sheet") { press(find("label == %@", "Peruuta", scrolls: 0)) }
@@ -541,12 +554,13 @@ final class MotionAuditTests: WalkTestCase {
             note("calibration: no capture fixture under the queue"); dump(app, "calibration-second-fixture"); return
         }
         fixture.tap()
-        // The row's own line ("Odottaa tarkistusta", or the duplicate's): the summary under the
-        // queue says "1 odottaa tarkistusta" already for the first, unsaved row.
-        let pending = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
-                                                           "Odottaa tarkistusta", "Samanlainen kuitti on jo tallennettu")).firstMatch
+        // The summary under the settled queue: the first, unsaved row waits for its check, so the
+        // second saved and left for review (a look-alike too) makes two. The rows themselves no
+        // longer tell: the first row's own slot says "Odottaa tarkistusta" from the start (N4), and
+        // the approval is said by the summary alone.
+        let pending = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "2 odottaa tarkistusta")).firstMatch
         let refused = app.buttons["Avaa lomake"].firstMatch
-        let approved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Hyväksytty automaattisesti")).firstMatch
+        let approved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Hyväksyttiin automaattisesti")).firstMatch
         guard let outcome = firstOf([pending, refused, approved], timeout: 90) else {
             note("calibration: the second fixture was not read"); dump(app, "calibration-second-fixture"); return
         }
@@ -589,9 +603,10 @@ final class MotionAuditTests: WalkTestCase {
             return value.isEmpty || value == placeholder
         }
         if blank(vendor, "Myyjä") { type(vendor, "Testikauppa Oy") }
-        let total = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Summa €", "Summa €")).firstMatch
+        // "Summa" beside the field, "0,00" in it while empty; the field is named "Summa euroina".
+        let total = app.textFields.matching(NSPredicate(format: "label BEGINSWITH %@ OR placeholderValue == %@", "Summa", "0,00")).firstMatch
         // Whole euros: the decimal key follows the simulator's region, not the app's Finnish.
-        if total.exists && blank(total, "Summa €") { type(total, "12") }
+        if total.exists && blank(total, "0,00") { type(total, "12") }
         // The keyboard's Valmis: the queue's own Valmis is not on screen while the form is.
         let done = app.buttons["Valmis"].firstMatch
         if done.exists { done.tap(); _ = done.waitForNonExistence(timeout: 3) }
@@ -603,7 +618,10 @@ final class MotionAuditTests: WalkTestCase {
             let choice = app.buttons["Tarvikkeet & ostot"].firstMatch
             if choice.waitForExistence(timeout: 5) { choice.tap() }
         }
-        guard tap("Tallenna kuitti") else { note("calibration: no Tallenna kuitti"); dump(app, "calibration-no-save"); return false }
+        // Pinned under the form (N4): tapped where it is, as `tap` scrolls for anything near the bottom edge.
+        let save = app.buttons["Tallenna kuitti"].firstMatch
+        guard save.waitForExistence(timeout: 5) else { note("calibration: no Tallenna kuitti"); dump(app, "calibration-no-save"); return false }
+        save.tap()
         return true
     }
 }

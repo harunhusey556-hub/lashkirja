@@ -978,11 +978,7 @@ private struct CashflowCard: View {
     }
 
     private func legend(_ title: String, _ tint: Color) -> some View {
-        HStack(spacing: 4) {
-            Circle().fill(tint).frame(width: 7, height: 7)
-            Text(title).font(.caption).foregroundStyle(Theme.ink2)
-        }
-        .accessibilityHidden(true)
+        ChartLegendItem(title: title, tint: tint).accessibilityHidden(true)
     }
 }
 

@@ -947,6 +947,15 @@ struct ReceiptRow<Accessory: View>: View, Equatable {
             VStack(alignment: .leading, spacing: 2) {
                 Text(text.title).lineLimitUnlessLarge(wrapsTitle ? 2 : 1)
                 HStack(spacing: 4) {
+                    if let tag = text.kindTag {
+                        // Fixed size: a long detail wraps beside it, the tag itself never breaks.
+                        Text(tag)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Theme.ink2.opacity(0.12), in: Capsule())
+                            .fixedSize()
+                    }
                     Text(text.detail)
                     if text.linked {
                         Image(systemName: "link").accessibilityLabel("Kohdistettu")

@@ -66,12 +66,14 @@ struct CustomersView: View {
         .onChange(of: includeArchived) { _, _ in limit.reset() }
         .navigationTitle("Asiakkaat")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 Menu {
-                    Button { showNew = true } label: { Label("Uusi asiakas", systemImage: "person.badge.plus") }
                     Button { showImport = true } label: { Label("Tuo CSV", systemImage: "square.and.arrow.down") }
-                } label: { Image(systemName: "plus") }
-                .accessibilityLabel("Lisää asiakkaita")
+                } label: { Image(systemName: "ellipsis.circle") }
+                .accessibilityLabel("Toiminnot")
+                // "+" adds a customer at once (X029): it opened a menu with the import beside it, two taps.
+                Button { showNew = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Uusi asiakas")
             }
         }
         .sheet(isPresented: $showNew) { CustomerFormSheet(existing: nil) { _ in Task { await load() } } }
@@ -198,10 +200,9 @@ struct CustomerDetailView: View {
                         ForEach(detail.invoices.prefix(invoiceLimit.visible(detail.invoices.count))) { invoice in
                             NavigationLink(value: Route.invoice(invoice.id)) {
                                 HStack {
-                                    VStack(alignment: .leading) {
-                                        Text("Lasku \(invoice.number)")
-                                        Text(APIDate.displayDay(invoice.issueDate)).font(.caption).foregroundStyle(Theme.ink2)
-                                    }
+                                    // Myynti's line (X027): the invoice date here, unlabelled, read as
+                                    // the same day as Myynti's due date.
+                                    Text(invoice.rowSecondary)
                                     Spacer()
                                     VStack(alignment: .trailing) {
                                         MoneyText(amount: invoice.gross)

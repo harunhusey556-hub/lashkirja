@@ -32,4 +32,13 @@ describe("ReceiptRow", () => {
     expect(out).not.toContain("<img");
     expect(out).not.toContain("/file/preview");
   });
+
+  it("badges a filed bill as Ostolasku in a report drill, and a plain receipt not (X079)", () => {
+    const render = (kind: SavedReceipt["kind"]) =>
+      renderToStaticMarkup(
+        createElement(ReceiptRow, { receipt: { ...receipt, kind }, selected: false, onToggleSelect: () => {} })
+      );
+    expect(render("invoice")).toContain("Ostolasku");
+    expect(render("receipt")).not.toContain("Ostolasku");
+  });
 });

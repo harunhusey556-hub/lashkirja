@@ -535,7 +535,11 @@ struct BankFeedView: View {
         if !linksLoaded, let cached: BankConnections = await app.cachedValue("/api/bank/connections") {
             bankLinks = cached.connections
             linksLoaded = true
+            app.rememberPainted(cached, "/api/bank/connections")
         }
+        // What this row shows is what Pankkiyhteys ja tilit, the screen it opens, paints first (M071).
+        // After both reads, so the row itself is not held back.
+        if position != nil { await app.rememberBankAccounts() }
     }
 
     /// Saldo yhteensä, beside the rows. A figure already on screen stays when the answer fails;
@@ -550,6 +554,7 @@ struct BankFeedView: View {
             position = value
             positionFailed = false
             app.versions.settleBalances(loadStartedAt: startedAt)
+            await app.rememberBankAccounts()
         case .failure(let error):
             if !(error is CancellationError) && position == nil { positionFailed = true }
         }
@@ -695,6 +700,7 @@ struct BankFeedView: View {
         defer { if !Task.isCancelled { linksLoaded = true } }
         guard let list: BankConnections = try? await app.cachedGet("/api/bank/connections") else { return }
         bankLinks = list.connections
+        app.rememberPainted(list, "/api/bank/connections")
     }
 
     /// `POST /api/bank/connections/[id]/sync`, told as "Haettiin N tapahtumaa." The balances it
@@ -824,6 +830,10 @@ struct BankRowSheet: View {
     @State private var candidates = ScreenLoad<[BankMatchCandidate]>()
     /// The data version the row was read at; a newer one re-reads it.
     @State private var seenVersion: Int?
+    /// "Kohdista ostolaskuun" from Toiminnot: pushed on this sheet's stack.
+    @State private var linkingPurchase = false
+    /// A route opened from Toiminnot with no screen under the sheet to hand it to.
+    @State private var pushed: Route?
 
     init(row: BankTransaction, showStatementLink: Bool = true, onOpen: ((Route) -> Void)? = nil) {
         _row = State(initialValue: row)
@@ -845,32 +855,34 @@ struct BankRowSheet: View {
                     .listRowBackground(Color.clear)
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
-                Section { actions }
-                if purchaseLinkable {
-                    Section {
-                        // Pushed on this sheet's stack; a confirmed link closes the sheet like the other actions.
-                        NavigationLink {
-                            PurchaseRowLinkView(row: row) { dismiss() }
-                        } label: {
-                            Label("Kohdista ostolaskuun", systemImage: "doc.text.magnifyingglass")
-                        }
-                    } footer: {
-                        Text("Maksoiko tämä ostolaskun? Kohdista se laskuun, niin lasku merkitään maksetuksi.")
-                    }
-                }
+                details
                 if searchable { candidateSection }
-                if showStatementLink {
-                    Section {
-                        openLink(.statement(row.statementId), "Avaa tiliote", symbol: "doc.plaintext")
-                    }
-                }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
             .appDestinations()
+            // A confirmed link closes the sheet like the other actions.
+            .navigationDestination(isPresented: $linkingPurchase) {
+                PurchaseRowLinkView(row: row) { dismiss() }
+            }
+            .navigationDestination(item: $pushed) { route in
+                RouteScreen(route: route).navigationBarTitleDisplayMode(.inline)
+            }
             .navigationTitle(BankFeed.label(BankFeed.state(of: row), income: row.amount > 0))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Valmis") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Valmis") { dismiss() } }
+                if hasMoreActions {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu { moreActions } label: { Image(systemName: "ellipsis.circle") }
+                        .accessibilityLabel("Toiminnot")
+                    }
+                }
+            }
+            // At the bottom of the medium detent from the first frame, so it is reached without a scroll.
+            .bottomBar {
+                if let primary { primaryBar(primary) }
+            }
             .disabled(busy)
             // Only a saved receipt closes the row; a cancelled camera returns to it.
             .fullScreenCover(isPresented: $capture, onDismiss: { if captured { dismiss() } }) {
@@ -907,61 +919,157 @@ struct BankRowSheet: View {
         }
     }
 
-    @ViewBuilder private var actions: some View {
+    /// What the row waits for: the sheet's one primary, at the bottom (X092). Five rows of the same
+    /// weight stood in the body, and the medium detent cut the last ones off; the rest is in Toiminnot.
+    private enum Primary {
+        case capture, confirm(receiptId: String), approveSale
+        /// A settled row's document: opening it is the one thing left to do, two taps from Pankki.
+        case show(Route, title: String)
+
+        var title: String {
+            switch self {
+            case .capture: "Kuvaa kuitti"
+            case .confirm: "Kohdista kuitti"
+            case .approveSale: "Hyväksy myynti"
+            case .show(_, let title): title
+            }
+        }
+    }
+
+    private var primary: Primary? {
+        switch BankFeed.state(of: row) {
+        // A kuitti documents money out; money in that waits is set aside from Toiminnot.
+        case .missing: return row.amount < 0 ? Primary.capture : nil
+        case .suggested: return row.suggestedReceipt.map { Primary.confirm(receiptId: $0.id) }
+        case .sale: return Primary.approveSale
+        case .linked: return row.receipt.map { Primary.show(.receipt($0.id), title: "Avaa kuitti") }
+        case .invoice:
+            if let invoice = row.paidInvoice { return Primary.show(.invoice(invoice.id), title: "Avaa lasku \(invoice.number)") }
+            return row.paidPurchase.map { Primary.show(.purchaseInvoice($0.id), title: "Avaa ostolasku") }
+        case .ignored, .transfer: return nil
+        }
+    }
+
+    private func perform(_ primary: Primary) {
+        switch primary {
+        case .capture: capture = true
+        case .confirm(let receiptId): Task { await confirm(receiptId) }
+        case .approveSale: Task { await approveSale() }
+        case .show(let route, _): openDocument(route)
+        }
+    }
+
+    private func primaryBar(_ primary: Primary) -> some View {
+        Button { perform(primary) } label: {
+            // The spinner fades into a fixed slot mirrored on the other side, as on the receipt's
+            // Hyväksy: the title stays centred and still while the answer is on its way.
+            HStack(spacing: 8) {
+                ZStack {
+                    if busy { ProgressView().tint(Theme.onInk).transition(.opacity) }
+                }
+                .frame(width: 20, height: 20)
+                Text(primary.title).font(.headline)
+                Color.clear.frame(width: 20, height: 20)
+            }
+            .motion(.easeOut(duration: 0.15), value: busy)
+            .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.primary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .bottomBarBacking()
+        .transition(.opacity)
+    }
+
+    /// What the row says beside its primary; the actions themselves are in the bar and Toiminnot.
+    @ViewBuilder private var details: some View {
+        switch BankFeed.state(of: row) {
+        case .suggested:
+            if let suggested = row.suggestedReceipt {
+                Section {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Ehdotus: \(suggested.vendor ?? "kuitti")").foregroundStyle(Theme.ink2)
+                        if let why = BankFeed.matchWhy(row) {
+                            Text(why).font(.caption).foregroundStyle(Theme.ink2)
+                        }
+                    }
+                }
+            }
+        case .invoice:
+            if row.paidInvoice == nil {
+                Section {
+                    if let purchase = row.paidPurchase {
+                        Text("Maksu ostolaskulle: \(purchase.supplierName)").foregroundStyle(Theme.ink2)
+                    } else {
+                        Text("Tämä maksu on kirjattu laskulle.").foregroundStyle(Theme.ink2)
+                    }
+                }
+            }
+        case .transfer:
+            Section { Text("Oma siirto tai palkka. Tämä ei tarvitse kuittia.").foregroundStyle(Theme.ink2) }
+        case .sale, .missing, .linked, .ignored:
+            EmptyView()
+        }
+    }
+
+    /// Toiminnot: every action of the row but its primary.
+    @ViewBuilder private var moreActions: some View {
         switch BankFeed.state(of: row) {
         case .sale:
-            Button { Task { await approveSale() } } label: { Label("Hyväksy myynti", systemImage: "checkmark.circle") }
             Button { Task { await ignore(true) } } label: { Label("Ei ole myyntiä", systemImage: "nosign") }
         case .suggested:
             if let suggested = row.suggestedReceipt {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Ehdotus: \(suggested.vendor ?? "kuitti")").foregroundStyle(Theme.ink2)
-                    if let why = BankFeed.matchWhy(row) {
-                        Text(why).font(.caption).foregroundStyle(Theme.ink2)
-                    }
-                }
-                Button { Task { await confirm(suggested.id) } } label: { Label("Kohdista kuitti", systemImage: "link") }
                 Button { Task { await reject(suggested.id) } } label: { Label("Väärä kuitti", systemImage: "xmark") }
             }
         case .missing:
-            if row.amount < 0 {
-                Button { capture = true } label: { Label("Kuvaa kuitti", systemImage: "camera") }
-            }
             Button { Task { await ignore(true) } } label: { Label(row.amount > 0 ? "Ei vaadi kuittia" : "Kuittia ei tarvita", systemImage: "nosign") }
         case .linked:
-            if let receipt = row.receipt {
-                openLink(.receipt(receipt.id), "Avaa kuitti", symbol: "doc.text")
-            }
             Button(role: .destructive) { Task { await unlink() } } label: { Label("Poista kohdistus", systemImage: "link.badge.plus") }
         case .ignored:
             Button { Task { await ignore(false) } } label: { Label("Palauta", systemImage: "arrow.uturn.backward") }
         case .invoice:
-            if let invoice = row.paidInvoice {
-                openLink(.invoice(invoice.id), "Avaa lasku \(invoice.number)", symbol: "doc.text")
-            } else if let purchase = row.paidPurchase {
-                Text("Maksu ostolaskulle: \(purchase.supplierName)").foregroundStyle(Theme.ink2)
-                openLink(.purchaseInvoice(purchase.id), "Avaa ostolasku", symbol: "doc.text")
+            if row.paidInvoice == nil, let purchase = row.paidPurchase {
                 Button(role: .destructive) { Task { await unlinkPurchase(purchase) } } label: {
                     Label("Irrota ostolaskusta", systemImage: "link")
                 }
-            } else {
-                Text("Tämä maksu on kirjattu laskulle.").foregroundStyle(Theme.ink2)
             }
         case .transfer:
-            Text("Oma siirto tai palkka. Tämä ei tarvitse kuittia.").foregroundStyle(Theme.ink2)
+            EmptyView()
+        }
+        if purchaseLinkable {
+            Button { linkingPurchase = true } label: { Label("Kohdista ostolaskuun", systemImage: "doc.text.magnifyingglass") }
+        }
+        if searchable && !searchStarted {
+            Button { Task { await loadCandidates() } } label: { Label("Etsi kuitti", systemImage: "magnifyingglass") }
+        }
+        if showStatementLink {
+            openLink(.statement(row.statementId), "Avaa tiliote", symbol: "doc.plaintext")
         }
     }
 
-    @ViewBuilder private func openLink(_ route: Route, _ title: String, symbol: String) -> some View {
+    /// Toiminnot is left out only where it would open empty: a transfer, or a payment booked to an
+    /// invoice the row does not name, seen from its own tiliote.
+    private var hasMoreActions: Bool {
+        switch BankFeed.state(of: row) {
+        case .transfer: return showStatementLink
+        case .invoice: return showStatementLink || (row.paidInvoice == nil && row.paidPurchase != nil)
+        case .sale, .suggested, .missing, .linked, .ignored: return true
+        }
+    }
+
+    /// A Toiminnot item; see `openDocument`.
+    private func openLink(_ route: Route, _ title: String, symbol: String) -> some View {
+        Button { openDocument(route) } label: { Label(title, systemImage: symbol) }
+    }
+
+    /// Handed to the screen under the sheet, which pushes it once the sheet has closed. A menu item
+    /// or the bar's button cannot be a NavigationLink, so without that screen it is pushed here.
+    private func openDocument(_ route: Route) {
         if let onOpen {
-            Button {
-                onOpen(route)
-                dismiss()
-            } label: {
-                Label(title, systemImage: symbol)
-            }
+            onOpen(route)
+            dismiss()
         } else {
-            NavigationLink(value: route) { Label(title, systemImage: symbol) }
+            pushed = route
         }
     }
 
@@ -977,6 +1085,9 @@ struct BankRowSheet: View {
         return (state == .missing || state == .suggested) && BankFeed.canSearchReceipts(row)
     }
 
+    /// "Etsi kuitti" (Toiminnot) has been tapped: its list takes the place of the row's own candidates.
+    private var searchStarted: Bool { candidates.phase != .idle || candidates.value != nil }
+
     @ViewBuilder private var candidateSection: some View {
         let inline = (row.matchCandidates ?? []).filter { $0.receipt != nil && $0.receipt?.id != row.suggestedReceiptId }
         if !inline.isEmpty && candidates.value == nil {
@@ -986,10 +1097,8 @@ struct BankRowSheet: View {
                 Text("Ehdotetut kuitit")
             }
         }
-        Section {
-            if candidates.phase == .idle && candidates.value == nil {
-                Button { Task { await loadCandidates() } } label: { Label("Etsi kuitti", systemImage: "magnifyingglass") }
-            } else {
+        if searchStarted {
+            Section {
                 switch candidates.display {
                 case .loading:
                     ProgressView().frame(maxWidth: .infinity)
@@ -1005,9 +1114,9 @@ struct BankRowSheet: View {
                         ForEach(list, id: \.self) { candidate in candidateButton(candidate) }
                     }
                 }
+            } header: {
+                if candidates.value != nil { Text("Valitse kuitti") }
             }
-        } header: {
-            if candidates.value != nil { Text("Valitse kuitti") }
         }
     }
 

@@ -118,17 +118,6 @@ struct MyyntiView: View {
                 } footer: {
                     if let note = SalesListQuery.limitNote(rowCount: list.invoices.count) { Text(note) }
                 }
-                if scope.isEmpty {
-                    Section("Muut") {
-                        Button { showMatch = true } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Label("Hae asiakkaiden maksut pankista", systemImage: "building.columns")
-                                Text("Kirjaa maksut viitenumeron mukaan").font(.caption).foregroundStyle(Theme.ink2)
-                            }
-                        }
-                        .foregroundStyle(Theme.ink)
-                    }
-                }
             } else {
                 ScreenStateView(state: state, retry: load) { (_: InvoiceList) in EmptyView() }
                     .listRowBackground(Color.clear)
@@ -144,8 +133,20 @@ struct MyyntiView: View {
         }
         .navigationTitle(scope.isEmpty ? "Myynti" : "Laskut")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { Perf.beginOpen("laskuUusi"); newInvoice = SheetRequest() } label: { Label("Uusi lasku", systemImage: "plus") }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                // The rest in Toiminnot (M035): the bank's payments were a full-width card under the list.
+                if scope.isEmpty {
+                    Menu {
+                        Button { showMatch = true } label: {
+                            Label("Hae asiakkaiden maksut pankista", systemImage: "building.columns")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("Toiminnot")
+                }
+                // The one primary, in words: as "+" it was an icon of the same weight as those beside it.
+                Button("Uusi lasku") { Perf.beginOpen("laskuUusi"); newInvoice = SheetRequest() }
             }
         }
         .sheet(item: $newInvoice, onDismiss: openCreated) { _ in
@@ -593,7 +594,8 @@ struct InvoiceRow: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(invoice.customer.name).font(.body).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
-                Text(secondary).font(.caption).foregroundStyle(Theme.ink2)
+                // The badge beside it says "Myöhässä"; the line no longer says it too (M100).
+                Text(invoice.rowSecondary).font(.caption).foregroundStyle(Theme.ink2)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
@@ -603,21 +605,16 @@ struct InvoiceRow: View {
         }
         .padding(.vertical, 2)
     }
-
-    private var secondary: String {
-        if invoice.isCreditNote { return "Hyvityslasku \(invoice.number)" }
-        if invoice.displayStatus == .draft { return "Lasku \(invoice.number)" }
-        let base = "Lasku \(invoice.number) · \(invoice.displayStatus == .overdue ? "myöhässä, eräpäivä" : "eräpäivä") \(APIDate.displayDay(invoice.dueDate))"
-        return base + (invoice.creditedRowSuffix ?? "")
-    }
 }
 
 struct StatusBadge: View {
     let status: InvoiceStatus
     /// A part credit leaves the status as it was; the badge says "Osittain hyvitetty" instead.
     var partlyCredited = false
+    /// Words of its own in the status's colours: the invoice's "Myöhässä 15 päivää".
+    var text: String? = nil
     var body: some View {
-        Text(partlyCredited ? InvoiceCreditDisplay.partlyCreditedLabel : status.label)
+        Text(text ?? (partlyCredited ? InvoiceCreditDisplay.partlyCreditedLabel : status.label))
             .font(.caption2.weight(.semibold))
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(color.opacity(0.12), in: Capsule())
