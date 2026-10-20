@@ -253,10 +253,13 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .padding(.horizontal, ChipRow.inset)
                 }
+                .chipRowScroll()
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
             }
+            .chipRowSection()
         }
         if list.candidates.isEmpty {
             Section {

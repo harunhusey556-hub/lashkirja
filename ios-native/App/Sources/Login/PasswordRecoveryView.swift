@@ -179,7 +179,7 @@ struct PasswordRecoveryView: View {
     private var codeFields: some View {
         VStack(alignment: .leading, spacing: 20) {
             AuthField(label: "Tilin sähköposti", problem: emailProblem, focused: focus == .email) {
-                TextField("Tilin sähköposti", text: $email, prompt: Text("nimi@yritys.fi"))
+                TextField("Tilin sähköposti", text: $email, prompt: Text(verbatim: "nimi@yritys.fi"))
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
