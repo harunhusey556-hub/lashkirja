@@ -45,7 +45,9 @@ extension View {
     }
 
     /// A chip label's subheadline font, semibold while selected. The label always takes its semibold
-    /// width (a hidden semibold copy under it), so picking a chip moves none beside it (X025).
+    /// width (a hidden semibold copy under it), so picking a chip moves none beside it (X025). The
+    /// chips draw their outline inside the edge (`strokeBorder`): a centred `stroke` reached 0.5 pt
+    /// past an unselected chip only, which made it 1 pt wider than when selected.
     func chipFont(selected: Bool) -> some View {
         ZStack {
             self.font(.subheadline.weight(.semibold)).hidden().accessibilityHidden(true)

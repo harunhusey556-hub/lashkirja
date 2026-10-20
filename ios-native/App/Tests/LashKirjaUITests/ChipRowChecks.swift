@@ -32,4 +32,24 @@ extension WalkTestCase {
         check("\(screen): the chip row reaches the screen's edges, its first chip 16 pt in", held)
         return held
     }
+
+    /// Swipes the chip row `identifier` until `chip` is wholly on the screen. Judged by the chip's
+    /// frame, not `isHittable`: of a chip wholly past the screen's edge XCTest finds no point to hit
+    /// and fails the test instead of answering false (run 39334173559: Kuitit's 'Ei kohdistettu' at
+    /// x 423..570 in the 402 pt window, "Activation point invalid and no suggested hit points").
+    @discardableResult
+    func revealChip(_ chip: XCUIElement, inRow identifier: String) -> Bool {
+        let row = app.scrollViews.matching(identifier: identifier).firstMatch
+        let window = app.windows.firstMatch.frame
+        func shown() -> Bool {
+            let frame = chip.frame
+            return frame.minX >= window.minX && frame.maxX <= window.maxX
+        }
+        for _ in 0..<3 where !shown() {
+            if chip.frame.maxX > window.maxX { row.swipeLeft() } else { row.swipeRight() }
+            // The row coasts on after the finger lifts.
+            waitStill(chip)
+        }
+        return shown()
+    }
 }

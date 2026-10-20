@@ -326,7 +326,7 @@ struct PurchaseInvoicesView: View {
                 .padding(.horizontal, 14)
                 .frame(minHeight: 36)
                 .background(selected ? Theme.ink : Theme.surface, in: Capsule())
-                .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
+                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: selected ? 0 : 1))
         }
         .buttonStyle(.pressable)
         .accessibilityAddTraits(selected ? .isSelected : [])

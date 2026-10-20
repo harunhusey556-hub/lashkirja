@@ -510,10 +510,7 @@ final class StabilityTests: WalkTestCase {
         let unlinked = app.buttons["receipt-tab-unlinked"].firstMatch
         guard unlinked.waitForExistence(timeout: 15) else { dump(app, "stability-15-kuitit"); XCTFail("no Ei kohdistettu chip"); return }
         // The chips scroll sideways; the fifth may sit past the edge.
-        if !unlinked.isHittable {
-            app.buttons["receipt-tab-all"].firstMatch.swipeLeft()
-            _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: unlinked)], timeout: 5)
-        }
+        revealChip(unlinked, inRow: "receipt-chips")
         unlinked.tap(); taps += 1
         // The seed's two sure pairs. At the top of the list, rows run on under the bar.
         let sure = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kohdista varmat")).firstMatch
@@ -532,7 +529,8 @@ final class StabilityTests: WalkTestCase {
     }
 
     /// X025 (B11): a picked chip turns semibold and moves nothing. Its wider label pushed every chip
-    /// after it by about 3 pt, on Myynti, on an invoice's tabs and on Kuitit.
+    /// after it by about 3 pt, on Myynti, on an invoice's tabs, on Kuitit and on Ostolaskut. The
+    /// outline did too: drawn centred on the edge, it made an unpicked chip 1 pt wider (run 39334173559).
     func test18_ChipsKeepTheirWidth() {
         XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
         assertChipsHoldStill("sales-chips", "Myynti", counted: true)
@@ -544,6 +542,12 @@ final class StabilityTests: WalkTestCase {
         openHubRow("Kuitit")
         assertChipsHoldStill("receipt-chips", "Kuitit", counted: true)
         shot("stability-chips-kuitit")
+        // Ostolaskut draws its own copy of the chip. Its pick is kept between visits (ostolaskut.filter):
+        // Kaikki is picked again after.
+        backToBooks("Kuitit")
+        openHubRow("Ostolaskut")
+        assertChipsHoldStill("purchase-chips", "Ostolaskut", counted: true)
+        app.scrollViews.matching(identifier: "purchase-chips").firstMatch.buttons.element(boundBy: 0).tap(); taps += 1
     }
 
     /// The first picked-mode row of a list on screen below `top`, not under the bottom of the

@@ -391,7 +391,7 @@ struct ReceiptsView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(active ? Theme.ink : Theme.surface, in: Capsule())
-                        .overlay(Capsule().stroke(Theme.line, lineWidth: active ? 0 : 1))
+                        .overlay(Capsule().strokeBorder(Theme.line, lineWidth: active ? 0 : 1))
                     }
                     .buttonStyle(.pressable)
                     .accessibilityAddTraits(active ? .isSelected : [])
