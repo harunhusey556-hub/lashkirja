@@ -190,33 +190,60 @@ extension Error {
     var userMessage: String { (self as? LKError)?.message ?? LKError.unreachable }
 }
 
-/// A brief message with an optional action ("Kumoa"), shown above the tab bar.
+/// A brief message with an optional action ("Kumoa"), shown above the tab bar. A failure `stays`
+/// until the owner closes it or acts on it: gone after five seconds, it could not be read whole.
 struct Toast: Equatable, Identifiable {
     let id = UUID()
     let text: String
     let actionLabel: String?
+    var stays = false
     static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
 }
 
 struct ToastView: View {
     let toast: Toast
     let action: () -> Void
+    /// Closes a toast that stays; one that goes by itself has no close button.
+    var close: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "checkmark.circle").accessibilityHidden(true)
-            Text(toast.text).font(.subheadline).lineLimit(2)
-            Spacer(minLength: 8)
-            if let label = toast.actionLabel {
-                Button(label, action: action).font(.subheadline.bold())
+        content
+            .foregroundStyle(Theme.onInk)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Theme.ink.opacity(0.94), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 16)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    @ViewBuilder private var content: some View {
+        if toast.stays {
+            // Read whole, with the action under the text: what failed, and whether it may have gone
+            // through, is the message (U045). Beside the buttons a long one was a narrow column.
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle").accessibilityHidden(true)
+                    Text(toast.text).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    if let close {
+                        Button(action: close) { Image(systemName: "xmark").font(.subheadline.bold()) }
+                            .accessibilityLabel("Sulje")
+                    }
+                }
+                if let label = toast.actionLabel {
+                    Button(label, action: action).font(.subheadline.bold())
+                }
+            }
+        } else {
+            HStack(spacing: 12) {
+                Image(systemName: "checkmark.circle").accessibilityHidden(true)
+                Text(toast.text).font(.subheadline).lineLimit(2)
+                Spacer(minLength: 8)
+                if let label = toast.actionLabel {
+                    Button(label, action: action).font(.subheadline.bold())
+                }
             }
         }
-        .foregroundStyle(Theme.onInk)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Theme.ink.opacity(0.94), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.horizontal, 16)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }
 
