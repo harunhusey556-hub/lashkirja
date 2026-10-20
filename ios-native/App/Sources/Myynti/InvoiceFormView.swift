@@ -127,17 +127,7 @@ struct InvoiceFormView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if existing == nil {
-                    ToolbarItem(placement: .principal) {
-                        VStack(spacing: 0) {
-                            Text("Uusi lasku").font(.headline).foregroundStyle(Theme.ink)
-                            // The number's line is there from the first frame and fades in once the
-                            // server names it: swapping the plain title for this one moved the title up.
-                            Text(InvoiceSequence.label(nextNumber) ?? " ").font(.caption2).foregroundStyle(Theme.ink2)
-                                .opacity(nextNumber == nil ? 0 : 1)
-                        }
-                        .motion(.easeOut(duration: 0.2), value: nextNumber)
-                        .accessibilityElement(children: .combine)
-                    }
+                    ToolbarItem(placement: .principal) { InvoiceFormTitle(nextNumber: nextNumber) }
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
@@ -720,6 +710,30 @@ struct InvoiceFormView: View {
             failure = error.userMessage
             Haptics.error()
         }
+    }
+}
+
+/// "Uusi lasku" over the number the server will give it.
+struct InvoiceFormTitle: View {
+    let nextNumber: Int?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Uusi lasku").font(.headline).foregroundStyle(Theme.ink)
+            // The number's line is there from the first frame and fades in once the server names it:
+            // swapping the plain title for this one moved the title up. It is as wide as a four-digit
+            // number from the start, since the bar re-centres a title whose width changes: it jumped
+            // 25 pt left and eased back when the number came (M092).
+            ZStack {
+                Text("Seuraava laskunumero: 0000").hidden().accessibilityHidden(true)
+                Text(InvoiceSequence.label(nextNumber) ?? " ")
+                    .opacity(nextNumber == nil ? 0 : 1)
+                    .motion(.easeOut(duration: 0.2), value: nextNumber)
+            }
+            .font(.caption2)
+            .foregroundStyle(Theme.ink2)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

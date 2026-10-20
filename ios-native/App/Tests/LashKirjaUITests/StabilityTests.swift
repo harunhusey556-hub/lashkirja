@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// Stability walk (2026-10-08): every long list grows and folds back with "Näytä enemmän", and the
 /// screens added in October open and answer. Unlike the acceptance walks these ASSERT: a freeze
@@ -279,6 +280,136 @@ final class StabilityTests: WalkTestCase {
         }
     }
 
+    /// X002 X022 X160 X161 (B3): at the default text size on a 402 pt phone, each confirm sheet's
+    /// inline title reads whole between Peruuta and the confirm button. Long confirm labels cut the
+    /// titles ('Lähetä maksumuis…', 'Hyvitä la…', 'Hyvitä os…') or pushed one out of the bar ('Kirjaa
+    /// maksu' beside 'Merkitse maksetuksi'), and the credit amount's label lost its '(€)'. Text the
+    /// audit finds cut on the screen under a sheet is that screen's and is not counted.
+    func test17_SheetTitlesFit() {
+        // From Myynti, not Koti: Koti's tasks can put the overdue invoice behind "Näytä enemmän".
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        let invoice = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
+        guard tapLabel("label CONTAINS %@", "· myöhässä"), invoice.waitForExistence(timeout: 20) else {
+            dump(app, "stability-17-no-invoice"); XCTFail("no overdue invoice opened from Myynti"); return
+        }
+        var under = clippedTexts()
+        // The primary while a reminder may go, a Toiminnot item while it waits for its date.
+        if let remind = hittable(app.buttons.matching(NSPredicate(format: "label == %@", "Lähetä maksumuistutus")), timeout: 15) {
+            remind.tap(); taps += 1
+            assertSheetFits("Maksumuistutus", beyond: under)
+        } else if pickFromMenu(invoice, "Lähetä maksumuistutus") {
+            assertSheetFits("Maksumuistutus", beyond: under)
+        } else {
+            XCTFail("the overdue invoice offers no Lähetä maksumuistutus")
+        }
+        if pickFromMenu(invoice, "Hyvitä") { assertSheetFits("Hyvitä laskua", beyond: under) } else { XCTFail("Toiminnot has no Hyvitä") }
+
+        openHubRow("Ostolaskut")
+        let purchase = app.navigationBars["Ripsitukku Oy"]
+        guard tapLabel("label CONTAINS %@", "Ripsitukku Oy"), purchase.waitForExistence(timeout: 20) else {
+            dump(app, "stability-17-no-purchase"); XCTFail("the seed's Ripsitukku Oy ostolasku did not open"); return
+        }
+        under = clippedTexts()
+        if pickFromMenu(purchase, "Hyvitä") { assertSheetFits("Hyvitä ostolasku", beyond: under) } else { XCTFail("Ripsitukku Oy: Toiminnot has no Hyvitä") }
+        if pickFromMenu(purchase, "Kirjaa maksu") { assertSheetFits("Kirjaa maksu", beyond: under) } else { XCTFail("Ripsitukku Oy: Toiminnot has no Kirjaa maksu") }
+    }
+
+    /// The sheet titled `title` has risen: its bar shows the whole title, and the textClipped audit finds no
+    /// text cut beyond `under` (the screen beneath, read before the sheet opened). Closed with Peruuta.
+    private func assertSheetFits(_ title: String, beyond under: [String], file: StaticString = #filePath, line: UInt = #line) {
+        let bar = app.navigationBars[title]
+        guard bar.waitForExistence(timeout: 10) else {
+            dump(app, "stability-17-no-sheet"); XCTFail("\(title) did not open", file: file, line: line); return
+        }
+        waitStill(bar)
+        shot("stability-17-\(title)")
+        let name = bar.staticTexts[title].firstMatch
+        XCTAssertTrue(name.exists && name.frame.width > 1, "\(title): the bar does not show its title", file: file, line: line)
+        // iOS 26 draws a half-height sheet as its full-width layout scaled into the inset card: its bar
+        // is 386 x 51.9 pt against 402 x 54 at full height, and 'Peruuta' 80.0 x 34.6 against 83.3 x 36
+        // (P0 e3-payment dump). The audit then read every snug label of Hyvitä laskua and Kirjaa maksu
+        // as cut, 'Peruuta' and 'Tallenna' included, while their screenshots show them whole (run
+        // 39322642358). The layout is the same at both heights, so such a sheet is dragged up by its
+        // bar and audited unscaled.
+        if !spansWindow(bar) {
+            bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)))
+            let deadline = Date().addingTimeInterval(5)
+            while !spansWindow(bar) && Date() < deadline { usleep(250_000) }
+            waitStill(bar)
+            shot("stability-17-\(title)-full")
+        }
+        if spansWindow(bar) {
+            // What the audit says for a real cut is unseen, so the title is measured too: cut, its frame
+            // is narrower than the whole title in the bar's 17 pt semibold (about 129 pt, run 39322642358).
+            let whole = (title as NSString).size(withAttributes: [.font: UIFont.preferredFont(forTextStyle: .headline)]).width
+            XCTAssertGreaterThanOrEqual(name.frame.width, whole - 3, "\(title): the title is cut (\(name.frame.width) of \(whole) pt)", file: file, line: line)
+            let cut = clippedTexts().filter { !under.contains($0) }
+            XCTAssertEqual(cut, [], "\(title): text cut on the sheet", file: file, line: line)
+        } else {
+            dump(app, "stability-17-not-full")
+            XCTFail("\(title): the sheet did not rise to full height (bar \(bar.frame)), so it was not audited", file: file, line: line)
+        }
+        bar.buttons["Peruuta"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(bar.waitForNonExistence(timeout: 10), "\(title): Peruuta did not close the sheet", file: file, line: line)
+    }
+
+    /// Taps `item` in the bar's Toiminnot menu. The screen under the menu can have a button of that
+    /// name too (Ostolasku's own "Kirjaa maksu"); the menu lies over it, so its item is the last match.
+    private func pickFromMenu(_ bar: XCUIElement, _ item: String) -> Bool {
+        let menu = bar.buttons["Toiminnot"].firstMatch
+        guard menu.waitForExistence(timeout: 15) else { note("MISS \(item): no Toiminnot"); return false }
+        menu.tap(); taps += 1
+        guard let button = hittable(app.buttons.matching(NSPredicate(format: "label == %@", item)), last: true, timeout: 5) else {
+            dump(app, "stability-17-menu"); note("MISS \(item) in Toiminnot")
+            // Closes the menu, so the next step starts from the screen.
+            app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+            return false
+        }
+        button.tap(); taps += 1
+        return true
+    }
+
+    /// The first hittable element of `query` (the last one with `last`), looked for until `timeout`.
+    private func hittable(_ query: XCUIElementQuery, last: Bool = false, timeout: TimeInterval) -> XCUIElement? {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let all = query.allElementsBoundByIndex
+            if let element = last ? all.last(where: { $0.isHittable }) : all.first(where: { $0.isHittable }) { return element }
+            usleep(250_000)
+        } while Date() < deadline
+        return nil
+    }
+
+    /// A sheet's bar spans the window only at full height, where the sheet is drawn unscaled.
+    private func spansWindow(_ bar: XCUIElement) -> Bool {
+        bar.frame.width >= app.windows.firstMatch.frame.width - 1
+    }
+
+    /// The texts the textClipped audit finds cut on the screen at this text size, by label and what the
+    /// audit said; the audit itself records nothing. Its guesses at larger sizes ("may be clipped at
+    /// larger Dynamic Type sizes") are only noted, as in P2Tests.testI: those belong to B5, and the
+    /// audit makes them for whole text too (OwnerScreensTests.testD, run 39207976615). P2Tests has a
+    /// copy: the session gate builds this file alone onto an older ref.
+    private func clippedTexts() -> [String] {
+        let found = ClippedTexts()
+        do {
+            try app.performAccessibilityAudit(for: .textClipped) { issue in
+                let label = issue.element?.label ?? ""
+                let text = "\(label.isEmpty ? issue.compactDescription : label): \(issue.detailedDescription)"
+                if "\(issue.compactDescription) \(issue.detailedDescription)".localizedCaseInsensitiveContains("larger") {
+                    self.note("INFO 17 audit at larger sizes: \(text)")
+                } else {
+                    found.labels.append(text)
+                }
+                return true
+            }
+        } catch {
+            XCTFail("the textClipped audit did not run: \(error)")
+        }
+        return found.labels
+    }
+
     /// A month chip's button: "Syyskuu, 3", or "Joulukuu 2025, 3" for another year (SectionChip).
     static let monthChip = "[A-ZÄÖÅ][a-zäöå]+( [0-9]{4})?, [0-9]+"
     /// Any bank row's button, whatever its state. A copy of P1Tests.bankRow: the session gate
@@ -510,10 +641,7 @@ final class StabilityTests: WalkTestCase {
         let unlinked = app.buttons["receipt-tab-unlinked"].firstMatch
         guard unlinked.waitForExistence(timeout: 15) else { dump(app, "stability-15-kuitit"); XCTFail("no Ei kohdistettu chip"); return }
         // The chips scroll sideways; the fifth may sit past the edge.
-        if !unlinked.isHittable {
-            app.buttons["receipt-tab-all"].firstMatch.swipeLeft()
-            _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: unlinked)], timeout: 5)
-        }
+        revealChip(unlinked, inRow: "receipt-chips")
         unlinked.tap(); taps += 1
         // The seed's two sure pairs. At the top of the list, rows run on under the bar.
         let sure = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kohdista varmat")).firstMatch
@@ -529,6 +657,28 @@ final class StabilityTests: WalkTestCase {
         guard approve.waitForExistence(timeout: 15) else { dump(app, "stability-15-no-hyvaksy"); XCTFail("the pending receipt has no Hyväksy"); return }
         assertCanvasUnderBar(approve, "Kuitti, Hyväksy")
         shot("stability-receipt-bar")
+    }
+
+    /// X025 (B11): a picked chip turns semibold and moves nothing. Its wider label pushed every chip
+    /// after it by about 3 pt, on Myynti, on an invoice's tabs, on Kuitit and on Ostolaskut. The
+    /// outline did too: drawn centred on the edge, it made an unpicked chip 1 pt wider (run 39334173559).
+    func test18_ChipsKeepTheirWidth() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        assertChipsHoldStill("sales-chips", "Myynti", counted: true)
+        // Lasku 2, the seed's overdue invoice: listed on Kaikki and on Myöhässä alike.
+        guard tapLabel("label CONTAINS %@", "Lasku 2 · "), app.navigationBars["Lasku 2"].waitForExistence(timeout: 20) else {
+            dump(app, "stability-18-no-invoice"); XCTFail("Lasku 2 did not open from Myynti"); return
+        }
+        assertChipsHoldStill("invoice-tabs", "Lasku 2", counted: false)
+        openHubRow("Kuitit")
+        assertChipsHoldStill("receipt-chips", "Kuitit", counted: true)
+        shot("stability-chips-kuitit")
+        // Ostolaskut draws its own copy of the chip. Its pick is kept between visits (ostolaskut.filter):
+        // Kaikki is picked again after.
+        backToBooks("Kuitit")
+        openHubRow("Ostolaskut")
+        assertChipsHoldStill("purchase-chips", "Ostolaskut", counted: true)
+        app.scrollViews.matching(identifier: "purchase-chips").firstMatch.buttons.element(boundBy: 0).tap(); taps += 1
     }
 
     /// The first picked-mode row of a list on screen below `top`, not under the bottom of the
@@ -567,6 +717,60 @@ final class StabilityTests: WalkTestCase {
         XCTAssertTrue(app.navigationBars["Kirjanpito"].waitForExistence(timeout: 10), "Back from \(title) did not reach Kirjanpito")
     }
 
+    /// X025: picks the first chip of the row not picked yet (one wholly on the screen, so XCTest does
+    /// not scroll the row to reach it), waits until it reports itself selected, and compares every
+    /// chip's place and width with before the tap.
+    private func assertChipsHoldStill(_ identifier: String, _ screen: String, counted: Bool,
+                                      file: StaticString = #filePath, line: UInt = #line) {
+        let row = app.scrollViews.matching(identifier: identifier).firstMatch
+        guard row.waitForExistence(timeout: 20) else {
+            dump(app, "stability-18-\(identifier)"); XCTFail("\(screen): no chip row '\(identifier)'", file: file, line: line); return
+        }
+        let chips = row.buttons
+        let before = chipFrames(chips, counted: counted)
+        let window = app.windows.firstMatch.frame
+        let shown = chips.allElementsBoundByIndex
+        guard let index = shown.indices.first(where: {
+            !shown[$0].isSelected && shown[$0].frame.minX >= window.minX && shown[$0].frame.maxX <= window.maxX
+        }) else {
+            dump(app, "stability-18-\(identifier)"); XCTFail("\(screen): no chip on the screen to pick", file: file, line: line); return
+        }
+        let chip = chips.element(boundBy: index)
+        let label = chip.label
+        chip.tap(); taps += 1
+        let picked = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: chip)
+        guard XCTWaiter().wait(for: [picked], timeout: 10) == .completed else {
+            dump(app, "stability-18-\(identifier)"); XCTFail("\(screen): '\(label)' did not report itself selected", file: file, line: line); return
+        }
+        let after = chipFrames(chips, counted: counted)
+        func places(_ frames: [CGRect]) -> String { frames.map { "\($0.minX)+\($0.width)" }.joined(separator: " ") }
+        note("INFO stability 18 \(screen): picked '\(label)'; x+width before \(places(before)), after \(places(after))")
+        XCTAssertEqual(after.count, before.count, "\(screen): the row has \(after.count) chips after the pick, \(before.count) before",
+                       file: file, line: line)
+        for (position, (old, new)) in zip(before, after).enumerated() {
+            XCTAssertEqual(new.minX, old.minX, accuracy: 0.5, "\(screen): chip \(position) moved from x \(old.minX) to \(new.minX)",
+                           file: file, line: line)
+            XCTAssertEqual(new.width, old.width, accuracy: 0.5, "\(screen): chip \(position) went from \(old.width) pt wide to \(new.width)",
+                           file: file, line: line)
+        }
+    }
+
+    /// The row's chip frames once two looks half a second apart agree, and in a counted row once every
+    /// chip shows its count: a count arriving widens its chip, which is not the pick's doing.
+    private func chipFrames(_ chips: XCUIElementQuery, counted: Bool) -> [CGRect] {
+        var last: [CGRect] = []
+        let deadline = Date().addingTimeInterval(15)
+        repeat {
+            let shown = chips.allElementsBoundByIndex
+            let frames = shown.map(\.frame)
+            let ready = !counted || shown.allSatisfy { $0.label.contains(where: \.isNumber) }
+            if ready, !frames.isEmpty, frames == last { return frames }
+            last = frames
+            usleep(500_000)
+        } while Date() < deadline
+        return last
+    }
+
     /// The toolbar's Valmis ends the mode: the bar and Valitse kaikki go.
     private func endSelectMode(_ bar: XCUIElement, _ title: String, _ screen: String, file: StaticString = #filePath, line: UInt = #line) {
         let done = app.navigationBars[title].buttons["Valmis"].firstMatch
@@ -575,4 +779,9 @@ final class StabilityTests: WalkTestCase {
         XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "\(screen): Valmis left the bulk bar up", file: file, line: line)
         XCTAssertFalse(app.buttons["Valitse kaikki"].exists, "\(screen): Valmis left the mode on", file: file, line: line)
     }
+}
+
+/// What an audit's handler found; a class, so the handler fills it in place.
+private final class ClippedTexts {
+    var labels: [String] = []
 }

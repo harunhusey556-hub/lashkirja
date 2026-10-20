@@ -25,8 +25,9 @@ public actor APIClient {
     /// Told after each request whether the server answered (true) or the request never got an
     /// answer (false), for the offline indicator. A cancelled request says nothing.
     public private(set) var onReachability: (@Sendable (Bool) async -> Void)?
-    /// Told (method, path, status, decodeError) of a 5xx the server answered or an answer that
-    /// would not decode, never of offline, timeouts or 4xx. Runs detached: it cannot slow a request.
+    /// Told (method, path, status, decodeError) of a 5xx the server answered (not the app's own
+    /// 503, see `reportsUnexpected`) or an answer that would not decode, never of offline, timeouts
+    /// or 4xx. Runs detached: it cannot slow a request.
     public private(set) var onUnexpectedFailure: (@Sendable (String, String, Int, Bool) async -> Void)?
     /// Told about every request once it is over (the debugging trail, `EventLog`). Runs
     /// detached; the trail's own uploads (/api/observe…) are not reported.
@@ -81,6 +82,13 @@ public actor APIClient {
     private func noteUnexpected(_ method: String, _ path: String, _ status: Int, decodeError: Bool) {
         guard let handler = onUnexpectedFailure else { return }
         Task.detached { await handler(method, path, status, decodeError) }
+    }
+
+    /// A 503 the app server wrote is its feature switch (card payments, bank, signup or passkeys
+    /// not set up on this server), an answer it means to give. A crash is a 500, and a gateway's
+    /// 503 has no version header, so both are still reported.
+    static func reportsUnexpected(status: Int, fromApp: Bool) -> Bool {
+        status >= 500 && !(status == 503 && fromApp)
     }
 
     public func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {
@@ -220,7 +228,9 @@ public actor APIClient {
             // ends it: a wrong password (no token) or a stale request from a
             // previous sign-in must not sign the owner out.
             let failure = APIErrorDecoder.decode(status: response.status, data: response.body)
-            if response.status >= 500 { noteUnexpected(method, path, response.status, decodeError: false) }
+            if Self.reportsUnexpected(status: response.status, fromApp: response.fromApp) {
+                noteUnexpected(method, path, response.status, decodeError: false)
+            }
             if failure.endsSession, let sentToken {
                 let current = await tokens.currentToken() == sentToken
                 // Another request's 401 already ended this session: nothing more to sign out, and

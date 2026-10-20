@@ -100,7 +100,7 @@ struct SignUpView: View {
                     .onSubmit { focus = .email }
             }
             AuthField(label: "Sähköposti", problem: emailProblem, focused: focus == .email) {
-                TextField("Sähköposti", text: $email, prompt: Text("nimi@yritys.fi"))
+                TextField("Sähköposti", text: $email, prompt: Text(verbatim: "nimi@yritys.fi"))
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)

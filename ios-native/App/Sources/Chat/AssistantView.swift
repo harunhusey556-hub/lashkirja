@@ -238,7 +238,12 @@ struct AssistantView: View {
                     .disabled(model.streaming || !model.canSendShortcut)
                 }
             }
+            .padding(.horizontal, 16)
         }
+        // Out through the conversation's 16 pt padding to the screen's edges: the row was cut
+        // mid-word inside it ('Tämän kuur', U016 U053). The chips start 16 pt in all the same.
+        .padding(.horizontal, -16)
+        .accessibilityIdentifier("assistant-shortcuts")
     }
 
     private func composer(_ model: ChatModel) -> some View {

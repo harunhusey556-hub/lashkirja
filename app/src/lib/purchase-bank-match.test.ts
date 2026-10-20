@@ -87,10 +87,20 @@ describe("scorePurchasePair", () => {
     expect(nameOnly.score).toBeGreaterThan(0);
   });
 
-  it("a stranger with another amount scores nothing", () => {
+  it("a stranger with another amount scores nothing and gives no reason, not even its date (X162)", () => {
     const score = scorePurchasePair(row({ counterparty: "Joku Muu", amountCents: -9_00 }), invoice());
     expect(score.score).toBe(0);
-    expect(score.reasons).toEqual(["maksettu 1 päivä eräpäivän jälkeen"]);
+    expect(score.reasons).toEqual([]);
+    // Paid on the due date itself: the date alone still says nothing.
+    const onDueDate = scorePurchasePair(row({ counterparty: "Joku Muu", amountCents: -9_00, date: day("2026-01-24") }), invoice());
+    expect(onDueDate.score).toBe(0);
+    expect(onDueDate.reasons).toEqual([]);
+  });
+
+  it("a stranger with the same amount keeps its reasons", () => {
+    const score = scorePurchasePair(row({ counterparty: "Joku Muu" }), invoice());
+    expect(score.score).toBeGreaterThan(0);
+    expect(score.reasons).toEqual(["summa sama", "maksettu 1 päivä eräpäivän jälkeen"]);
   });
 });
 
