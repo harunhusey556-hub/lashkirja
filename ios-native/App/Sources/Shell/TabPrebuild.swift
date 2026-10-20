@@ -56,10 +56,14 @@ struct TabPrebuild: UIViewRepresentable {
                 // The tab on screen is built already.
                 guard index != controller.selectedIndex, index >= ready.count || ready[index]() else {
                     Self.logger.log("prebuild \(index, privacy: .public) skipped selected=\(index == controller.selectedIndex, privacy: .public)")
+                    MotionProbe.shared.mark("prebuild-\(index)-skipped")
                     continue
                 }
                 let tabs = controller.viewControllers ?? []
                 let name = index < tabs.count ? tabs[index].tabBarItem.title ?? "\(index)" : "\(index)"
+                // On the audit's timeline too: a copy built after the walk's tap on its tab warmed
+                // nothing for it (M040).
+                MotionProbe.shared.mark("prebuild-\(index)-\(name)")
                 build(roots[index](), size: controller.selectedViewController?.view.bounds.size ?? controller.view.bounds.size, name: name, in: controller.view.window?.windowScene)
             }
         }
@@ -91,14 +95,18 @@ struct TabPrebuild: UIViewRepresentable {
             window.isHidden = true
             window.rootViewController = nil
             // Out of the scene too, so no part of the copy stays among the windows a later
-            // presentation goes through; the probe line tells whether the copy was freed (w65).
+            // presentation goes through; the probe lines tell whether the copy was freed (w65),
+            // the controller and the window each, as M086 needs to know which one stays.
             window.windowScene = nil
             Task { [weak host, weak window] in
                 try? await Task.sleep(for: .seconds(2))
                 MotionProbe.shared.mark("prebuild-\(name)-freed=\(host == nil && window == nil)")
+                MotionProbe.shared.mark("prebuild-\(name)-host-freed=\(host == nil)")
+                MotionProbe.shared.mark("prebuild-\(name)-window-freed=\(window == nil)")
             }
             let elapsed = ContinuousClock.now - start
             let ms = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+            MotionProbe.shared.mark("prebuild-\(name)-built ms=\(ms)")
             Self.logger.log("prebuild \(name, privacy: .public) \(ms, privacy: .public) ms \(mode, privacy: .public) views=\(views, privacy: .public) lists=\(lists, privacy: .public)")
         }
 

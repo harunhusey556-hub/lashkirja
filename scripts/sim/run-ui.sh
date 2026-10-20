@@ -46,8 +46,10 @@ rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
     for r in "$SH"/*.req(N); do n=${r:r}; xcrun simctl io "$U" screenshot "$n.png" >/dev/null 2>&1; rm -f "$r"; done
     for o in "$SH"/*.openurl(N); do xcrun simctl openurl "$U" "$(cat "$o")" >/dev/null 2>&1; rm -f "$o"; done
     for c in "$SH"/*.contentsize(N); do xcrun simctl ui "$U" content_size "$(cat "$c")" >/dev/null 2>&1; rm -f "$c"; done
-    # Motion audit: <name>.rec holds seconds to record. <name>.recording gets the epoch times the
-    # recording really started (simctl says so) and stopped; the test acts only once it exists.
+    # Motion audit: <name>.rec holds the most seconds to record (30 at most); the test ends the
+    # recording earlier with <name>.stop, once the step's result is filmed. <name>.recording gets the
+    # epoch times the recording really started (simctl says so) and stopped; the test acts only once
+    # it exists.
     for v in "$SH"/*.rec(N); do
       n=${v:r}
       xcrun simctl io "$U" recordVideo --codec h264 --force "$n.mov" 2>"$n.reclog" &
@@ -57,14 +59,16 @@ rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
       # A link the step sends opens while it is filmed. A plain sleep held it until the recording
       # had ended, so the step filmed nothing and iOS asked "Open in LashKirja?" over the next
       # step, where the default interruption handler cancelled it (motion gate, CI 2026-10-17).
-      end=$(( EPOCHREALTIME + $(cat "$v") ))
-      while (( EPOCHREALTIME < end )); do
+      # A fixed length ended before a sheet the main thread held back had risen (M096).
+      secs=$(cat "$v"); (( secs > 30 )) && secs=30
+      end=$(( EPOCHREALTIME + secs ))
+      while (( EPOCHREALTIME < end )) && [ ! -e "$n.stop" ]; do
         for o in "$SH"/*.openurl(N); do url=$(cat "$o"); rm -f "$o"; xcrun simctl openurl "$U" "$url" >/dev/null 2>&1 & done
         sleep 0.1
       done
       kill -INT $rp 2>/dev/null; wait $rp 2>/dev/null
       python3 -c 'import time; print("%.3f" % time.time())' >> "$n.recording"
-      rm -f "$v" "$n.reclog"
+      rm -f "$v" "$n.stop" "$n.reclog"
     done
     sleep 0.3
   done ) &

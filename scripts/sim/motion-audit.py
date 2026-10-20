@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Motion audit analyzer: videos + probe log from MotionAuditTests -> motion-report.md/.json.
 
-usage: motion-audit.py <out-dir>     (<out-dir>/<suite>/{steps.json, m-*.mov, probe.log})
+usage: motion-audit.py <out-dir>     (<out-dir>/<suite>/{steps.json, m-*.mov, probe.log, xcui.log})
 
 Per step (docs/quality/SIMULATOR.md §4):
   intermediate  a settled screen (two consecutive captured frames alike) that is neither the
@@ -24,11 +24,19 @@ Per step (docs/quality/SIMULATOR.md §4):
                 counts anywhere after the tap. Catches what 4 fps misses.
   jank          frames missing against 60 fps while the screen moved. The Haswell simulator emits
                 ~4 fps, so this is reported, never judged (in-app signposts are the jank tool).
-  settle_ms     from the tap to the last frame that moved.
+  settle_ms     from the touch to the last frame that moved.
+  stall         the longest main-thread stall (the probe's STALL lines) inside the step, less the
+                time XCUITest was driving the app (xcui.log: from 'XCUI begin' to the step's TOUCH,
+                or to 'XCUI end' when nothing touched the app): its element snapshots run on the
+                app's main thread. app_stall_ms of STALL_MS or more is a FAIL (M003, M069, M098).
+A step's t = 0 is its TOUCH, the probe's line for the finger reaching the app (steps.json touchAt,
+else the first TOUCH after tapAt), not tapAt: XCUITest may take seconds between the two (M046).
 A check that saw nothing is never PASS: NO-MOTION (no video, fewer than MIN_FRAMES frames, or no
 frame moved on a step that must move), UNREACHED (the step missed its target), SKIPPED (the walk
-never ran it) and 'n/a (no settle)' (nothing settled inside the window); the time-based checks
-(intermediate, shift-video) read 'n/a (bad timestamps)' when the frame times go backwards.
+never ran it), MISS-WINDOW (the recording ended within MISS_WINDOW_S of the action, M029, M096),
+NO-TOUCH (a step that pressed the app has no TOUCH: its t = 0 is unknown) and 'n/a (no settle)'
+(nothing settled inside the window); the time-based checks (intermediate, shift-video) read
+'n/a (bad timestamps)' when the frame times go backwards.
 The simulator writes a frame only when the screen changes, so frames are read at their own
 timestamps (variable rate), not resampled: a 30 fps resample would make every frame look settled.
 """
@@ -64,6 +72,9 @@ PROBE_MIN_PT = 3        # probe moves smaller than this are rounding
 # wrote no MOVE at all and the late shift was the first move.
 PRESENTED_S = 0.7      # a sheet has landed this long after the probe's 'MARK presented'
 MIN_FRAMES = 3          # fewer frames than this: the step's motion was not filmed
+MISS_WINDOW_S = 1.0     # a recording must run this long past the action to have filmed its result
+STALL_MS = 500          # an app-side stall this long fails the step (section 7: harness below it)
+TOUCH_SLACK_S = 0.05    # a TOUCH this far before tapAt still belongs to the step (clock rounding)
 MOTION_KINDS = ("nav", "sheet", "swap", "scroll")  # steps where no moving frame means not filmed
 CALIBRATION = """Thresholds were set on test00_Calibration: good = tab switch to Kirjanpito, push to
 Kuukauden sulku and its swipe-back; bad = the w32 brief's item 7 (capture upload, the screen moves
@@ -314,7 +325,7 @@ def probe_events(path):
         return out
     for line in open(path, encoding="utf-8", errors="replace"):
         parts = line.split()
-        if len(parts) < 3 or parts[0] not in ("MOVE", "SCROLLJUMP", "SCREEN", "ROOT", "QUIET", "MARK"):
+        if len(parts) < 3 or parts[0] not in ("MOVE", "SCROLLJUMP", "SCREEN", "ROOT", "QUIET", "MARK", "TOUCH", "STALL"):
             continue
         try:
             t = float(parts[1])
@@ -323,6 +334,9 @@ def probe_events(path):
         ev = {"kind": parts[0], "t": t, "screen": parts[2], "raw": line.strip()}
         m = re.search(r"max=(\d+)", line)
         ev["max"] = int(m.group(1)) if m else (abs(int(re.search(r"dy=(-?\d+)", line).group(1))) if "dy=" in line else 0)
+        if parts[0] == "STALL":
+            ms = re.search(r"ms=(\d+)", line)
+            ev["ms"] = int(ms.group(1)) if ms else 0
         out.append(ev)
     # A log from a probe without QUIET lines: a 0.5 s gap between moves stands for one.
     if out and not any(e["kind"] == "QUIET" for e in out):
@@ -369,18 +383,71 @@ def probe_shift(events, start, end):
     return late, int((settled - start) * 1000) if settled is not None else None
 
 
-KS = ("intermediate", "flash", "shift_video", "shift_probe")
-MISSES = ("NO-MOTION", "UNREACHED", "SKIPPED", "n/a (no settle)", "n/a (bad timestamps)")
+def xcui_windows(path):
+    """xcui.log as (begin, end, step) stretches, from the walk's 'XCUI begin|end <t> <step>' lines;
+    None without the file (a walk from before it)."""
+    if not os.path.exists(path):
+        return None
+    out, open_at = [], {}
+    for line in open(path, encoding="utf-8", errors="replace"):
+        parts = line.split()
+        if len(parts) < 4 or parts[0] != "XCUI":
+            continue
+        try:
+            t = float(parts[2])
+        except ValueError:
+            continue
+        if parts[1] == "begin":
+            open_at[parts[3]] = t
+        elif parts[1] == "end" and parts[3] in open_at:
+            out.append((open_at.pop(parts[3]), t, parts[3]))
+    return out
+
+
+def first_touch(events, after, until):
+    """The first TOUCH in [after - TOUCH_SLACK_S, until], or None."""
+    return next((e["t"] for e in events if e["kind"] == "TOUCH" and after - TOUCH_SLACK_S <= e["t"] <= until), None)
+
+
+def app_stall_ms(events, windows, start, end):
+    """The longest main-thread stall inside [start, end] less the time XCUITest drove the app in it.
+    A stretch counts up to the first TOUCH inside it: the element look-up and the check for
+    interrupting alerts before a tap are snapshots on the app's main thread, while after the touch
+    XCUITest only waits for the app to go idle, which is the app's own time. A stretch that touched
+    nothing (typed text, a wait for an element to go) counts whole."""
+    busy = []
+    for begin, finish, _ in windows:
+        touch = first_touch(events, begin + TOUCH_SLACK_S, finish)
+        busy.append((begin, finish if touch is None else touch))
+    longest = 0
+    for e in events:
+        if e["kind"] != "STALL":
+            continue
+        a, b = max(start, e["t"] - e["ms"] / 1000), min(end, e["t"])
+        if b <= a:
+            continue
+        driven = sum(max(0.0, min(b, y) - max(a, x)) for x, y in busy)
+        longest = max(longest, int(round((b - a - driven) * 1000)))
+    return longest
+
+
+KS = ("intermediate", "flash", "shift_video", "shift_probe", "stall")
+MISSES = ("NO-MOTION", "UNREACHED", "SKIPPED", "MISS-WINDOW", "NO-TOUCH", "n/a (no settle)", "n/a (bad timestamps)")
 
 
 def checks(row, probe_seen, late):
     """Each check's verdict. PASS needs the step reached and its motion seen: an empty finding
-    list from a video or a window that missed the motion is not a PASS (M004, M019, M052)."""
+    list from a video or a window that missed the motion is not a PASS (M004, M019, M052), nor is
+    one whose recording stopped at the action or whose t = 0 is unknown (M029, M046, M096)."""
     kind = row["kind"]
     if row["skipped"]:
         return dict.fromkeys(KS, "SKIPPED")
     if not row["reached"] and not row["crashed"]:
         return dict.fromkeys(KS, "UNREACHED")
+    if row.get("window_cut"):
+        return dict.fromkeys(KS, "MISS-WINDOW")
+    if row.get("no_touch"):
+        return dict.fromkeys(KS, "NO-TOUCH")
     filmed = "error" not in row and row["frames"] >= MIN_FRAMES
 
     def video(judged, found, timed=True):
@@ -401,6 +468,8 @@ def checks(row, probe_seen, late):
         # A scroll step's late moves were never judged, so its old PASS said nothing.
         "shift_probe": "n/a" if not probe_seen or kind == "scroll" else (
             "FAIL" if late else "n/a (no settle)" if row["probe_settle_ms"] is None else "PASS"),
+        "stall": "n/a" if not probe_seen or row.get("app_stall_ms") is None else (
+            "FAIL" if row["app_stall_ms"] >= STALL_MS else "PASS"),
     }
 
 
@@ -427,19 +496,30 @@ def main():
             continue
         steps = json.load(open(steps_path, encoding="utf-8"))
         events = probe_events(os.path.join(d, "probe.log"))
+        windows = xcui_windows(os.path.join(d, "xcui.log"))
         for s in steps:
             row = {"suite": s.get("suite") or suite, "id": s["id"], "from": s["from"], "to": s["to"], "kind": s["kind"],
                    "expect": s["expect"], "reached": s["reached"], "skipped": s["skipped"],
                    "crashed": bool(s.get("crashed"))}
             end = s.get("recEnd") or (s["doneAt"] + 4)
-            late, probe_settle = probe_shift(events, s["tapAt"], end)
+            # t = 0 is the finger reaching the app. A steps.json from before TOUCH has neither
+            # field, and each of its steps pressed the app.
+            touch = s.get("touchAt") or first_touch(events, s["tapAt"], s["doneAt"] + 0.5)
+            t0 = s["tapAt"] if touch is None else touch
+            row["touch_ms"] = None if touch is None else int(round((touch - s["tapAt"]) * 1000))
+            row["no_touch"] = s.get("pressed", True) and touch is None and not s["skipped"]
+            row["window_cut"] = bool(s.get("recEnd")) and not s["skipped"] and s["recEnd"] < s["doneAt"] + MISS_WINDOW_S
+            if s.get("foundAt") is not None:
+                row["stamp_ms"] = int(round((s["tapAt"] - s["foundAt"]) * 1000))
+            late, probe_settle = probe_shift(events, t0, end)
+            row["app_stall_ms"] = None if windows is None or not events else app_stall_ms(events, windows, t0, end)
             if s.get("video") and s.get("recStart") and os.path.exists(os.path.join(d, s["video"])):
-                tap_s = s["tapAt"] - s["recStart"]
+                tap_s = t0 - s["recStart"]
                 # The step's own motion in the probe, on the video's clock: what moved before the
                 # probe settled, and a sheet's slide starting. Later moves are shifts, not motion.
                 own = [] if probe_settle is None else [
                     (e["t"] - s["recStart"], e["kind"]) for e in events
-                    if s["tapAt"] <= e["t"] <= s["tapAt"] + probe_settle / 1000
+                    if t0 <= e["t"] <= t0 + probe_settle / 1000
                     and ((e["kind"] == "MOVE" and e["max"] >= PROBE_MIN_PT) or (e["kind"] == "MARK" and e["screen"] == "presented"))]
                 res = analyze_video(os.path.join(d, s["video"]), tap_s,
                                     *((GESTURE_HOLD_S, GESTURE_HOLD_S + 0.4) if GESTURE.search(s["id"]) else (HOLD_S, QUIET_S)),
@@ -465,7 +545,7 @@ def main():
             if REFRESH.search(s["id"]):
                 late = [e for e in late
                         if not (e["kind"] == "SCROLLJUMP" and int(re.search(r"dy=(-?\d+)", e["raw"]).group(1)) > 0
-                                and (probe_settle is None or e["t"] <= s["tapAt"] + probe_settle / 1000))]
+                                and (probe_settle is None or e["t"] <= t0 + probe_settle / 1000))]
             row["probe_shift"] = [e["raw"] for e in late][:5]
             row["probe_settle_ms"] = probe_settle
             row["probe_seen"] = bool(events)
@@ -474,7 +554,7 @@ def main():
         for name, sid, why in skipped_in_notes(os.path.join(d, "notes.txt"), {s["id"] for s in steps}):
             rows.append({"suite": name, "id": sid, "from": "", "to": "", "kind": "", "expect": "", "reached": False,
                          "skipped": True, "crashed": False, "error": why, "probe_shift": [], "probe_settle_ms": None,
-                         "probe_seen": bool(events), "checks": dict.fromkeys(KS, "SKIPPED")})
+                         "app_stall_ms": None, "probe_seen": bool(events), "checks": dict.fromkeys(KS, "SKIPPED")})
     json.dump(rows, open(os.path.join(out, "motion-report.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False, default=str)
 
     def count(check):
@@ -483,22 +563,29 @@ def main():
     def unseen(verdict):
         return sum(1 for r in rows if verdict in r["checks"].values())
     lines = ["# Motion audit", "", f"{len(rows)} steps. FAIL: intermediate {count('intermediate')}, flash {count('flash')}, "
-             f"shift (video) {count('shift_video')}, shift (probe) {count('shift_probe')}; "
+             f"shift (video) {count('shift_video')}, shift (probe) {count('shift_probe')}, stall {count('stall')}; "
              f"crashes {sum(1 for r in rows if r['crashed'])}. Not judged: "
              + ", ".join(f"{v} {unseen(v)}" for v in MISSES) + ".", "",
+             # The walk's own timing: each count is 0 on a walk that stamps and films as it should.
+             f"Walk timing: {sum(1 for r in rows if r.get('window_cut'))} recordings ended within {MISS_WINDOW_S:g} s "
+             f"of the action, {sum(1 for r in rows if r.get('no_touch'))} pressed steps have no TOUCH, "
+             f"{sum(1 for r in rows if (r.get('stamp_ms') or 0) >= 50)} taps went out 50 ms or more after their "
+             f"element was found.", "",
              "## Calibration", "", CALIBRATION, "",
              f"Thresholds: STATIC_DIFF={STATIC_DIFF}, DISTINCT={DISTINCT}, INTER_AREA={INTER_AREA} (cells off by {CELL_DIFF}), "
              f"LOADING_STD={LOADING_STD} (band {LOADING_BAND}), HOLD_S={HOLD_S} (drag steps {GESTURE_HOLD_S}, quiet {GESTURE_HOLD_S + 0.4}), FLASH_LUMA={FLASH_LUMA}, QUIET_S={QUIET_S}, "
-             f"SHIFT_AREA={SHIFT_AREA}, PROBE_MIN_PT={PROBE_MIN_PT}, PRESENTED_S={PRESENTED_S}, MIN_FRAMES={MIN_FRAMES}.", "",
+             f"SHIFT_AREA={SHIFT_AREA}, PROBE_MIN_PT={PROBE_MIN_PT}, PRESENTED_S={PRESENTED_S}, MIN_FRAMES={MIN_FRAMES}, "
+             f"MISS_WINDOW_S={MISS_WINDOW_S}, STALL_MS={STALL_MS}.", "",
              "Jank is not judged: the simulator writes ~4 frames a second, so 'dropped' counts every animation.", "",
              "## Steps", "",
-             "| suite | step | from → to | kind | reached | intermediate | flash | shift video | shift probe | settle ms | dropped@60 | sheet |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| suite | step | from → to | kind | reached | intermediate | flash | shift video | shift probe | stall | settle ms | app stall ms | dropped@60 | sheet |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         c = r["checks"]
+        stall = "" if r.get("app_stall_ms") is None else r["app_stall_ms"]
         lines.append(f"| {r['suite']} | {r['id']} | {r['from']} → {r['to']} | {r['kind']} | {'CRASH' if r['crashed'] else ('yes' if r['reached'] else 'NO')} | "
-                     f"{c['intermediate']} | {c['flash']} | {c['shift_video']} | {c['shift_probe']} | {r.get('settle_ms', '')} | "
-                     f"{r.get('jank_dropped', '')} | {'[png](' + r['sheet'] + ')' if r.get('sheet') else r.get('error', '')} |")
+                     f"{c['intermediate']} | {c['flash']} | {c['shift_video']} | {c['shift_probe']} | {c['stall']} | {r.get('settle_ms', '')} | "
+                     f"{stall} | {r.get('jank_dropped', '')} | {'[png](' + r['sheet'] + ')' if r.get('sheet') else r.get('error', '')} |")
     lines += ["", "## Details of FAIL rows", ""]
     for r in rows:
         if "FAIL" in r["checks"].values():
@@ -507,9 +594,10 @@ def main():
                              f"intermediate screens {r['intermediate']}" if r.get("intermediate") else "",
                              f"flash {r['flash']}" if r.get("flash") else "",
                              f"late change {r['shift']}" if r.get("shift") and r["kind"] != "scroll" else "",
-                             f"probe {r['probe_shift'][:3]}" if r["probe_shift"] and r["kind"] != "scroll" else ""] if x))
+                             f"probe {r['probe_shift'][:3]}" if r["probe_shift"] and r["kind"] != "scroll" else "",
+                             f"the app held its main thread {r['app_stall_ms']} ms" if r["checks"]["stall"] == "FAIL" else ""] if x))
     open(os.path.join(out, "motion-report.md"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
-    print("\n".join(lines[:3]))
+    print("\n".join(lines[:5]))
 
 
 if __name__ == "__main__":
