@@ -32,6 +32,8 @@ struct MainTabView: View {
                             }
                             .appDestinations()
                     }
+                    // Over the tab's every screen, just above the tab bar (B4): see OfflineBanner.
+                    .overlay(alignment: .bottom) { OfflineBanner() }
                     .environment(\.openRoute, openRoute(item))
                 }
             }
@@ -60,7 +62,6 @@ struct MainTabView: View {
         .fullScreenCover(isPresented: Bindable(OnboardingGate.shared).isPresented) { OnboardingView() }
         // "Kuvaa kuitti" on a notification: the camera for that bank row, whatever tab is showing.
         .fullScreenCover(item: Bindable(app).pendingCapture) { capture in CaptureFlow(transactionId: capture.transactionId) }
-        .overlay(alignment: .top) { OfflineBanner() }
         .alert("Poisto epäonnistui", isPresented: Binding(get: { app.removalFailure != nil }, set: { if !$0 { app.removalFailure = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {

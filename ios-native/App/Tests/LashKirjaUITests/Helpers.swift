@@ -112,6 +112,24 @@ extension XCTestCase {
         return (mean: mean, spread: max(0, squares / count - mean * mean).squareRoot())
     }
 
+    /// The darkest pixel across `rect` (screen points), by luma: a glyph's own colour, whatever the
+    /// antialiasing around its edges. Nil when the rect is not on the screen.
+    func darkestColour(_ app: XCUIApplication, in rect: CGRect) -> RGB? {
+        guard let capture = screenCapture(app) else { return nil }
+        let image = capture.image, screen = capture.screen, scale = capture.scale
+        let pixels = CGRect(x: (rect.minX - screen.minX) * scale, y: (rect.minY - screen.minY) * scale,
+                            width: rect.width * scale, height: rect.height * scale).integral
+            .intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard !pixels.isNull, pixels.width >= 1, pixels.height >= 1, let bytes = sRGBBytes(image, in: pixels) else { return nil }
+        var darkest: RGB?
+        for index in stride(from: 0, to: bytes.count, by: 4) {
+            let pixel = RGB(r: Int(bytes[index]), g: Int(bytes[index + 1]), b: Int(bytes[index + 2]))
+            if let found = darkest, found.luma <= pixel.luma { continue }
+            darkest = pixel
+        }
+        return darkest
+    }
+
     /// One screenshot, with the screen's frame and the scale that map screen points onto its pixels.
     private func screenCapture(_ app: XCUIApplication) -> (image: CGImage, screen: CGRect, scale: CGFloat)? {
         let shot = XCUIScreen.main.screenshot()

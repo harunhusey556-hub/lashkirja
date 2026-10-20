@@ -31,6 +31,14 @@ private func month(_ m: String, _ income: Decimal, _ expenses: Decimal, _ source
     #expect(zeroBase.points == [0, 10])
 }
 
+/// X004 (P3): only more sales is good news; a fall, or costs either way, read neutral (web trendTone).
+@Test func percentToneFollowsTheDirection() {
+    #expect(MoneyTrend.tone(.income, percent: -100) == .neutral)
+    #expect(MoneyTrend.tone(.income, percent: 12) == .success)
+    #expect(MoneyTrend.tone(.expenses, percent: 12) == .neutral)
+    #expect(MoneyTrend.tone(.income, percent: 0) == .neutral)
+}
+
 @Test func sparkGeometryMatchesTheWeb() {
     #expect(MoneyTrend.geometry([]) == nil)
     let flat = MoneyTrend.geometry([3, 3])!
