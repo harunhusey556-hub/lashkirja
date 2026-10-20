@@ -339,7 +339,9 @@ struct InvoiceDetailView: View {
                 ShowMoreButton(limit: $lineLimit, total: invoice.lines.count)
                 LabeledContent("Veroton") { MoneyText(amount: invoice.net) }.font(.subheadline)
                 LabeledContent("ALV") { MoneyText(amount: invoice.vat) }.font(.subheadline)
-                LabeledContent("Yhteensä") { MoneyText(amount: invoice.gross).fontWeight(.semibold) }
+                // In ink: as a LabeledContent value it came out the pale secondary grey, the weakest
+                // figure on the card (M099).
+                LabeledContent("Yhteensä") { MoneyText(amount: invoice.gross).fontWeight(.semibold).foregroundStyle(Theme.ink) }
             }
         case .payments:
             Section {

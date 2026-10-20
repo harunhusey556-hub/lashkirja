@@ -123,11 +123,13 @@ struct PurchaseMatchView: View {
                 Text(reasons).font(.caption).foregroundStyle(Theme.ink2)
             }
             HStack(spacing: 12) {
+                // Soft, as the row pills elsewhere: filled, it was a second primary beside "Hyväksy
+                // kaikki varmat" for the same payment (M076).
                 Button { Task { await accept(suggestion) } } label: {
-                    if busyId == invoice.id { ProgressView() } else { Text("Hyväksy") }
+                    if busyId == invoice.id { ProgressView() } else { Text("Hyväksy").foregroundStyle(Theme.accentDark) }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
+                .tint(Theme.accentSoft)
                 .disabled(!suggestion.canAccept || busy)
                 .accessibilityLabel("Hyväksy maksu ostolaskulle \(invoice.supplierName)")
                 Button("Hylkää") { Task { await reject(suggestion) } }

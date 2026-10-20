@@ -848,7 +848,8 @@ struct PurchaseInvoiceDetailView: View {
         Section {
             LabeledContent("Veroton") { MoneyText(amount: invoice.net) }
             LabeledContent("ALV") { MoneyText(amount: invoice.vat) }
-            LabeledContent("Yhteensä") { MoneyText(amount: invoice.gross).fontWeight(.semibold) }
+            // In ink, not a LabeledContent value's pale grey (M099).
+            LabeledContent("Yhteensä") { MoneyText(amount: invoice.gross).fontWeight(.semibold).foregroundStyle(Theme.ink) }
             if !invoice.payments.isEmpty {
                 LabeledContent("Maksettu") { MoneyText(amount: invoice.paid) }
             }

@@ -30,12 +30,15 @@ struct BulkBar<Actions: View>: View {
         .disabled(busy)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Theme.ink.opacity(0.94), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // Opaque: at 0.94 the row under the bar read through it (X041).
+        .background(Theme.ink, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Valitut: \(count)")
         .accessibilityIdentifier("bulk-bar")
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+        // Also where no bottom bar holds it (Pankki, Ostolaskut put it in their own inset).
+        .bottomClearance()
     }
 
     private var header: some View {

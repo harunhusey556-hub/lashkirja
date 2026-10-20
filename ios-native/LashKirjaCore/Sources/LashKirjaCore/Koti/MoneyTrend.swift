@@ -27,6 +27,14 @@ public struct MoneyTrend: Equatable, Sendable {
         return MoneyTrend(points: points.count > 1 ? points : [], percent: percent, previousMonth: previousMonth)
     }
 
+    /// The percent line's colour (web `trendTone`): good news only when sales grew. '−100 % vs.
+    /// syyskuu' on the sales card was drawn in success green (X004); costs read neutral either way.
+    public enum Tone: Equatable, Sendable { case success, neutral }
+
+    public static func tone(_ metric: Metric, percent: Int) -> Tone {
+        metric == .income && percent > 0 ? .success : .neutral
+    }
+
     public struct Point: Equatable, Sendable { public let x: Double; public let y: Double }
     public struct Geometry: Equatable, Sendable { public let points: [Point] }
 

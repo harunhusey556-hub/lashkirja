@@ -257,6 +257,8 @@ struct CaptureFlow: View {
             } label: {
                 Label("Takaisin", systemImage: "chevron.backward").labelStyle(.titleAndIcon)
             }
+            // In ink, as a system back button (U003).
+            .tint(Theme.ink)
         } else {
             Button(queue.rows.isEmpty ? "Peruuta" : "Sulje") { close() }
         }

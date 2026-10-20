@@ -2,8 +2,23 @@ import XCTest
 
 /// P3: offline banner, recovery, and a copy whose answer is lost on the way back.
 final class P3Tests: WalkTestCase {
-    /// The quiet capsule at the top; the screen's own failure panel can carry the same words.
-    var banner: XCUIElement { app.descendants(matching: .any)["offline-banner"] }
+    /// The quiet capsule above the tab bar; the screen's own failure panel can carry the same words.
+    /// The first match: each tab's stack holds its own pill (B4).
+    var banner: XCUIElement { app.descendants(matching: .any).matching(identifier: "offline-banner").firstMatch }
+
+    /// U040 U041 U054 (B4): the pill is clear of the bar's controls and title. In the bar's row it hid
+    /// Avustaja and Asetukset on the tab roots and a pushed screen's title, and took their taps.
+    func assertBannerClear(_ screen: String, of items: [(name: String, element: XCUIElement)],
+                           file: StaticString = #filePath, line: UInt = #line) {
+        guard banner.exists else { XCTFail("\(screen): the offline pill is not up", file: file, line: line); return }
+        let pill = banner.frame
+        note("INFO P3 \(screen): offline pill \(pill)")
+        for item in items {
+            guard item.element.exists else { XCTFail("\(screen): no \(item.name) in the bar", file: file, line: line); continue }
+            XCTAssertFalse(pill.intersects(item.element.frame), "\(screen): the offline pill \(pill) covers \(item.name) \(item.element.frame)",
+                           file: file, line: line)
+        }
+    }
 
     func testA_OfflineBannerAndRecovery() {
         tab("Myynti")
@@ -14,6 +29,30 @@ final class P3Tests: WalkTestCase {
         tab("Kirjanpito"); sleep(3); tab("Myynti"); sleep(3)
         shot("p3a-offline")
         check("P3 offline banner appears when the API is unreachable", banner.waitForExistence(timeout: 20))
+        let myynti = app.navigationBars["Myynti"]
+        assertBannerClear("Myynti", of: [("Asetukset", myynti.buttons["Asetukset"].firstMatch),
+                                         ("Uusi lasku", myynti.buttons["Uusi lasku"].firstMatch),
+                                         ("Toiminnot", myynti.buttons["Toiminnot"].firstMatch),
+                                         ("the title", myynti.staticTexts["Myynti"].firstMatch)])
+        // Koti's bar has Avustaja (Q2): clear of the pill, and its tap opens the assistant.
+        tab("Koti")
+        let koti = app.navigationBars.firstMatch
+        let assistant = koti.buttons["Avustaja"].firstMatch
+        _ = banner.waitForExistence(timeout: 10)
+        shot("p3a-offline-koti")
+        assertBannerClear("Koti", of: [("Avustaja", assistant),
+                                       ("Asetukset", koti.buttons["Asetukset"].firstMatch),
+                                       ("the title", koti.staticTexts[koti.identifier].firstMatch)])
+        if assistant.exists {
+            assistant.tap(); taps += 1
+            let composer = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Kirjoita viesti…")).firstMatch
+            XCTAssertTrue(composer.waitForExistence(timeout: 10), "Avustaja did not open the assistant while offline")
+            shot("p3a-offline-assistant")
+            let done = app.navigationBars.buttons["Valmis"].firstMatch
+            if done.exists { done.tap(); taps += 1 }
+            XCTAssertTrue(composer.waitForNonExistence(timeout: 10), "the assistant did not close")
+        }
+        tab("Myynti")
         goOnline()
         let gone = NSPredicate(format: "exists == false")
         let recovered = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: banner)], timeout: 30) == .completed
@@ -81,6 +120,22 @@ final class P3Tests: WalkTestCase {
             XCTAssertLessThanOrEqual(abs(moved), 1, "the failure moved the tabs \(moved) pt: \(failure.label)")
         } else {
             XCTFail("the offline copy said no Yhteys katkesi or Ei verkkoyhteyttä")
+        }
+        // U041 (B4): on the pushed invoice the pill is clear of its title and Toiminnot, and floats
+        // above the failure's toast instead of over its words. A failed refresh is one more miss
+        // if the copy alone has not yet made the server count as unreachable.
+        for _ in 0..<2 where !banner.waitForExistence(timeout: 5) {
+            app.windows.firstMatch.swipeDown(velocity: .fast)
+        }
+        _ = banner.waitForExistence(timeout: 10)
+        let invoiceBar = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
+        shot("p3b-copy-offline-pill")
+        assertBannerClear("the invoice", of: [("the title", invoiceBar.staticTexts[invoiceBar.identifier].firstMatch),
+                                              ("Toiminnot", invoiceBar.buttons["Toiminnot"].firstMatch)])
+        let toast = app.staticTexts.matching(NSPredicate(format: "(label BEGINSWITH %@ OR label BEGINSWITH %@) AND identifier != %@",
+                                                         "Yhteys katkesi", "Ei verkkoyhteyttä", "offline-banner")).firstMatch
+        if banner.exists && toast.exists {
+            XCTAssertFalse(banner.frame.intersects(toast.frame), "the offline pill \(banner.frame) covers the failure \(toast.frame): \(toast.label)")
         }
         goOnline(); sleep(10)
         // H4 (U101): a copy whose answer is lost. The request went out, so the app cannot say the copy
