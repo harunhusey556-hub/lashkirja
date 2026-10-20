@@ -43,6 +43,12 @@ public struct ProfitLoss: Decodable, Sendable {
     /// Receipts with no date (they cannot be placed in a month).
     public let undatedCount: Int?
 
+    /// False when the period holds no receipt, invoice or credit note: Raportit then says so once
+    /// instead of a blank chart and a December of 0,00 € (M048).
+    public var hasFigures: Bool {
+        total.receiptCount > 0 || total.invoiceCount > 0 || (total.creditNoteCount ?? 0) > 0
+    }
+
     /// All twelve months of `year`, empty ones included, for a steady chart.
     public func filledMonths(year: String) -> [Period] {
         (1...12).map { m in

@@ -64,7 +64,8 @@ public enum ReportDrill: Hashable, Sendable {
         return targets
     }
 
-    /// Expenses are receipts only.
+    /// Expenses are receipts only: the Kuitit list, the bills filed as ostolaskut included, as the
+    /// figure counts them (`ReceiptListQuery.drill`).
     public static func expenseTarget(_ period: ProfitLoss.Period, key: String) -> ReportDrill? {
         period.expenseByCategory.reduce(0) { $0 + $1.count } == 0 ? nil : .receipts(period: key, tab: "meno", category: "")
     }

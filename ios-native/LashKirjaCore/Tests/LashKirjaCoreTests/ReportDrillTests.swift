@@ -147,3 +147,47 @@ private func alv(_ sources: String) throws -> AlvReport {
     #expect(!query.remembered.contains("vat"))
     #expect(ReportDrill.receiptsMissingVat(period: "2026").label == "Kuitit")
 }
+
+/// X079: the Menot figure counts the bills filed as ostolaskut, so its list asks for every document
+/// (no `kind`), list and chip counts alike. Kuitit's own entry still lists the kuitit only.
+@Test func aFiguresListHoldsEveryDocumentItCounts() throws {
+    let expense = try #require(ReportDrill.expenseTarget(period("2026-09", expense: [row("vuokra", count: 1)]), key: "2026"))
+    let query = try #require(expense.receiptQuery)
+    #expect(query.drill)
+    #expect(query.listQuery()["kind"] == nil)
+    #expect(query.listQuery()["type"] == "meno")
+    #expect(query.countsQuery()["kind"] == nil)
+    #expect(ReceiptListPaging.firstQuery(query)["kind"] == nil)
+    // Raportit warms exactly what the drilled list asks.
+    #expect(ReportDrillWarm.requests([expense]).allSatisfy { $0.query["kind"] == nil })
+    // A category and the VAT gaps too; the Laskut chip still asks for the bills alone.
+    #expect(ReportDrill.target(kind: .expense, category: "vuokra", year: "2026").receiptQuery?.countsQuery()["kind"] == nil)
+    #expect(ReportDrill.receiptsMissingVat(period: "2026").receiptQuery?.listQuery()["kind"] == nil)
+    var bills = query
+    bills.tab = .laskut
+    #expect(bills.listQuery()["kind"] == "invoice")
+    // Not a figure's list: Kuitit opened plainly, or restored from the last visit.
+    #expect(ReceiptListQuery().listQuery()["kind"] == "receipt")
+    #expect(ReceiptListQuery().countsQuery()["kind"] == "receipt")
+    #expect(!ReceiptListQuery(remembered: "month=2026-09&tab=meno").drill)
+}
+
+/// X079: a figure's list shows the bill filed as an ostolasku among the kuitit, so its row carries the
+/// 'Ostolasku' tag from the paged list's `kind`; a kuitti's row has none.
+@Test func aFiledBillInAFiguresListCarriesItsOstolaskuTag() throws {
+    func receipt(_ extra: String) throws -> Receipt {
+        try JSONDecoder().decode(Receipt.self, from: Data(#"{"id":"r1","createdAt":"a","updatedAt":"b"\#(extra)}"#.utf8))
+    }
+    let bill = try receipt(#","kind":"invoice""#)
+    let kuitti = try receipt(#","kind":"receipt""#)
+    #expect(bill.kind == .invoice)
+    #expect(ReceiptRowText(bill).kindTag == "Ostolasku")
+    #expect(kuitti.kind == .receipt)
+    #expect(ReceiptRowText(kuitti).kindTag == nil)
+    // A changed kind draws the row again (ReceiptRow compares its words).
+    #expect(ReceiptRowText(bill) != ReceiptRowText(kuitti))
+    // The offset pages and an older server send no kind; a value from a newer server only hides the tag.
+    #expect(try receipt("").kind == nil)
+    #expect(try ReceiptRowText(receipt("")).kindTag == nil)
+    #expect(try receipt(#","kind":"proforma""#).kind == nil)
+}

@@ -227,6 +227,20 @@ struct MoneyText: View {
     var body: some View { Text(Money.format(amount, signed: signed)).monospacedDigit() }
 }
 
+/// One series of a bar chart named beside a dot of its colour (Koti's cash-flow card, Raportit's
+/// Kuukausittain): the colours alone did not tell income from expenses (X086).
+struct ChartLegendItem: View {
+    let title: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(tint).frame(width: 7, height: 7)
+            Text(title).font(.caption).foregroundStyle(Theme.ink2)
+        }
+    }
+}
+
 /// The label of a button whose request is in flight (`SubmitGuard.inFlight`): the title keeps its
 /// place and a spinner sits on it, so the bar neither jumps nor blanks while the server answers.
 struct InFlightLabel: View {

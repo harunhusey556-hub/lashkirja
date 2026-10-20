@@ -24,6 +24,12 @@ class WalkTestCase: XCTestCase {
     override func setUp() {
         continueAfterFailure = true
         app = XCUIApplication()
+        // The flag stands for the one-time notification question (as in P0, U027). A later launch
+        // raised it over the walk's taps, and XCTest's own handler could not always answer it (run
+        // 39334491019: "Failed to construct element query matching interruption"; every tab tap of
+        // P3 B after its relaunch, and of P3 C, landed on the alert). First, so no value-less
+        // flag before it can be read as taking the key for its value.
+        app.launchArguments += ["-notifications.asked.v1", "YES"]
         app.launchArguments.append("-LKLaunchPhase")
         let signingIn = launchSignedIn()
         // On a fresh simulator the save offer comes seconds after the tab bar, over the first test's
