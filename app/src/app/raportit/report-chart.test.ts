@@ -90,7 +90,7 @@ describe("expenseRankedItems", () => {
     );
     expect(totalCents).toBe(13050);
     expect(items).toHaveLength(2);
-    expect(items[0]).toMatchObject({ label: "Tarvikkeet", valueCents: 12050, href: "/kuitit?month=2026&type=meno&category=tarvikkeet" });
+    expect(items[0]).toMatchObject({ label: "Tarvikkeet", valueCents: 12050, href: "/kuitit?month=2026&type=meno&category=tarvikkeet&drill=1" });
     expect(items[1].href).toBeUndefined();
   });
 });

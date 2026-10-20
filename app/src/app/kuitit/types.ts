@@ -17,6 +17,8 @@ export interface SavedReceipt {
   thumbnailUrl?: string | null;
   /** The paged list's match state; that row omits `match`. */
   matchStatus?: "linked" | "suggested" | "unlinked";
+  /** The paged list's document kind: a report drill sends no kind filter, so a filed bill shows among the receipts. */
+  kind?: "receipt" | "invoice";
   currency?: string | null;
   source: string;
   createdAt: string;

@@ -191,14 +191,17 @@ final class P2Tests: WalkTestCase {
         // From Myynti, not Koti: the draft this test just created joins Koti's first five tasks and
         // pushes the overdue row under "Näytä enemmän" (run 39180204687).
         XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
-        guard tapLabel("label CONTAINS %@", "myöhässä") else { XCTFail("no overdue invoice on Myynti"); return }
+        // The row's badge says "Myöhässä" and its line the due date; the line no longer says
+        // "myöhässä" too (N6, M100). Not the late chip or the bar, which name no due date.
+        guard tapLabel("label CONTAINS 'Myöhässä' AND label CONTAINS %@", "· eräpäivä") else { XCTFail("no overdue invoice on Myynti"); return }
         let invoiceBar = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
-        let pay = app.buttons["Maksu"].firstMatch
-        guard invoiceBar.waitForExistence(timeout: 20), pay.waitForExistence(timeout: 30) else {
-            dump(app, "p2e-no-invoice"); XCTFail("the overdue invoice did not open with Maksu"); return
+        let actions = invoiceBar.buttons["Toiminnot"].firstMatch
+        guard invoiceBar.waitForExistence(timeout: 20), actions.waitForExistence(timeout: 30) else {
+            dump(app, "p2e-no-invoice"); XCTFail("the overdue invoice did not open with Toiminnot"); return
         }
         let number = Int(invoiceBar.identifier.dropFirst("Lasku ".count))
-        pay.tap(); taps += 1
+        // The primary or a Toiminnot item (N6): the Maksu tile is gone.
+        guard invoiceAction("Kirjaa maksu") else { dump(app, "p2e-no-pay"); XCTFail("the overdue invoice offers no Kirjaa maksu"); return }
         let sheet = app.navigationBars["Kirjaa maksu"]
         guard sheet.waitForExistence(timeout: 10) else { XCTFail("Kirjaa maksu did not open"); return }
         let shown = shownDay(app.datePickers.firstMatch)
@@ -397,7 +400,8 @@ final class P2Tests: WalkTestCase {
             dump(app, "p2j-no-draft"); XCTFail("Lasku 4 did not open from Myynti"); return
         }
         let under = clippedTexts()
-        guard tap("Muokkaa"), app.navigationBars["Muokkaa laskua"].waitForExistence(timeout: 15) else {
+        // A Toiminnot item on the draft (N6): the Muokkaa tile is gone.
+        guard invoiceAction("Muokkaa"), app.navigationBars["Muokkaa laskua"].waitForExistence(timeout: 15) else {
             dump(app, "p2j-no-form"); XCTFail("Muokkaa did not open Muokkaa laskua"); return
         }
         let card = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Y-tunnus 2454577-7")).firstMatch

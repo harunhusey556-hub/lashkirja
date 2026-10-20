@@ -125,12 +125,23 @@ final class CaptureQueueModel {
 
     func openForm(_ row: UploadQueueRow) {
         guard let draft = row.draft else { return }
-        step = .edit(rowId: row.id, draft: draft)
+        show(.edit(rowId: row.id, draft: draft))
     }
 
     /// Back from the form: every other row is where it was; this one waits for the form again.
     func leaveForm() {
-        step = queue.rows.isEmpty ? .pick : .queue
+        show(queue.rows.isEmpty ? .pick : .queue)
+    }
+
+    /// A page the owner sees change: the bar's buttons go in the same 0.4 s fade as the page. Set
+    /// plainly, the bar showed "Sulje" and ⋯ over the picker for the length of the fade (M002).
+    /// `along` is a change of the page going away made in the same transaction: made before it, in
+    /// one of its own, the page is drawn once more with it and fades out showing it.
+    private func show(_ next: Step, along change: () -> Void = {}) {
+        withMotion(.linear(duration: 0.4)) {
+            change()
+            step = next
+        }
     }
 
     /// Binds the queue to the signed-in owner and brings back the readings an earlier run kept, so
@@ -180,7 +191,7 @@ final class CaptureQueueModel {
         guard !picks.isEmpty else { return }
         let ids = queue.enqueue(picks.map(\.0))
         for (id, pick) in zip(ids, picks) { sources[id] = pick.1 }
-        if case .pick = step { step = .queue }
+        if case .pick = step { show(.queue) }
         startWorker()
     }
 
@@ -188,7 +199,7 @@ final class CaptureQueueModel {
     func discardUnsaved() {
         for id in queue.discardUnsaved() { dropSource(id) }
         persist()
-        if queue.rows.isEmpty { step = .pick }
+        if queue.rows.isEmpty { show(.pick) }
     }
 
     // MARK: Sending
@@ -304,10 +315,11 @@ final class CaptureQueueModel {
         return try await sent.value
     }
 
-    /// A receipt saved from the form (or a bank row linked to the receipt its file already was).
+    /// A receipt saved from the form (or a bank row linked to the receipt its file already was):
+    /// the owner's own save, never one approved "automaattisesti".
     func saved(_ rowId: String, autoApproved: Bool? = false, invoiceNote: String? = nil,
                receiptId: String? = nil, kind: ReceiptDocumentKind? = nil) {
-        queue.markSaved(rowId, autoApproved: autoApproved, invoiceNote: invoiceNote, receiptId: receiptId, kind: kind)
+        queue.markSaved(rowId, autoApproved: autoApproved, invoiceNote: invoiceNote, receiptId: receiptId, kind: kind, byHand: true)
         onSaved?()
         persist()
         // A bank row takes one receipt: once it is saved the match is done.
@@ -315,7 +327,7 @@ final class CaptureQueueModel {
         announce(invoiceNote)
         // A bill that became an ostolasku keeps the screen up: its row and the toast say so, and
         // "Valmis" closes it. Any other last save closes the screen at once.
-        if invoiceNote == nil && queue.closesAfterSave { closeRequested = true } else { step = .queue }
+        if invoiceNote == nil && queue.closesAfterSave { closeRequested = true } else { show(.queue) }
     }
 
     /// "Älä tallenna" on the look-alike question (W27): the staged file is deleted on the server and
@@ -330,7 +342,7 @@ final class CaptureQueueModel {
         persist()
         if single { closeRequested = true; return }
         say(UploadQueueStatus.skipped.label)
-        step = .queue
+        show(.queue)
     }
 
     /// "Kuitti ⇄ Ostolasku" on a saved row: the AI's decision turned around on the server
@@ -478,13 +490,19 @@ final class CaptureQueueModel {
             startSaveWorker()
             return
         }
-        queue.markReady(id, draft: reading)
+        // The first reading that needs the owner opens by itself, only while the screen is up. Its
+        // row turns ready in the fade that opens the form: marked ready first, the queue drew the
+        // read row (its words and "Käytä lomakkeessa", 18 pt taller) and faded out with it, where
+        // the owner had last seen "Käsitellään" (motion gate 39374914516, bad-capture-upload).
+        var next = queue
+        next.markReady(id, draft: reading)
+        if visible, case .queue = step, let row = next.takeAutoOpen(), let draft = row.draft {
+            show(.edit(rowId: row.id, draft: draft)) { queue = next }
+        } else {
+            queue = next
+        }
         dropSource(id)
         persist()
-        // The first reading that needs the owner opens by itself, only while the screen is up.
-        if visible, case .queue = step, let row = queue.takeAutoOpen(), let draft = row.draft {
-            step = .edit(rowId: row.id, draft: draft)
-        }
     }
 
     private func keepOffline(_ id: String, _ file: Encoded) {
