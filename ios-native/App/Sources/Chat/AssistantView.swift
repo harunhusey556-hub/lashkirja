@@ -84,7 +84,10 @@ struct AssistantView: View {
     private func conversation(_ model: ChatModel) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                // The notice and the greeting above the lazy stack, not in it: a lazy stack is an
+                // accessibility container that still lists its hidden children, and their sparkles
+                // stayed in the tree as 'Säihke' (U057). Out of it, hidden symbols leave the tree.
+                VStack(alignment: .leading, spacing: 14) {
                     // With the conversation, in its fade-in (ChatModel.ready): in the composer it came
                     // in after the sheet had settled and grew the composer by two lines (M012 M068).
                     // On top, so a question sent below it scrolls as it did without it (chat-send).
@@ -106,34 +109,36 @@ struct AssistantView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
                     }
-                    ForEach(model.messages) { message in
-                        MessageRow(message: message, streaming: model.streaming && message.id == model.messages.last?.id, model: model)
-                            .id(message.id)
-                    }
-                    // Limited mode: the shortcuts that still work stay at hand after each reply.
-                    let row = AssistantCooldown.shortcutRow(available: model.aiAvailable, messageCount: model.messages.count,
-                                                            replying: model.streaming, lastRole: model.messages.last?.role)
-                    if row != .none {
-                        shortcuts(model)
-                            .opacity(row == .shown ? 1 : 0)
-                            .allowsHitTesting(row == .shown)
-                            .accessibilityHidden(row != .shown)
-                            .motion(.linear(duration: 0.3), value: row)
-                    }
-                    if let failure = model.failure {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(failure).font(.footnote).foregroundStyle(Theme.danger)
-                            if model.turn.retryText != nil {
-                                Button { Haptics.selection(); model.retry() } label: {
-                                    Label("Yritä uudelleen", systemImage: "arrow.clockwise")
-                                        .font(.subheadline.weight(.medium))
-                                        .padding(.horizontal, 14)
-                                        .frame(minHeight: 36)
-                                        .background(Theme.accentSoft, in: Capsule())
-                                        .foregroundStyle(Theme.accentDark)
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(model.messages) { message in
+                            MessageRow(message: message, streaming: model.streaming && message.id == model.messages.last?.id, model: model)
+                                .id(message.id)
+                        }
+                        // Limited mode: the shortcuts that still work stay at hand after each reply.
+                        let row = AssistantCooldown.shortcutRow(available: model.aiAvailable, messageCount: model.messages.count,
+                                                                replying: model.streaming, lastRole: model.messages.last?.role)
+                        if row != .none {
+                            shortcuts(model)
+                                .opacity(row == .shown ? 1 : 0)
+                                .allowsHitTesting(row == .shown)
+                                .accessibilityHidden(row != .shown)
+                                .motion(.linear(duration: 0.3), value: row)
+                        }
+                        if let failure = model.failure {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(failure).font(.footnote).foregroundStyle(Theme.danger)
+                                if model.turn.retryText != nil {
+                                    Button { Haptics.selection(); model.retry() } label: {
+                                        Label("Yritä uudelleen", systemImage: "arrow.clockwise")
+                                            .font(.subheadline.weight(.medium))
+                                            .padding(.horizontal, 14)
+                                            .frame(minHeight: 36)
+                                            .background(Theme.accentSoft, in: Capsule())
+                                            .foregroundStyle(Theme.accentDark)
+                                    }
+                                    .buttonStyle(.pressable)
+                                    .disabled(!model.canSendShortcut)
                                 }
-                                .buttonStyle(.pressable)
-                                .disabled(!model.canSendShortcut)
                             }
                         }
                     }
