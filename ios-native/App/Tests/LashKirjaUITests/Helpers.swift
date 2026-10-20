@@ -48,6 +48,8 @@ struct RGB: Equatable, CustomStringConvertible {
     /// Theme.canvas in the light appearance (#F6F3EF).
     static let canvas = RGB(r: 246, g: 243, b: 239)
     var description: String { "(\(r),\(g),\(b))" }
+    /// Brightness 0–255, weighted as the eye sees it (Rec. 709).
+    var luma: Double { 0.2126 * Double(r) + 0.7152 * Double(g) + 0.0722 * Double(b) }
     func near(_ other: RGB, within tolerance: Int) -> Bool {
         abs(r - other.r) <= tolerance && abs(g - other.g) <= tolerance && abs(b - other.b) <= tolerance
     }
@@ -56,26 +58,63 @@ struct RGB: Equatable, CustomStringConvertible {
 /// The pixel helper (B2; B5, B12, B14, P1 and P3 reuse it).
 extension XCTestCase {
     /// The colours at `points` (screen points, as element frames give them), all read off one
-    /// screenshot; nil for a point off the screen. Each pixel is drawn into an sRGB context, so a
-    /// wide-colour capture still reads as the sRGB values the palette is written in.
+    /// screenshot; nil for a point off the screen.
     func screenColours(_ app: XCUIApplication, at points: [CGPoint]) -> [RGB?] {
-        let shot = XCUIScreen.main.screenshot()
-        let screen = app.windows.firstMatch.frame
-        guard let image = shot.image.cgImage ?? UIImage(data: shot.pngRepresentation)?.cgImage,
-              let space = CGColorSpace(name: CGColorSpace.sRGB), screen.width > 0 else { return points.map { _ in nil } }
-        // The capture is at the screen's native scale (3 px a point on a current iPhone).
-        let scale = CGFloat(image.width) / screen.width
+        guard let capture = screenCapture(app) else { return points.map { _ in nil } }
+        let image = capture.image, screen = capture.screen, scale = capture.scale
         return points.map { point -> RGB? in
             let pixel = CGRect(x: ((point.x - screen.minX) * scale).rounded(.down), y: ((point.y - screen.minY) * scale).rounded(.down),
                                width: 1, height: 1)
             guard pixel.minX >= 0, pixel.minY >= 0, pixel.maxX <= CGFloat(image.width), pixel.maxY <= CGFloat(image.height),
-                  let one = image.cropping(to: pixel),
-                  let context = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: space,
-                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-            context.draw(one, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-            guard let bytes = context.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+                  let bytes = sRGBBytes(image, in: pixel) else { return nil }
             return RGB(r: Int(bytes[0]), g: Int(bytes[1]), b: Int(bytes[2]))
         }
+    }
+
+    /// The brightness across `rect` (screen points, as element frames give them), read off one
+    /// screenshot: its mean and its standard deviation, as luma 0–255. A flat fill has a spread of
+    /// 0; a line of text cut across reads in the tens. Nil when the rect is not on the screen.
+    func luma(_ app: XCUIApplication, in rect: CGRect) -> (mean: Double, spread: Double)? {
+        guard let capture = screenCapture(app) else { return nil }
+        let image = capture.image, screen = capture.screen, scale = capture.scale
+        let pixels = CGRect(x: (rect.minX - screen.minX) * scale, y: (rect.minY - screen.minY) * scale,
+                            width: rect.width * scale, height: rect.height * scale).integral
+            .intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard !pixels.isNull, pixels.width >= 1, pixels.height >= 1, let bytes = sRGBBytes(image, in: pixels) else { return nil }
+        var sum = 0.0, squares = 0.0
+        for index in stride(from: 0, to: bytes.count, by: 4) {
+            let value = RGB(r: Int(bytes[index]), g: Int(bytes[index + 1]), b: Int(bytes[index + 2])).luma
+            sum += value
+            squares += value * value
+        }
+        let count = Double(bytes.count / 4)
+        let mean = sum / count
+        return (mean: mean, spread: max(0, squares / count - mean * mean).squareRoot())
+    }
+
+    /// One screenshot, with the screen's frame and the scale that map screen points onto its pixels.
+    private func screenCapture(_ app: XCUIApplication) -> (image: CGImage, screen: CGRect, scale: CGFloat)? {
+        let shot = XCUIScreen.main.screenshot()
+        let screen = app.windows.firstMatch.frame
+        guard let image = shot.image.cgImage ?? UIImage(data: shot.pngRepresentation)?.cgImage, screen.width > 0 else { return nil }
+        // The capture is at the screen's native scale (3 px a point on a current iPhone).
+        return (image: image, screen: screen, scale: CGFloat(image.width) / screen.width)
+    }
+
+    /// The RGBA bytes of `pixels` (a rect of the capture's own pixels), row by row. Drawn into an
+    /// sRGB context, so a wide-colour capture still reads as the sRGB values the palette is written in.
+    private func sRGBBytes(_ image: CGImage, in pixels: CGRect) -> [UInt8]? {
+        guard let part = image.cropping(to: pixels), let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        let width = part.width, height = part.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: space,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(part, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        return drawn ? bytes : nil
     }
 
     /// The gutter left of a grouped list's cards: 6 pt in from the left edge of `bar` (the screen's,

@@ -54,6 +54,7 @@ struct EmailInboxView: View {
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                     .listRowSeparator(.hidden)
+                    .chipRowSection()
                 if let rows = receipts.value?.filter({ !app.removedIds.contains($0.id) }) {
                     if let banner = receipts.banner {
                         Section { RefreshFailureBanner(failure: banner, retry: load) }
@@ -192,20 +193,21 @@ struct EmailInboxView: View {
                                 Text("\(count)").monospacedDigit().foregroundStyle(selected ? Theme.onInk.opacity(0.8) : Theme.ink2)
                             }
                         }
-                        .font(.subheadline.weight(selected ? .semibold : .regular))
+                        .chipFont(selected: selected)
                         .foregroundStyle(selected ? Theme.onInk : Theme.ink)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .background(selected ? Theme.ink : Theme.surface, in: Capsule())
-                        .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
+                        .overlay(Capsule().strokeBorder(Theme.line, lineWidth: selected ? 0 : 1))
                     }
                     .buttonStyle(.pressable)
                     .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
             .padding(.vertical, 4)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ChipRow.inset)
         }
+        .chipRowScroll()
     }
 
     private func cleanupSection(_ candidates: Int) -> some View {

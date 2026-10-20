@@ -5,6 +5,12 @@ name: iOS UI suite
 # data (copies, customers, problem reports), so no class sees another's leftovers.
 on:
   workflow_dispatch:
+    inputs:
+      classes:
+        # A re-run of only the classes a fix touched; the full suite is the default and runs before a merge.
+        description: "UI test classes as a JSON list (default: all nine)"
+        required: false
+        default: '["P0Tests", "P1Tests", "P2Tests", "P3Tests", "P4Tests", "P5Tests", "StabilityTests", "OwnerScreensTests", "IntegrationTests"]'
   push:
     branches: [fix/w36-ui-suite]
 
@@ -19,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        class: [P0Tests, P1Tests, P2Tests, P3Tests, P4Tests, P5Tests, StabilityTests, OwnerScreensTests, IntegrationTests]
+        class: ${{ fromJSON(inputs.classes || '["P0Tests", "P1Tests", "P2Tests", "P3Tests", "P4Tests", "P5Tests", "StabilityTests", "OwnerScreensTests", "IntegrationTests"]') }}
     steps:
       - uses: actions/checkout@v4
       - name: Tools

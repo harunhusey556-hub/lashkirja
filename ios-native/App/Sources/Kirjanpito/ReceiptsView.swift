@@ -131,25 +131,26 @@ struct ReceiptsView: View {
     var body: some View {
         List {
             QueuedReceiptsCard()
-            if !selecting {
-                ReviewQueueSection(
-                    pending: pending.filter { !app.removedIds.contains($0.id) },
-                    rejected: rejected.filter { !app.removedIds.contains($0.id) },
-                    rejectedTotal: rejectedTotal,
-                    pendingHasMore: pendingTruncated,
-                    rejectedHasMore: rejectedTruncated,
-                    loadingPending: loadingMorePending,
-                    loadingRejected: loadingMoreRejected,
-                    busy: busy,
-                    approve: { ids in await review(ids) },
-                    restore: { id in await restore(id) },
-                    loadMorePending: { await loadMorePending() },
-                    loadMoreRejected: {
-                        await loadMoreRejected()
-                        return rejected.count
-                    }
-                )
-            }
+            // Kept in place while picking, dimmed and inert: taken away, it pulled the chips and
+            // every row up by its height (X040, owner 2026-10-18).
+            ReviewQueueSection(
+                pending: pending.filter { !app.removedIds.contains($0.id) },
+                rejected: rejected.filter { !app.removedIds.contains($0.id) },
+                rejectedTotal: rejectedTotal,
+                pendingHasMore: pendingTruncated,
+                rejectedHasMore: rejectedTruncated,
+                loadingPending: loadingMorePending,
+                loadingRejected: loadingMoreRejected,
+                busy: busy,
+                dimmed: selecting,
+                approve: { ids in await review(ids) },
+                restore: { id in await restore(id) },
+                loadMorePending: { await loadMorePending() },
+                loadMoreRejected: {
+                    await loadMoreRejected()
+                    return rejected.count
+                }
+            )
             if let failure { Text(failure).foregroundStyle(Theme.danger).transition(.opacity) }
             if let notice { Text(notice).foregroundStyle(Theme.ink2).transition(.opacity) }
             Section {
@@ -160,6 +161,7 @@ struct ReceiptsView: View {
             }
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .chipRowSection()
 
             if receipts.value != nil {
                 if let banner = receipts.banner {
@@ -197,17 +199,13 @@ struct ReceiptsView: View {
         .searchable(text: $searchText, prompt: "Hae kuitteja")
         .navigationTitle("Kuitit")
         .toolbar { toolbar }
-        .safeAreaInset(edge: .bottom) {
-            // The web BulkBar's actions exactly: Peruuta, Hyväksy (only the ready pending ones), Poista.
+        .bottomBar {
+            // The web BulkBar's actions: Hyväksy (only the ready pending ones) and Poista. The
+            // toolbar's Valmis ends the mode.
             let picked = selectedVisible
             if selecting && !picked.isEmpty {
                 let approvable = ReceiptBulk.approvable(picked)
-                BulkBar(count: picked.count, busy: busy, onCancel: {
-                    withMotion(.snappy) {
-                        selecting = false
-                        selected = []
-                    }
-                }) {
+                BulkBar(count: picked.count, busy: busy) {
                     if !approvable.isEmpty {
                         BulkBarButton(title: ReceiptBulk.approveLabel(ready: approvable.count, notReady: picked.count - approvable.count)) {
                             Task { await approveSelected(approvable.map(\.id)) }
@@ -388,19 +386,22 @@ struct ReceiptsView: View {
                                 .contentTransition(.numericText())
                                 .accessibilityHidden(counts == nil)
                         }
-                        .font(.subheadline.weight(active ? .semibold : .regular))
+                        .chipFont(selected: active)
                         .foregroundStyle(active ? Theme.onInk : Theme.ink)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(active ? Theme.ink : Theme.surface, in: Capsule())
-                        .overlay(Capsule().stroke(Theme.line, lineWidth: active ? 0 : 1))
+                        .overlay(Capsule().strokeBorder(Theme.line, lineWidth: active ? 0 : 1))
                     }
                     .buttonStyle(.pressable)
+                    .accessibilityAddTraits(active ? .isSelected : [])
                     .accessibilityIdentifier("receipt-tab-\(tab.rawValue)")
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ChipRow.inset)
         }
+        .accessibilityIdentifier("receipt-chips")
+        .chipRowScroll()
     }
 
     private var activeFilters: some View {
@@ -425,8 +426,9 @@ struct ReceiptsView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ChipRow.inset)
         }
+        .chipRowScroll()
     }
 
     private func filterChip(_ title: String, clear: @escaping () -> Void) -> some View {
@@ -490,7 +492,8 @@ struct ReceiptsView: View {
         .disabled(sureBusy)
         .accessibilityHint(SureMatchText.explanation)
         .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .padding(.vertical, 8)
+        .bottomBarBacking()
         .transition(.opacity)
     }
 
@@ -566,57 +569,70 @@ struct ReceiptsView: View {
                     }
                 }
             } else {
+                // One primary, the camera, and Toiminnot for the rest (U030, U098): the filter and
+                // "Valitse" were two more circled icons of the camera's weight.
                 Menu {
-                    Picker("Kuukausi", selection: $query.month) {
-                        Text("Kaikki kuukaudet").tag("")
-                        ForEach(monthChoices, id: \.self) { key in
-                            Text(MonthKey.title(key, currentYear: String(MonthKey.current().prefix(4)))).tag(key)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    Picker("Kategoria", selection: $query.category) {
-                        Text("Kaikki kategoriat").tag("")
-                        ForEach(ReceiptCategory.all) { category in Text(category.label).tag(category.id) }
-                    }
-                    .pickerStyle(.menu)
-                    Picker("Lähde", selection: $query.source) {
-                        ForEach(ReceiptSourceFilter.allCases) { source in Text(source.title).tag(source) }
-                    }
-                    .pickerStyle(.menu)
-                    Button {
-                        minDraft = query.minAmount
-                        maxDraft = query.maxAmount
-                        editingAmount = true
+                    Menu {
+                        filterPickers
                     } label: {
-                        Label(query.amountLabel.map { "Summa: \($0)" } ?? "Summa…", systemImage: "eurosign")
+                        Label("Suodata", systemImage: "line.3.horizontal.decrease.circle")
                     }
-                    Picker("Järjestys", selection: $query.sort) {
-                        ForEach(ReceiptSort.allCases) { sort in Text(sort.title).tag(sort) }
+                    // Always here, so the menu keeps its shape when the list arrives.
+                    Button { withMotion(.snappy) { selecting = true } } label: {
+                        Label("Valitse kuitteja", systemImage: "checkmark.circle")
                     }
-                    .pickerStyle(.menu)
-                    if !query.month.isEmpty || !query.category.isEmpty || query.source != .all || query.amountLabel != nil || query.sort != .dateDesc {
-                        Button("Tyhjennä suodattimet") {
-                            query.month = ""
-                            query.category = ""
-                            query.source = .all
-                            query.minAmount = ""
-                            query.maxAmount = ""
-                            query.sort = .dateDesc
-                        }
-                    }
+                    // The checkmark symbol made VoiceOver call the action "selected" (U032).
+                    .accessibilityRemoveTraits(.isSelected)
+                    .disabled(receipts.value?.isEmpty ?? true)
                 } label: {
-                    // Three glyphs of one family on one 44 pt grid (owner 2026-10-15: a text "Valitse"
-                    // between a circled and a plain icon looked misaligned). An active filter fills it.
-                    Image(systemName: filtered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    // An active filter fills it; the chips under the tabs say which one.
+                    Image(systemName: filtered ? "ellipsis.circle.fill" : "ellipsis.circle")
                         .tapTarget()
                 }
-                .accessibilityLabel(filtered ? "Suodata kuitteja, suodatin käytössä" : "Suodata kuitteja")
-                // Always there, so the toolbar does not rearrange itself when the list arrives.
-                Button { withMotion(.snappy) { selecting = true } } label: { Image(systemName: "checkmark.circle").tapTarget() }
-                    .accessibilityLabel("Valitse kuitteja")
-                    .disabled(receipts.value?.isEmpty ?? true)
+                .accessibilityLabel(filtered ? "Toiminnot, suodatin käytössä" : "Toiminnot")
                 Button { capture = true } label: { Image(systemName: "camera.circle").tapTarget() }
                     .accessibilityLabel("Kuvaa kuitti")
+            }
+        }
+    }
+
+    /// Toiminnot > Suodata: month, category, source, amount and order.
+    @ViewBuilder private var filterPickers: some View {
+        Picker("Kuukausi", selection: $query.month) {
+            Text("Kaikki kuukaudet").tag("")
+            ForEach(monthChoices, id: \.self) { key in
+                Text(MonthKey.title(key, currentYear: String(MonthKey.current().prefix(4)))).tag(key)
+            }
+        }
+        .pickerStyle(.menu)
+        Picker("Kategoria", selection: $query.category) {
+            Text("Kaikki kategoriat").tag("")
+            ForEach(ReceiptCategory.all) { category in Text(category.label).tag(category.id) }
+        }
+        .pickerStyle(.menu)
+        Picker("Lähde", selection: $query.source) {
+            ForEach(ReceiptSourceFilter.allCases) { source in Text(source.title).tag(source) }
+        }
+        .pickerStyle(.menu)
+        Button {
+            minDraft = query.minAmount
+            maxDraft = query.maxAmount
+            editingAmount = true
+        } label: {
+            Label(query.amountLabel.map { "Summa: \($0)" } ?? "Summa…", systemImage: "eurosign")
+        }
+        Picker("Järjestys", selection: $query.sort) {
+            ForEach(ReceiptSort.allCases) { sort in Text(sort.title).tag(sort) }
+        }
+        .pickerStyle(.menu)
+        if !query.month.isEmpty || !query.category.isEmpty || query.source != .all || query.amountLabel != nil || query.sort != .dateDesc {
+            Button("Tyhjennä suodattimet") {
+                query.month = ""
+                query.category = ""
+                query.source = .all
+                query.minAmount = ""
+                query.maxAmount = ""
+                query.sort = .dateDesc
             }
         }
     }
@@ -898,30 +914,38 @@ struct ReceiptsView: View {
     }
 }
 
-struct ReceiptRow: View, Equatable {
+struct ReceiptRow<Accessory: View>: View, Equatable {
     let receipt: Receipt
     /// Kuitit shows a small picture of the file; the review queue and mail list stay text only.
     let thumbnail: Bool
+    /// The review queue's rows: the name may take two lines and the line under it one, so a long
+    /// vendor shows whole next to the pill under the amount.
+    let wrapsTitle: Bool
     /// The row's words, made once when the row is made instead of on every redraw.
     private let text: ReceiptRowText
+    /// Under the amount (the queue's "Tarkista" or "Palauta" pill), as on Koti's task rows.
+    private let accessory: Accessory
 
-    init(receipt: Receipt, thumbnail: Bool = false) {
+    init(receipt: Receipt, thumbnail: Bool = false, wrapsTitle: Bool = false, @ViewBuilder accessory: () -> Accessory) {
         self.receipt = receipt
         self.thumbnail = thumbnail
+        self.wrapsTitle = wrapsTitle
         text = ReceiptRowText(receipt)
+        self.accessory = accessory()
     }
 
-    /// A row whose words and picture did not change is not drawn again (`.equatable()`).
+    /// A row whose words and picture did not change is not drawn again (`.equatable()`). Only the
+    /// list rows use it, and they have no accessory.
     static func == (lhs: ReceiptRow, rhs: ReceiptRow) -> Bool {
         lhs.receipt.id == rhs.receipt.id && lhs.text == rhs.text && lhs.thumbnail == rhs.thumbnail
-            && lhs.receipt.hasOriginalFile == rhs.receipt.hasOriginalFile
+            && lhs.wrapsTitle == rhs.wrapsTitle && lhs.receipt.hasOriginalFile == rhs.receipt.hasOriginalFile
     }
 
     var body: some View {
         HStack {
             if thumbnail { ReceiptThumbnail(receipt: receipt) }
             VStack(alignment: .leading, spacing: 2) {
-                Text(text.title).lineLimitUnlessLarge()
+                Text(text.title).lineLimitUnlessLarge(wrapsTitle ? 2 : 1)
                 HStack(spacing: 4) {
                     Text(text.detail)
                     if text.linked {
@@ -929,14 +953,24 @@ struct ReceiptRow: View, Equatable {
                     }
                 }
                 .font(.caption).foregroundStyle(Theme.ink2)
+                .lineLimitUnlessLarge(wrapsTitle ? 1 : nil)
             }
             Spacer()
-            if let amount = text.amount {
-                MoneyText(amount: text.isIncome ? amount : -amount, signed: text.isIncome)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(text.isIncome ? Theme.success : Theme.ink)
+            VStack(alignment: .trailing, spacing: 6) {
+                if let amount = text.amount {
+                    MoneyText(amount: text.isIncome ? amount : -amount, signed: text.isIncome)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(text.isIncome ? Theme.success : Theme.ink)
+                }
+                accessory
             }
         }
+    }
+}
+
+extension ReceiptRow where Accessory == EmptyView {
+    init(receipt: Receipt, thumbnail: Bool = false) {
+        self.init(receipt: receipt, thumbnail: thumbnail) { EmptyView() }
     }
 }
 

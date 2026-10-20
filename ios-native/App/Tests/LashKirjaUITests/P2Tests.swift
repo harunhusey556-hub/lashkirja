@@ -1,7 +1,9 @@
 import XCTest
+import UIKit
 
 /// P2 additions: Spotlight routes, receipt thumbnails, next invoice number, dates in Helsinki, one
-/// sign per figure, Koti's "Näytä kaikki" counts, category labels.
+/// sign per figure, Koti's "Näytä kaikki" counts, category labels, and the invoice form's unit pill
+/// and customer card fitting their line.
 final class P2Tests: WalkTestCase {
     /// Reads ids from the demo API the app uses (through the walk proxy), with the demo-seed login.
     func demoJSON(_ path: String) -> [String: Any] {
@@ -59,7 +61,59 @@ final class P2Tests: WalkTestCase {
         shot("p2-receipts"); dump(app, "p2-receipts")
         check("P2 Kuitit list shows image thumbnails (\(pictures.count))", pictures.count > 0)
         XCTAssertGreaterThan(pictures.count, 0, "no Kuitit row shows its picture")
+        // U031 (B11): the chips reach the screen's edges; the fourth was cut at the card's ('Kohdistet').
+        assertChipRowEdge("receipt-chips", "P2 C Kuitit")
+
+        // U030, U032 (N3): one primary in the bar, the camera, and Toiminnot for the rest. The
+        // filter and "Valitse kuitteja" were circled icons of the camera's weight, and "Valitse
+        // kuitteja" told VoiceOver it was selected.
+        let bar = app.navigationBars["Kuitit"]
+        let items = barItems(bar)
+        check("P2 C Kuitit bar is Kuvaa kuitti + Toiminnot (\(items))", items.sorted() == ["Kuvaa kuitti", "Toiminnot"])
+        XCTAssertEqual(items.sorted(), ["Kuvaa kuitti", "Toiminnot"], "the Kuitit bar beside Back")
+        let actions = bar.buttons["Toiminnot"].firstMatch
+        guard actions.exists else { dump(app, "p2c-no-toiminnot"); XCTFail("no Toiminnot on Kuitit"); return }
+        actions.tap()
+        let select = app.buttons["Valitse kuitteja"].firstMatch
+        guard select.waitForExistence(timeout: 5) else { dump(app, "p2c-menu"); XCTFail("Toiminnot has no Valitse kuitteja"); return }
+        let filter = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Suodata")).firstMatch
+        XCTAssertTrue(filter.exists, "Toiminnot has no Suodata")
+        XCTAssertFalse(select.isSelected, "Valitse kuitteja reports Selected")
+        shot("p2-receipts-toiminnot")
+        select.tap()
+        let all = app.buttons["Valitse kaikki"].firstMatch.waitForExistence(timeout: 5)
+        let done = bar.buttons["Valmis"].firstMatch.exists
+        check("P2 C Valitse kuitteja shows Valitse kaikki and Valmis", all && done)
+        XCTAssertTrue(all && done, "Valitse kuitteja did not start picking: Valitse kaikki \(all), Valmis \(done)")
+
+        // X132 X147 (B11): Ostolaskut's, Myynti's and the template editor's chip rows reach the
+        // screen's edges too. They ended in a chip cut at the card's edge ('Od', '{era').
+        if done {
+            bar.buttons["Valmis"].firstMatch.tap()
+            _ = app.buttons["Valitse kaikki"].firstMatch.waitForNonExistence(timeout: 5)
+        }
+        bar.buttons["BackButton"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Kirjanpito"].waitForExistence(timeout: 10), "Back from Kuitit did not reach Kirjanpito")
+        tapLabel("label BEGINSWITH %@", "Ostolaskut")
+        if app.navigationBars["Ostolaskut"].waitForExistence(timeout: 10) {
+            assertChipRowEdge("purchase-chips", "P2 C Ostolaskut")
+        } else { XCTFail("Ostolaskut did not open") }
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        assertChipRowEdge("sales-chips", "P2 C Myynti")
+        XCTAssertTrue(selectTab("Koti"), "Koti is not selected")
+        openSettings()
+        guard tap("Sähköpostimallit"), tap("Uusi malli") else { XCTFail("Sähköpostimallit > Uusi malli did not open"); return }
+        assertChipRowEdge("template-placeholders", "P2 C Uusi malli")
+        // The section gives up its side margins for the row and gives them back to its header: read
+        // beside the header above it, for the review.
+        let viesti = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Viesti")).firstMatch
+        let placeholders = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Paikkamerkit")).firstMatch
+        if viesti.exists && placeholders.exists {
+            note("INFO P2 C Uusi malli headers: Viesti x \(viesti.frame.minX), Paikkamerkit x \(placeholders.frame.minX)")
+        }
+        shot("p2-template-placeholders")
     }
+
     /// U038: the caption is the server's next number, and the form opens on the Helsinki day with the
     /// due date 14 days on. The check read only "Seuraava laskunumero", so it passed while the picker
     /// drew 17.10.2026 above "Eräpäivä 1.11.2026 · 14 pv" on the UTC simulator.
@@ -157,7 +211,10 @@ final class P2Tests: WalkTestCase {
         let amount = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Summa", "Summa")).firstMatch
         guard amount.waitForExistence(timeout: 5) else { dump(app, "p2e-no-amount"); XCTFail("no Summa in Kirjaa maksu"); return }
         let filled = (amount.value as? String) ?? ""
-        type(amount, String(repeating: XCUIKeyboardKey.delete.rawValue, count: filled.count + 2) + "1")
+        // The sum sits at the trailing edge, as on the purchase sheet: type()'s centre tap put the caret before it.
+        amount.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5)).withOffset(CGVector(dx: -2, dy: 0)).tap(); taps += 1
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: amount)], timeout: 2)
+        amount.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: filled.count + 2) + "1")
         XCTAssertEqual(amount.value as? String, "1", "Summa before Tallenna")
         sheet.buttons["Tallenna"].tap(); taps += 1
         XCTAssertTrue(sheet.waitForNonExistence(timeout: 20), "Kirjaa maksu did not close after Tallenna")
@@ -307,6 +364,102 @@ final class P2Tests: WalkTestCase {
             .label
     }
 
+    /// U013 U026 U092 U103: Rivi 1's unit pill reads 'kpl ⌃⌄' on the stepper's line. The row gave the
+    /// stepper and the pill an equal share narrower than the stepper, and the pill became a tall
+    /// empty capsule, about 27 x 73 pt, with only its chevron showing.
+    func testF_UnitMenuFitsTheLine() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        guard tap("Uusi lasku"), app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15) else {
+            XCTFail("Uusi lasku did not open"); return
+        }
+        let unit = app.buttons["Yksikkö kpl"].firstMatch
+        guard reveal(unit) else { dump(app, "p2f-no-unit"); XCTFail("Rivi 1 shows no Yksikkö kpl"); return }
+        waitStill(unit)
+        shot("p2f-unit-menu")
+        let pill = unit.frame
+        XCTAssertLessThanOrEqual(pill.height, 44, "the unit pill is \(pill.height) pt tall")
+        XCTAssertGreaterThanOrEqual(pill.width, 40, "the unit pill is \(pill.width) pt wide")
+        let plus = app.buttons["Lisää määrää"].firstMatch
+        let price = app.textFields["Rivin 1 à-hinta euroina"].firstMatch
+        guard plus.exists, price.exists else { dump(app, "p2f-row"); XCTFail("Rivi 1 has no Lisää määrää or no price field"); return }
+        XCTAssertFalse(overlaps(pill, plus.frame), "the unit pill \(pill) lies over Lisää määrää \(plus.frame)")
+        XCTAssertFalse(overlaps(pill, price.frame), "the unit pill \(pill) lies over the price field \(price.frame)")
+    }
+
+    /// X026: on Lasku 4 > Muokkaa the Asiakas card shows Kauneus Oy's Y-tunnus and e-mail whole. On one
+    /// line beside "Vaihda" the e-mail was cut to 'laskut@kaune…'. Text the audit finds cut on the
+    /// invoice under the form is that screen's, not the card's. Wrapped whole on two lines the detail
+    /// still drew the audit's guess for larger sizes (p2j-customer-card, run 39322642358): that is B5's.
+    func testJ_CustomerCardFits() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        // The seed's draft (demo-seed.ts): Kauneus Oy, Y-tunnus 2454577-7, laskut@kauneus.example.
+        guard tapLabel("label MATCHES %@", ".*Lasku 4(\\D.*)?"), app.navigationBars["Lasku 4"].waitForExistence(timeout: 20) else {
+            dump(app, "p2j-no-draft"); XCTFail("Lasku 4 did not open from Myynti"); return
+        }
+        let under = clippedTexts()
+        guard tap("Muokkaa"), app.navigationBars["Muokkaa laskua"].waitForExistence(timeout: 15) else {
+            dump(app, "p2j-no-form"); XCTFail("Muokkaa did not open Muokkaa laskua"); return
+        }
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Y-tunnus 2454577-7")).firstMatch
+        guard card.waitForExistence(timeout: 15) else { dump(app, "p2j-no-card"); XCTFail("the form has no Asiakas card for Kauneus Oy"); return }
+        waitStill(card)
+        shot("p2j-customer-card")
+        // What the audit says for a real cut is unseen, so the line is measured too: whole, the caption
+        // wraps to two lines (lineLimit 2); cut, it was one line beside Vaihda.
+        let detail = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Y-tunnus 2454577-7")).firstMatch
+        XCTAssertGreaterThanOrEqual(detail.frame.height, UIFont.preferredFont(forTextStyle: .caption1).lineHeight * 1.5, "the Y-tunnus/e-mail line is on one line beside Vaihda, where it was cut: \(detail.frame)")
+        let cut = clippedTexts(within: card.frame).filter { !under.contains($0) }
+        XCTAssertEqual(cut, [], "text cut on the Asiakas card")
+    }
+
+    /// X037 X053 X062 X070 X082 (B12): the pending row of "Odottaa hyväksyntää" shows the whole
+    /// vendor and a one-line detail. The 'Tarkista' pill beside the amount cut the CI seed's
+    /// 'Audit Hyvitys Odottaa Oy' to 'Audit Hyvitys Odott…' and wrapped its '· Tarvikkeet & ostot'.
+    func testI_ReviewRowFits() throws {
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Audit Hyvitys Odottaa Oy,")).firstMatch
+        guard row.waitForExistence(timeout: 20) else {
+            dump(app, "p2i-no-row"); XCTFail("no Audit Hyvitys Odottaa Oy in Odottaa hyväksyntää: is the seed demo-seed.ts --ci?"); return
+        }
+        waitStill(row)
+        shot("p2i-review-row"); dump(app, "p2i-review-row")
+        let header = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Odottaa hyväksyntää")).firstMatch
+        let rows = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@ OR label ENDSWITH %@", ", Tarkista", ", Täydennä"))
+        var card = row.frame
+        if header.exists { card = card.union(header.frame) }
+        for other in rows.allElementsBoundByIndex where other.exists { card = card.union(other.frame) }
+
+        // No text in the card is cut at this size. The audit also guesses at larger text sizes
+        // ("may be clipped at larger Dynamic Type sizes"); those belong to B5 and are noted only.
+        var clipped: [String] = []
+        try app.performAccessibilityAudit(for: .textClipped) { issue in
+            guard let element = issue.element, element.exists, element.frame.intersects(card) else { return true }
+            let text = "\(element.label): \(issue.compactDescription) – \(issue.detailedDescription)"
+            if text.localizedCaseInsensitiveContains("larger") {
+                self.note("INFO P2 I audit at other sizes: \(text)")
+                return true
+            }
+            clipped.append(text)
+            return false
+        }
+        check("P2 I no text cut in Odottaa hyväksyntää (\(clipped))", clipped.isEmpty)
+
+        // The detail ("<date> · <category>") is one caption line.
+        let detail = row.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", " · ")).firstMatch
+        let caption = UIFont.preferredFont(forTextStyle: .caption1).lineHeight
+        XCTAssertTrue(detail.exists, "the row shows no '<date> · <category>' line")
+        check("P2 I the detail is one line (\(detail.frame.height) pt, caption \(caption) pt)", detail.frame.height <= caption * 1.3)
+        XCTAssertLessThanOrEqual(detail.frame.height, caption * 1.3, "the detail takes \(detail.frame.height) pt: more than one caption line (\(caption) pt)")
+
+        // The pill sits under the amount, inside the row.
+        let pill = row.staticTexts["Tarkista"].firstMatch
+        let amount = row.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "€")).firstMatch
+        XCTAssertTrue(pill.exists && amount.exists, "the row has no Tarkista pill or no amount")
+        note("INFO p2i-geometry: row \(row.frame), detail \(detail.frame), amount \(amount.frame), pill \(pill.frame)")
+        XCTAssertTrue(row.frame.contains(pill.frame), "the pill \(pill.frame) is outside its row \(row.frame)")
+        XCTAssertGreaterThanOrEqual(pill.frame.minY, amount.frame.maxY - 1, "the pill \(pill.frame) is not under the amount \(amount.frame)")
+    }
+
     /// A fresh launch with the device in `zone`; the simulator itself runs in UTC.
     private func relaunch(zone: String) {
         app.terminate()
@@ -379,6 +532,38 @@ final class P2Tests: WalkTestCase {
         return true
     }
 
+    /// Two frames share an area, not only an edge.
+    private func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+        let shared = a.intersection(b)
+        return !shared.isNull && shared.width > 0.5 && shared.height > 0.5
+    }
+
+    /// The texts the textClipped audit finds cut on the screen at this text size (within `area` when one
+    /// is given), by label and what the audit said; the audit itself records nothing. Its guesses at
+    /// larger sizes are only noted, as in testI: they belong to B5. StabilityTests has its own copy,
+    /// without the area.
+    private func clippedTexts(within area: CGRect? = nil) -> [String] {
+        let found = ClippedTexts()
+        do {
+            try app.performAccessibilityAudit(for: .textClipped) { issue in
+                if let area {
+                    guard let frame = issue.element?.frame, self.overlaps(frame, area) else { return true }
+                }
+                let label = issue.element?.label ?? ""
+                let text = "\(label.isEmpty ? issue.compactDescription : label): \(issue.detailedDescription)"
+                if "\(issue.compactDescription) \(issue.detailedDescription)".localizedCaseInsensitiveContains("larger") {
+                    self.note("INFO P2 audit at larger sizes: \(text)")
+                } else {
+                    found.labels.append(text)
+                }
+                return true
+            }
+        } catch {
+            XCTFail("the textClipped audit did not run: \(error)")
+        }
+        return found.labels
+    }
+
     private func waitEnabled(_ element: XCUIElement) {
         let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: element)
         _ = XCTWaiter().wait(for: [enabled], timeout: 15)
@@ -399,6 +584,11 @@ final class P2Tests: WalkTestCase {
         let button = bar.buttons["BackButton"].exists ? bar.buttons["BackButton"] : bar.buttons.element(boundBy: 0)
         button.tap(); taps += 1
     }
+}
+
+/// What an audit's handler found; a class, so the handler fills it in place.
+private final class ClippedTexts {
+    var labels: [String] = []
 }
 
 /// A calendar day in Helsinki, the day the app and the server count in.

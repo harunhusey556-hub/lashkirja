@@ -15,6 +15,8 @@ struct ReviewQueueSection: View {
     let loadingPending: Bool
     let loadingRejected: Bool
     let busy: Bool
+    /// Kuitit is picking rows: the card stays where it is, dimmed and not tappable.
+    let dimmed: Bool
     let approve: ([String]) async -> Void
     let restore: (String) async -> Void
     let loadMorePending: () async -> Void
@@ -30,12 +32,24 @@ struct ReviewQueueSection: View {
     var body: some View {
         let groups = ReviewQueue.groups(pending: pending, rejectedCount: rejected.count)
         if let current = GroupChoice.pick(group, available: groups) {
-            Section {
-                if groups.count > 1 {
+            let title = Text(current == .rejected ? "Hylätyt kuitit · \(rejectedTotal)" : "Odottaa hyväksyntää · \(pending.count)")
+            // The chips get a section of their own: at no margins, the rows' section would stretch their
+            // card to the screen's edges too. Both sections dim and move alike, so the queue dims as one.
+            if groups.count > 1 {
+                Section {
                     chips(groups, current: current)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                } header: {
+                    // The section's margins hold its header too: it keeps the other sections' line.
+                    title.padding(.horizontal, ChipRow.inset)
                 }
+                .chipRowSection()
+                .motion(listMotion.animation(.snappy), value: pendingHasMore)
+                .disabled(dimmed)
+                .opacity(dimmed ? 0.4 : 1)
+            }
+            Section {
                 Text(current.description).font(.caption).foregroundStyle(Theme.ink2)
                 if current == .rejected {
                     rejectedRows
@@ -43,11 +57,13 @@ struct ReviewQueueSection: View {
                     pendingRows(ReviewQueue.split(pending)[current] ?? [])
                 }
             } header: {
-                Text(current == .rejected ? "Hylätyt kuitit · \(rejectedTotal)" : "Odottaa hyväksyntää · \(pending.count)")
+                if groups.count <= 1 { title }
             }
             // The last page arriving removes "Lataa lisää" at the foot of the list: it fades out
             // instead of vanishing, and the rows below don't jump.
             .motion(listMotion.animation(.snappy), value: pendingHasMore)
+            .disabled(dimmed)
+            .opacity(dimmed ? 0.4 : 1)
         }
     }
 
@@ -65,33 +81,35 @@ struct ReviewQueueSection: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ChipRow.inset)
         }
+        .chipRowScroll()
     }
 
     @ViewBuilder private func pendingRows(_ rows: [Receipt]) -> some View {
         ForEach(showAll ? rows : Array(rows.prefix(Self.preview))) { receipt in
             let gaps = ReceiptApproval.gaps(receipt)
             NavigationLink(value: Route.receipt(receipt.id)) {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ReceiptRow(receipt: receipt)
-                        if !gaps.isEmpty {
-                            Text(ReceiptApproval.gapText(gaps)).font(.caption).foregroundStyle(Theme.warning)
+                VStack(alignment: .leading, spacing: 2) {
+                    // The pill under the amount, as on Koti's task rows: beside it, the pill cut a
+                    // vendor to 'Audit Hyvitys Odott…' and wrapped the line under it (X037).
+                    ReceiptRow(receipt: receipt, wrapsTitle: true) {
+                        if gaps.isEmpty {
+                            // Not a button of its own: approving from the queue meant approving a receipt
+                            // nobody had seen. The row opens the receipt, whose picture sits above "Hyväksy".
+                            pill("Tarkista")
+                        } else {
+                            // The row opens the receipt, where the missing fields are filled in.
+                            pill("Täydennä")
                         }
                     }
-                    if gaps.isEmpty {
-                        // Not a button of its own: approving from the queue meant approving a receipt
-                        // nobody had seen. The row opens the receipt, whose picture sits above "Hyväksy".
-                        pill("Tarkista")
-                    } else {
-                        // The row opens the receipt, where the missing fields are filled in.
-                        pill("Täydennä")
+                    if !gaps.isEmpty {
+                        Text(ReceiptApproval.gapText(gaps)).font(.caption).foregroundStyle(Theme.warning)
                     }
                 }
             }
             .swipeActions(edge: .trailing) {
-                if gaps.isEmpty {
+                if gaps.isEmpty && !dimmed {
                     Button("Hyväksy") { Task { await approve([receipt.id]) } }
                         .tint(Theme.successFill)
                         .disabled(busy)
@@ -143,8 +161,7 @@ struct ReviewQueueSection: View {
     @ViewBuilder private var rejectedRows: some View {
         ForEach(rejected.prefix(rejectedLimit.visible(rejected.count))) { receipt in
             NavigationLink(value: Route.receipt(receipt.id)) {
-                HStack(spacing: 10) {
-                    ReceiptRow(receipt: receipt)
+                ReceiptRow(receipt: receipt, wrapsTitle: true) {
                     Button { Task { await restore(receipt.id) } } label: { pill("Palauta") }
                         .buttonStyle(.borderless)
                         .disabled(busy)

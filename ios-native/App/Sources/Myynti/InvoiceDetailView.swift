@@ -83,6 +83,7 @@ struct InvoiceDetailView: View {
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
+                .chipRowSection()
                 tabContent(invoice, tab: tabs.contains { $0.tab == tab } ? tab : .lines)
             } else {
                 ScreenStateView(state: state, retry: load) { (_: Invoice) in EmptyView() }.listRowBackground(Color.clear)
@@ -337,7 +338,10 @@ struct InvoiceDetailView: View {
                     }
                 }
             }
+            .padding(.horizontal, ChipRow.inset)
         }
+        .accessibilityIdentifier("invoice-tabs")
+        .chipRowScroll()
     }
 
     @ViewBuilder private func tabContent(_ invoice: Invoice, tab: InvoiceDetailLayout.Tab) -> some View {
@@ -760,7 +764,13 @@ struct PaymentSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Summa", text: $amountText).moneyInput()
+                    // Named beside the field: the open sum filled in at once hid the placeholder, the
+                    // field's only name (U007).
+                    LabeledContent("Summa (€)") {
+                        TextField("Summa", text: $amountText)
+                            .moneyInput()
+                            .multilineTextAlignment(.trailing)
+                    }
                     DatePicker("Maksupäivä", selection: $date, in: ...(APIDate.pickerDate(APIDate.dayString(Date())) ?? Date()),
                                displayedComponents: .date)
                     TextField("Lisätieto (valinnainen)", text: $note)
@@ -806,7 +816,9 @@ struct PaymentSheet: View {
             // with other figures (the server refuses the changed retry instead).
             .task(id: candidateKey) { await findBankRow() }
         }
-        .presentationDetents([.medium, .large])
+        // Full height, as the other editor sheets: the discard question stacked on a half-height
+        // sheet pushed the form out of view, so "Jatka muokkausta" seemed to lead nowhere (U000).
+        .presentationDetents([.large])
         .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 
@@ -888,7 +900,8 @@ struct ReminderSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
-            .navigationTitle("Lähetä maksumuistutus")
+            // The bar's Lähetä already says what happens; the long title was cut beside it (X002).
+            .navigationTitle("Maksumuistutus")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Peruuta") { dismiss() } }
@@ -1267,6 +1280,7 @@ struct CloseReasonSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .presentationBackground(Theme.canvas)
         .discardGuard(dirty: dirty, busy: false, asking: $confirmDiscard) { dismiss() }
     }
 
