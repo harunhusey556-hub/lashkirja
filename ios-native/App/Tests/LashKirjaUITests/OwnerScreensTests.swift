@@ -191,7 +191,7 @@ final class OwnerScreensTests: WalkTestCase {
         XCTAssertEqual(items.sorted(), ["Kuvaa kuitti", "Toiminnot"], "the Kuitit bar beside Back")
 
         // The chips scroll sideways; the fifth may sit past the edge.
-        if !chip.isHittable { app.buttons["receipt-tab-all"].firstMatch.swipeLeft(); sleep(1) }
+        revealChip(chip, inRow: "receipt-chips")
         chip.tap()
         sleep(3)
         capture("b2-ei-kohdistettu")
