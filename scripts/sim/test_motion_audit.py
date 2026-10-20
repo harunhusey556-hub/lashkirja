@@ -102,6 +102,21 @@ def row(sid, **checks):
             "checks": {k: checks.get(k, "PASS") for k in ("intermediate", "flash", "shift_video", "shift_probe")}}
 
 
+class GateNeedsWalks(unittest.TestCase):
+    def test_a_walk_with_no_steps_fails_the_gate(self):
+        # F003: run 39355446040's walks stopped before their first step; three empty reports read
+        # NEW FAIL 0, NEW MISS 0, and the job passed.
+        out, code = gate([[], [], []])
+        self.assertEqual(code, 1, out)
+        self.assertIn("NO WALK: baseline, pr-run1, pr-run2", out)
+        out, code = gate([[row("a")], [row("a")], []])
+        self.assertEqual(code, 1, out)
+        self.assertIn("NO WALK: pr-run2", out)
+        out, code = gate([[row("a")], [row("a")], [row("a")]])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("NO WALK", out)
+
+
 class NoVacuousPass(unittest.TestCase):
     def test_one_frame_video_is_not_pass(self):
         # M004/M019: the push ran after filming stopped; the video holds the start screen only.
