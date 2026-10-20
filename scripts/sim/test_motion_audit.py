@@ -1,6 +1,8 @@
 """Unit tests for motion-audit.py and motion-gate.py (batch H1): no vacuous PASS, no false FIXED,
 spinner pages and late shifts after a stalled presentation caught. Batch H6: frame times, the
 contact sheet, and the motion a step is expected to make, each rule with a case it must still fail.
+Batch H5: the step's t = 0 is the app's TOUCH, a cut recording is not judged, and a stall counts
+against the app only where XCUITest was not driving it.
 usage: python3 -m unittest discover -s scripts/sim -p 'test_*.py'
 Synthetic frames stand in for ffmpeg; the gate runs as the workflow runs it, as a script."""
 import importlib.util, json, os, subprocess, sys, tempfile, unittest
@@ -50,7 +52,7 @@ def probe(lines):
         return ma.probe_events(p)
 
 
-def walk(root, suite, steps, videos, probe_lines=(), notes=()):
+def walk(root, suite, steps, videos, probe_lines=(), notes=(), xcui=()):
     """One walk's directory as the workflow leaves it, analysed with fake videos."""
     d = os.path.join(root, suite)
     os.makedirs(d)
@@ -58,7 +60,7 @@ def walk(root, suite, steps, videos, probe_lines=(), notes=()):
         json.dump(steps, f)
     for name in videos:
         open(os.path.join(d, name), "wb").close()
-    for name, lines in (("probe.log", probe_lines), ("notes.txt", notes)):
+    for name, lines in (("probe.log", probe_lines), ("notes.txt", notes), ("xcui.log", xcui)):
         if lines:
             with open(os.path.join(d, name), "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
@@ -75,8 +77,10 @@ def walk(root, suite, steps, videos, probe_lines=(), notes=()):
 
 
 def step(sid, kind="nav", reached=True, skipped=False, video=True):
+    """A step as the walk writes it since H5: the element found and the finger in at the tap."""
     return {"id": sid, "suite": "s", "from": "A", "to": "B", "action": sid, "kind": kind, "expect": "",
             "tapAt": 100.5, "doneAt": 101.0, "recStart": 100.0, "recEnd": 104.0,
+            "foundAt": 100.5, "touchAt": 100.5, "pressed": True,
             "video": f"m-{sid}.mov" if video else None, "reached": reached, "skipped": skipped}
 
 
@@ -151,7 +155,7 @@ class Gate(unittest.TestCase):
         out, code = gate(miss)
         self.assertEqual(code, 1)
         self.assertEqual(count(out, "NEW MISS"), 1)
-        self.assertIn("pr-run1: intermediate 0, flash 0, shift_video 0, shift_probe 0, crashed 0, steps 1; not judged: NO-MOTION 1", out)
+        self.assertIn("pr-run1: intermediate 0, flash 0, shift_video 0, shift_probe 0, stall 0, crashed 0, steps 1; not judged: NO-MOTION 1", out)
         # One PR walk that still judged the check is not a miss, as one noisy run is not a NEW FAIL.
         out, code = gate([[row("a")], [row("a", intermediate="NO-MOTION")], [row("a")]])
         self.assertEqual((count(out, "NEW MISS"), code), (0, 0))
@@ -470,6 +474,133 @@ class ExpectedMotion(unittest.TestCase):
         self.assertNotEqual(self.fade([3.1, 3.2, 3.3, 3.4], [fading(q, f, w) for w in (0.6, 0.3, 0.85)] + [f]), [])
         # A slide in from the right.
         self.assertNotEqual(self.fade([3.1, 3.2, 3.3], [np.concatenate([q[:, k:], f[:, :k]], axis=1) for k in (140, 280)] + [f]), [])
+
+
+def legacy(sid, **over):
+    """A step as the walk wrote it before H5: tapAt stamped before XCUITest looked for the element,
+    no foundAt, touchAt or pressed."""
+    out = {k: v for k, v in step(sid).items() if k not in ("foundAt", "touchAt", "pressed")}
+    out.update(over)
+    return out
+
+
+# A push whose tap XCUITest delivered 1.5 s after the stamp: the screen moves 0.5 s after the touch.
+PUSH = ([0.25, 2.5, 2.75, 3.0, 3.5], np.stack([A, B, B, B, B]))
+
+
+class TouchIsTimeZero(unittest.TestCase):
+    def test_tap_s_comes_from_touch(self):
+        # M046/M056: settle_ms held XCUITest's look for the element (tapAt 100.5, touch 102.0).
+        with tempfile.TemporaryDirectory() as root:
+            r = walk(root, "s", [legacy("push", doneAt=102.2, recEnd=104.0)], {"m-push.mov": PUSH},
+                     probe_lines=["TOUCH 102.000 tab.koti"])["push"]
+        self.assertEqual(r["settle_ms"], 500)
+        self.assertEqual(r["touch_ms"], 1500)
+        # The walk's own touchAt is taken first.
+        with tempfile.TemporaryDirectory() as root:
+            r = walk(root, "s", [dict(step("push"), doneAt=102.2, touchAt=102.0)], {"m-push.mov": PUSH},
+                     probe_lines=["TOUCH 101.500 tab.koti"])["push"]
+        self.assertEqual(r["settle_ms"], 500)
+
+    def test_pressed_step_without_touch_is_an_error(self):
+        # Today's steps.json: no touchAt, and its probe.log has no TOUCH; t = 0 is unknown.
+        with tempfile.TemporaryDirectory() as root:
+            r = walk(root, "s", [legacy("push", doneAt=102.2)], {"m-push.mov": PUSH},
+                     probe_lines=["MOVE 102.300 tab.koti n=4 max=120 HostingView@0,0,402x874:120,0", "QUIET 102.800 tab.koti"])["push"]
+        self.assertEqual(set(r["checks"].values()), {"NO-TOUCH"})
+        # A link moves no finger on the app: its stamp is its t = 0.
+        with tempfile.TemporaryDirectory() as root:
+            r = walk(root, "s", [dict(legacy("link"), pressed=False, tapAt=101.8, doneAt=102.0)], {"m-link.mov": PUSH})["link"]
+        self.assertNotIn("NO-TOUCH", r["checks"].values())
+        self.assertEqual(r["checks"]["intermediate"], "PASS")
+
+    def test_recording_cut_at_the_action_is_not_judged(self):
+        # M029/M096: the tap came after the recording had ended, and every check passed on nothing.
+        with tempfile.TemporaryDirectory() as root:
+            rows = walk(root, "s", [dict(step("cut"), doneAt=103.6), dict(step("full"), doneAt=103.0)],
+                        {"m-cut.mov": PUSH, "m-full.mov": PUSH})
+        self.assertEqual(set(rows["cut"]["checks"].values()), {"MISS-WINDOW"})
+        self.assertNotIn("MISS-WINDOW", rows["full"]["checks"].values())
+
+    def test_walk_timing_is_in_the_report(self):
+        with tempfile.TemporaryDirectory() as root:
+            walk(root, "s", [dict(step("cut"), doneAt=103.6), dict(step("late"), foundAt=100.3), legacy("old")],
+                 {"m-cut.mov": PUSH, "m-late.mov": PUSH, "m-old.mov": PUSH})
+            with open(os.path.join(root, "motion-report.md"), encoding="utf-8") as f:
+                report = f.read()
+        self.assertIn("Walk timing: 1 recordings ended within 1 s of the action, 1 pressed steps have no TOUCH, "
+                      "1 taps went out 50 ms or more after their element was found.", report)
+
+
+# xcui.log of a tap: XCUITest looks the element up until the touch, then waits for the app to idle.
+TAP = ["XCUI begin 100.400 push", "XCUI end 103.300 push"]
+
+
+class StallAttribution(unittest.TestCase):
+    def stall(self, probe_lines, xcui=TAP, touch=100.5):
+        with tempfile.TemporaryDirectory() as root:
+            return walk(root, "s", [dict(step("push"), doneAt=103.3, recEnd=106.0, touchAt=touch)], {"m-push.mov": PUSH},
+                        probe_lines=probe_lines, xcui=xcui)["push"]
+
+    def test_stall_after_the_touch_is_the_apps(self):
+        # raportit-tab (M040): the main thread held 0.9 s after the tab's touch.
+        r = self.stall(["STALL 100.500 tab.koti ms=1400", "TOUCH 100.500 tab.koti", "STALL 101.700 tab.raportit ms=900"])
+        self.assertEqual(r["app_stall_ms"], 900)
+        self.assertEqual(r["checks"]["stall"], "FAIL")
+
+    def test_xcuitest_snapshots_are_not_the_apps(self):
+        # Before the touch XCUITest resolves the element on the app's main thread (M003, M069).
+        lines = ["STALL 101.900 tab.koti ms=1300", "TOUCH 102.000 tab.koti"]
+        r = self.stall(lines, touch=102.0)
+        self.assertEqual(r["app_stall_ms"], 0)
+        self.assertEqual(r["checks"]["stall"], "PASS")
+        # A wait inside the recording that touched nothing is XCUITest's whole (an element going away).
+        until = ["TOUCH 100.500 tab.koti", "STALL 104.800 tab.koti ms=1200"]
+        r = self.stall(until, xcui=TAP + ["XCUI begin 103.500 push.until", "XCUI end 105.000 push.until"])
+        self.assertEqual(r["app_stall_ms"], 0)
+        # Without that stretch the same stall is the app's.
+        self.assertEqual(self.stall(until)["app_stall_ms"], 1200)
+
+    def test_short_stall_passes_and_no_log_is_not_judged(self):
+        self.assertEqual(self.stall(["TOUCH 100.500 tab.koti", "STALL 101.000 tab.koti ms=400"])["checks"]["stall"], "PASS")
+        # A walk without xcui.log cannot tell XCUITest's time from the app's.
+        self.assertEqual(self.stall(["TOUCH 100.500 tab.koti", "STALL 101.700 tab.koti ms=900"], xcui=())["checks"]["stall"], "n/a")
+
+    def test_report_has_the_app_stall_column(self):
+        with tempfile.TemporaryDirectory() as root:
+            walk(root, "s", [dict(step("push"), doneAt=103.3, recEnd=106.0)], {"m-push.mov": PUSH},
+                 probe_lines=["TOUCH 100.500 tab.koti", "STALL 101.700 tab.raportit ms=900"], xcui=TAP)
+            with open(os.path.join(root, "motion-report.md"), encoding="utf-8") as f:
+                report = f.read().splitlines()
+        header = next(x for x in report if x.startswith("| suite |"))
+        row = next(x for x in report if x.startswith("| s | push |"))
+        cells = [c.strip() for c in header.split("|")]
+        self.assertIn("app stall ms", cells)
+        self.assertEqual([c.strip() for c in row.split("|")][cells.index("app stall ms")], "900")
+        self.assertEqual([c.strip() for c in row.split("|")][cells.index("stall")], "FAIL")
+
+
+class GateStall(unittest.TestCase):
+    @staticmethod
+    def tab(stall):
+        r = row("tab")
+        r["checks"]["stall"] = stall
+        return r
+
+    def test_stall_is_gated_and_new_fail_says_it_does_not_fail_the_job(self):
+        # raportit-tab (M040): the stall check is a row of the gate like the four others.
+        out, code = gate([[self.tab("PASS")], [self.tab("FAIL")], [self.tab("FAIL")]])
+        self.assertEqual(count(out, "NEW FAIL"), 1)
+        self.assertEqual(code, 0)
+        line = next(x for x in out.splitlines() if x.startswith("NEW FAIL"))
+        self.assertIn("does not fail", line)
+
+    def test_cut_or_untouched_pr_walks_are_new_misses(self):
+        for miss in ("MISS-WINDOW", "NO-TOUCH"):
+            prs = [[{"suite": "s", "id": "a", "crashed": False, "checks": dict.fromkeys(ma.KS, miss)}] for _ in range(2)]
+            out, code = gate([[row("a")], *prs])
+            self.assertEqual((count(out, "NEW MISS"), code), (4, 1), miss)
+            self.assertIn(f"{miss} 1", out)
 
 
 if __name__ == "__main__":
