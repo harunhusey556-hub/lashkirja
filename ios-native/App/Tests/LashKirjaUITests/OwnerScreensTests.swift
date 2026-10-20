@@ -656,9 +656,13 @@ final class OwnerScreensTests: WalkTestCase {
     /// The shown screen's Back, then the bar of the screen under it. A sheet's stack has its own Back
     /// over the one of the screen beneath it, which is not hittable.
     func back(to title: String) {
-        let shown = app.navigationBars.buttons.matching(identifier: "BackButton").allElementsBoundByIndex.first { $0.isHittable }
-        if let shown { shown.tap() } else { edgeSwipeBack() }
-        _ = app.navigationBars[title].waitForExistence(timeout: 10)
+        // A menu still open takes the first tap and closes (UI suite 39487668420 stayed on Lasku 2
+        // under its Toiminnot), so the back is tried once more when the screen did not come.
+        for _ in 0..<2 {
+            let shown = app.navigationBars.buttons.matching(identifier: "BackButton").allElementsBoundByIndex.first { $0.isHittable }
+            if let shown { shown.tap() } else { edgeSwipeBack() }
+            if app.navigationBars[title].waitForExistence(timeout: 10) { return }
+        }
     }
 
     /// Closes an open menu without choosing, by a tap beside it, and waits until `item` has gone with it.
