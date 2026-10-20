@@ -161,7 +161,24 @@ final class MotionAuditTests: WalkTestCase {
         sleep(2)
         extra?()
         if swipeBack {
+            let bars = app.navigationBars.allElementsBoundByIndex.map { "\($0.identifier)|\($0.buttons.firstMatch.label)" }
+            note("DIAG \(id) before swipe: bars=\(bars)")
             step("\(id)-swipeback", from: title, to: from, kind: "nav") { edgeSwipeBack(); return true }
+            if app.navigationBars[title].exists {
+                note("DIAG \(id) STUCK after swipe 1")
+                try? app.debugDescription.write(toFile: "\(shotDir)/diag-\(id)-tree.txt", atomically: true, encoding: .utf8)
+                sleep(2)
+                edgeSwipeBack(); sleep(2)
+                note("DIAG \(id) after swipe 2 stuck=\(app.navigationBars[title].exists)")
+                if app.navigationBars[title].exists {
+                    let w = app.windows.firstMatch
+                    w.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.3))
+                        .press(forDuration: 0.3, thenDragTo: w.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.3)), withVelocity: .slow, thenHoldForDuration: 0.2)
+                    sleep(2)
+                    note("DIAG \(id) after slow swipe stuck=\(app.navigationBars[title].exists)")
+                }
+                if app.navigationBars[title].exists { _ = press(backButton()); sleep(2); note("DIAG \(id) after back stuck=\(app.navigationBars[title].exists)") }
+            } else { note("DIAG \(id) swipe 1 ok") }
         } else {
             step("\(id)-back", from: title, to: from, kind: "nav") { press(backButton()) }
         }
