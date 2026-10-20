@@ -225,6 +225,71 @@ final class P0Tests: WalkTestCase {
         assertWarmCanvas(app, under: app.navigationBars["Uusi kuitti"], "Uusi kuitti, lomake")
     }
 
+    // X123 X124: a refused sign-in is said under the password, as the web says it, without moving the
+    // fields the owner is about to retype (a card above the form pushed them down about 81 pt), and
+    // the words go once the password is edited. The e-mail placeholder is the quiet grey of the
+    // password's: parsed as Markdown, 'nimi@yritys.fi' became a link in the system blue (0,122,255).
+    // Asserted. It ends signed out; the next launch signs in again.
+    func testL_WrongPasswordInPlace() {
+        guard openSignOutQuestion() != nil else {
+            shot("l0-no-question"); dump(app, "l0-no-question"); XCTFail("Asetukset > Kirjaudu ulos did not ask"); return
+        }
+        app.buttons["confirm-sheet-confirm"].firstMatch.tap(); taps += 1
+        let email = app.textFields.firstMatch
+        let password = app.secureTextFields.firstMatch
+        guard password.waitForExistence(timeout: 20), email.exists else {
+            shot("l0-no-form"); dump(app, "l0-no-form"); XCTFail("signing out did not open the sign-in screen"); return
+        }
+        waitStill(email)
+        shot("l1-empty-form")
+
+        // 60 pt of each placeholder: 'nimi@yr' and 'Salasan', glyph cores in both.
+        let ink = placeholderInk([email, password], width: 60)
+        let read = ink.map { $0?.description ?? "nothing" }
+        note("INFO P0 L placeholder ink: e-mail \(read[0]), Salasana \(read[1])")
+        if let mail = ink[0], let grey = ink[1] {
+            XCTAssertTrue(mail.near(grey, within: 10), "the e-mail placeholder reads \(mail), not the grey \(grey) of Salasana's")
+            XCTAssertFalse(mail.near(RGB(r: 0, g: 122, b: 255), within: 10), "the e-mail placeholder is drawn in the system link blue: \(mail)")
+        } else {
+            XCTFail("the placeholders could not be read off the screen: e-mail \(read[0]), Salasana \(read[1])")
+        }
+
+        type(email, "demo@lashkirja.fi")
+        // Obviously not the demo password: one refused try, well inside the server's per-account limit.
+        type(password, "not-the-password")
+        waitStill(email)
+        let before = email.frame
+        // What sits under the password: the refusal must not push it down (about 40 pt when the
+        // words took room only once they came).
+        let forgot = app.buttons["Unohditko salasanan?"].firstMatch
+        let forgotBefore = forgot.frame.minY
+        app.buttons["Kirjaudu sisään"].firstMatch.tap(); taps += 1
+        // The demo API's 401 (app/src/lib/auth-login.ts).
+        let refusal = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "salasana on väärin")).firstMatch
+        guard refusal.waitForExistence(timeout: 30) else {
+            shot("l2-no-refusal"); dump(app, "l2-no-refusal"); XCTFail("a wrong password did not say so"); return
+        }
+        // The keyboard leaves at the tap, and the words fade in: measured once they stand still.
+        waitStill(refusal)
+        shot("l2-wrong-password")
+        let after = email.frame
+        let forgotAfter = forgot.frame.minY
+        note("INFO P0 L Sähköposti minY \(before.minY) -> \(after.minY); Unohditko salasanan? minY \(forgotBefore) -> \(forgotAfter); Salasana maxY \(password.frame.maxY); refusal \(refusal.frame)")
+        XCTAssertLessThanOrEqual(abs(after.minY - before.minY), 1,
+                                 "the refusal moved Sähköposti from \(before.minY) to \(after.minY)")
+        XCTAssertLessThanOrEqual(abs(forgotAfter - forgotBefore), 1,
+                                 "the refusal moved 'Unohditko salasanan?' from \(forgotBefore) to \(forgotAfter)")
+        XCTAssertGreaterThan(refusal.frame.minY, password.frame.maxY,
+                             "the refusal starts at \(refusal.frame.minY), not under the password (maxY \(password.frame.maxY))")
+
+        type(password, "x")
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: refusal)
+        let cleared = XCTWaiter().wait(for: [gone], timeout: 5) == .completed
+        shot("l3-password-edited")
+        XCTAssertTrue(cleared, "editing the password left the refusal up")
+    }
+
     /// M058: the small inline title of the screens pushed through Route (appDestinations): a bar of
     /// one row, the title on the back button's line. The large title made it about 100 pt tall,
     /// with the 34 pt title on its own row under the back button.
@@ -238,6 +303,39 @@ final class P0Tests: WalkTestCase {
         guard back.exists, name.exists else { XCTFail("\(title): the bar has no back button or no title", file: file, line: line); return }
         XCTAssertLessThanOrEqual(abs(back.frame.midY - name.frame.midY), 4,
                                  "\(title): the title's midY \(name.frame.midY) is not on the back button's \(back.frame.midY)", file: file, line: line)
+    }
+
+    /// The darkest pixel (lowest luma) of what is drawn at the left of each field, `width` points
+    /// wide and 12 tall about its middle, all read off one screenshot: the core of a glyph, so the
+    /// text's own colour and not an anti-aliased edge. Read once two looks 250 ms apart agree: the
+    /// sign-in screen fades in after a sign-out.
+    private func placeholderInk(_ fields: [XCUIElement], width: CGFloat, timeout: TimeInterval = 6) -> [RGB?] {
+        let luma = { (c: RGB) in 299 * c.r + 587 * c.g + 114 * c.b }
+        var last: [RGB?]?
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            // Half a point apart: no 3 px stroke falls between two samples.
+            let bands = fields.map { field -> [CGPoint] in
+                let frame = field.frame
+                var points: [CGPoint] = []
+                for dy in stride(from: CGFloat(-6), through: 6, by: 0.5) {
+                    for dx in stride(from: CGFloat(1), through: min(width, frame.width - 1), by: 0.5) {
+                        points.append(CGPoint(x: frame.minX + dx, y: frame.midY + dy))
+                    }
+                }
+                return points
+            }
+            var reads = screenColours(app, at: bands.flatMap { $0 })[...]
+            let now = bands.map { band -> RGB? in
+                let mine = reads.prefix(band.count)
+                reads = reads.dropFirst(band.count)
+                return mine.compactMap { $0 }.min { luma($0) < luma($1) }
+            }
+            if let last, last == now { return now }
+            last = now
+            usleep(250_000)
+        } while Date() < deadline
+        return last ?? fields.map { _ -> RGB? in nil }
     }
 
     /// Back from a screen pushed inside the Asetukset sheet, by its bar's back button.
