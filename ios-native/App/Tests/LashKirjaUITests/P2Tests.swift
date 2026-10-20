@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// P2 additions: Spotlight routes, receipt thumbnails, next invoice number, dates in Helsinki, and
 /// the invoice form's unit pill and customer card fitting their line.
@@ -59,7 +60,30 @@ final class P2Tests: WalkTestCase {
         shot("p2-receipts"); dump(app, "p2-receipts")
         check("P2 Kuitit list shows image thumbnails (\(pictures.count))", pictures.count > 0)
         XCTAssertGreaterThan(pictures.count, 0, "no Kuitit row shows its picture")
+
+        // U030, U032 (N3): one primary in the bar, the camera, and Toiminnot for the rest. The
+        // filter and "Valitse kuitteja" were circled icons of the camera's weight, and "Valitse
+        // kuitteja" told VoiceOver it was selected.
+        let bar = app.navigationBars["Kuitit"]
+        let items = barItems(bar)
+        check("P2 C Kuitit bar is Kuvaa kuitti + Toiminnot (\(items))", items.sorted() == ["Kuvaa kuitti", "Toiminnot"])
+        XCTAssertEqual(items.sorted(), ["Kuvaa kuitti", "Toiminnot"], "the Kuitit bar beside Back")
+        let actions = bar.buttons["Toiminnot"].firstMatch
+        guard actions.exists else { dump(app, "p2c-no-toiminnot"); XCTFail("no Toiminnot on Kuitit"); return }
+        actions.tap()
+        let select = app.buttons["Valitse kuitteja"].firstMatch
+        guard select.waitForExistence(timeout: 5) else { dump(app, "p2c-menu"); XCTFail("Toiminnot has no Valitse kuitteja"); return }
+        let filter = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Suodata")).firstMatch
+        XCTAssertTrue(filter.exists, "Toiminnot has no Suodata")
+        XCTAssertFalse(select.isSelected, "Valitse kuitteja reports Selected")
+        shot("p2-receipts-toiminnot")
+        select.tap()
+        let all = app.buttons["Valitse kaikki"].firstMatch.waitForExistence(timeout: 5)
+        let done = bar.buttons["Valmis"].firstMatch.exists
+        check("P2 C Valitse kuitteja shows Valitse kaikki and Valmis", all && done)
+        XCTAssertTrue(all && done, "Valitse kuitteja did not start picking: Valitse kaikki \(all), Valmis \(done)")
     }
+
     /// U038: the caption is the server's next number, and the form opens on the Helsinki day with the
     /// due date 14 days on. The check read only "Seuraava laskunumero", so it passed while the picker
     /// drew 17.10.2026 above "Eräpäivä 1.11.2026 · 14 pv" on the UTC simulator.
@@ -216,6 +240,54 @@ final class P2Tests: WalkTestCase {
         shot("p2j-customer-card")
         let cut = clippedTexts(within: card.frame).filter { !under.contains($0) }
         XCTAssertEqual(cut, [], "text cut on the Asiakas card")
+    }
+
+    /// X037 X053 X062 X070 X082 (B12): the pending row of "Odottaa hyväksyntää" shows the whole
+    /// vendor and a one-line detail. The 'Tarkista' pill beside the amount cut the CI seed's
+    /// 'Audit Hyvitys Odottaa Oy' to 'Audit Hyvitys Odott…' and wrapped its '· Tarvikkeet & ostot'.
+    func testI_ReviewRowFits() throws {
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Audit Hyvitys Odottaa Oy,")).firstMatch
+        guard row.waitForExistence(timeout: 20) else {
+            dump(app, "p2i-no-row"); XCTFail("no Audit Hyvitys Odottaa Oy in Odottaa hyväksyntää: is the seed demo-seed.ts --ci?"); return
+        }
+        waitStill(row)
+        shot("p2i-review-row"); dump(app, "p2i-review-row")
+        let header = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Odottaa hyväksyntää")).firstMatch
+        let rows = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@ OR label ENDSWITH %@", ", Tarkista", ", Täydennä"))
+        var card = row.frame
+        if header.exists { card = card.union(header.frame) }
+        for other in rows.allElementsBoundByIndex where other.exists { card = card.union(other.frame) }
+
+        // No text in the card is cut at this size. The audit also guesses at larger text sizes
+        // ("may be clipped at larger Dynamic Type sizes"); those belong to B5 and are noted only.
+        var clipped: [String] = []
+        try app.performAccessibilityAudit(for: .textClipped) { issue in
+            guard let element = issue.element, element.exists, element.frame.intersects(card) else { return true }
+            let text = "\(element.label): \(issue.compactDescription) – \(issue.detailedDescription)"
+            if text.localizedCaseInsensitiveContains("larger") {
+                self.note("INFO P2 I audit at other sizes: \(text)")
+                return true
+            }
+            clipped.append(text)
+            return false
+        }
+        check("P2 I no text cut in Odottaa hyväksyntää (\(clipped))", clipped.isEmpty)
+
+        // The detail ("<date> · <category>") is one caption line.
+        let detail = row.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", " · ")).firstMatch
+        let caption = UIFont.preferredFont(forTextStyle: .caption1).lineHeight
+        XCTAssertTrue(detail.exists, "the row shows no '<date> · <category>' line")
+        check("P2 I the detail is one line (\(detail.frame.height) pt, caption \(caption) pt)", detail.frame.height <= caption * 1.3)
+        XCTAssertLessThanOrEqual(detail.frame.height, caption * 1.3, "the detail takes \(detail.frame.height) pt: more than one caption line (\(caption) pt)")
+
+        // The pill sits under the amount, inside the row.
+        let pill = row.staticTexts["Tarkista"].firstMatch
+        let amount = row.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "€")).firstMatch
+        XCTAssertTrue(pill.exists && amount.exists, "the row has no Tarkista pill or no amount")
+        note("INFO p2i-geometry: row \(row.frame), detail \(detail.frame), amount \(amount.frame), pill \(pill.frame)")
+        XCTAssertTrue(row.frame.contains(pill.frame), "the pill \(pill.frame) is outside its row \(row.frame)")
+        XCTAssertGreaterThanOrEqual(pill.frame.minY, amount.frame.maxY - 1, "the pill \(pill.frame) is not under the amount \(amount.frame)")
     }
 
     /// A fresh launch with the device in `zone`; the simulator itself runs in UTC.
