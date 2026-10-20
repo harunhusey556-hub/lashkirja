@@ -58,12 +58,15 @@ struct InvoiceCreditSheet: View {
                     Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { Task { await create() } } label: { InFlightLabel("Luo hyvityslasku", inFlight: busy) }
+                    // One short verb: "Luo hyvityslasku" left the title only "Hyvitä la…" (X022).
+                    Button { Task { await create() } } label: { InFlightLabel("Hyvitä", inFlight: busy) }
                         .disabled(busy)
                 }
             }
         }
         .presentationDetents([.medium, .large])
+        // Opaque at half height: the invoice under the glass showed through the form (U007).
+        .presentationBackground(Theme.canvas)
         .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 

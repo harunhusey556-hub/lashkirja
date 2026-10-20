@@ -51,7 +51,10 @@ struct InvoiceLineCard: View {
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
                 : AnyLayout(HStackLayout(spacing: 10))
             layout {
+                // Sized first: an equal share of the row was narrower than the stepper, and the unit
+                // pill was squeezed to a tall empty capsule (U013).
                 HStack(spacing: 10) { quantityControl; unitMenu }
+                    .layoutPriority(1)
                 if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
                 priceField
             }
@@ -144,7 +147,7 @@ struct InvoiceLineCard: View {
             }
         } label: {
             HStack(spacing: 2) {
-                Text(line.unit.isEmpty ? "kpl" : line.unit)
+                Text(line.unit.isEmpty ? "kpl" : line.unit).lineLimit(1).fixedSize()
                 Image(systemName: "chevron.up.chevron.down").font(.caption2).accessibilityHidden(true)
             }
             .foregroundStyle(Theme.ink)
