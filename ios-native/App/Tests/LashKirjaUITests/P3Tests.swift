@@ -1,6 +1,6 @@
 import XCTest
 
-/// P3: offline banner, recovery, and a copy made while the API is unreachable.
+/// P3: offline banner, recovery, and a copy whose answer is lost on the way back.
 final class P3Tests: WalkTestCase {
     /// The quiet capsule at the top; the screen's own failure panel can carry the same words.
     var banner: XCUIElement { app.descendants(matching: .any)["offline-banner"] }
@@ -25,7 +25,36 @@ final class P3Tests: WalkTestCase {
         check("P3 failed screen reloads by itself when back online", reloaded)
     }
 
+    /// U043: the copy reaches the server and only its answer is lost, the one case where a retry
+    /// could make a second draft. The server's own count says one copy after the lost answer and
+    /// still one after the retry, which goes out with the same Idempotency-Key.
     func testB_CopyWhileOffline() {
+        // The demo API itself, past the proxy (the runner shares the Mac's loopback). Test values
+        // from app/scripts/demo-seed.ts; only ever against the throwaway demo API.
+        func call(_ path: String, _ body: [String: String]?, _ bearer: String?) -> [String: Any]? {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:3999\(path)")!)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            if let body {
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "content-type")
+                request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            }
+            if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "authorization") }
+            var result: [String: Any]?
+            let done = DispatchSemaphore(value: 0)
+            URLSession.shared.dataTask(with: request) { data, _, _ in
+                result = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                done.signal()
+            }.resume()
+            _ = done.wait(timeout: .now() + 30)
+            return result
+        }
+        guard let bearer = call("/api/auth/token", ["email": "demo@lashkirja.fi", "password": "demo123"], nil)?["token"] as? String else {
+            XCTFail("the demo API gave no token"); return
+        }
+        defer { _ = call("/api/auth/logout", [:], bearer) }
+        func serverDrafts() -> Int? { (call("/api/invoices/counts", nil, bearer)?["counts"] as? [String: Any])?["draft"] as? Int }
+
         tab("Myynti")
         let drafts = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Luonnokset'")).firstMatch
         let before = drafts.waitForExistence(timeout: 10) ? drafts.label : "?"
@@ -54,6 +83,26 @@ final class P3Tests: WalkTestCase {
             XCTFail("the offline copy said no Yhteys katkesi or Ei verkkoyhteyttä")
         }
         goOnline(); sleep(10)
+        // H4 (U101): a copy whose answer is lost. The request went out, so the app cannot say the copy
+        // was not made (WriteFailureCopy); the server holds one draft, and the next try keeps the key
+        // (InvoiceDetailView.runKeyed), so it gets that draft back and opens it.
+        guard let stored = serverDrafts() else { XCTFail("the demo API gave no draft count"); return }
+        loseAnswers()
+        guard invoiceAction("Kopioi luonnokseksi") else { return }
+        let lost = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Kopio on voinut'")).firstMatch
+        let explained = lost.waitForExistence(timeout: 30)
+        shot("p3b-copy-lost"); dump(app, "p3b-copy-lost")
+        check("P3 lost copy says it may have been saved (\(explained ? lost.label : "no message"))", explained)
+        var copies = serverDrafts()
+        for _ in 0..<10 where copies != stored + 1 { sleep(1); copies = serverDrafts() }
+        XCTAssertEqual(copies, stored + 1, "the copy whose answer was lost is not one draft on the server (before: \(stored))")
+        keepAnswers()
+        // The copy is a draft: its one primary is Lähetä lasku (N6), the overdue invoice's is not.
+        guard invoiceAction("Kopioi luonnokseksi") else { return }
+        let opened = app.buttons["Lähetä lasku"].firstMatch.waitForExistence(timeout: 30)
+        shot("p3b-copy-retried")
+        XCTAssertTrue(opened, "the retry did not open the copy")
+        XCTAssertEqual(serverDrafts(), stored + 1, "the retry made a second draft (before: \(stored))")
         app.terminate()
         // The launch every other test takes: it waits for the phase the app settles on. A bare
         // relaunch tapped Myynti 2.7 s after Koti painted; the tap was lost (no Myynti paint in the
@@ -61,9 +110,10 @@ final class P3Tests: WalkTestCase {
         launchSignedIn()
         check("P3 Myynti selected after the relaunch", selectTab("Myynti"))
         let after = drafts.waitForExistence(timeout: 10) ? drafts.label : "?"
-        note("INFO drafts before: \(before), after offline copy: \(after)")
+        note("INFO drafts before: \(before), after the lost copy and its retry: \(after); server \(stored) before")
         check("P3 drafts chip read after the relaunch", after != "?")
-        check("P3 offline copy created no draft", before == after)
+        let shown: String = after.filter(\.isNumber)
+        check("P3 drafts chip shows the server's one copy (\(after))", Int(shown) == stored + 1)
     }
 
     // X122 (P0): signing out deletes the receipt photos still waiting on the phone. The question says
