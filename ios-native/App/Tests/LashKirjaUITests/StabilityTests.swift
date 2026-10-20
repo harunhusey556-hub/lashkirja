@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// Stability walk (2026-10-08): every long list grows and folds back with "Näytä enemmän", and the
 /// screens added in October open and answer. Unlike the acceptance walks these ASSERT: a freeze
@@ -313,7 +314,7 @@ final class StabilityTests: WalkTestCase {
         if pickFromMenu(purchase, "Kirjaa maksu") { assertSheetFits("Kirjaa maksu", beyond: under) } else { XCTFail("Ripsitukku Oy: Toiminnot has no Kirjaa maksu") }
     }
 
-    /// The sheet titled `title` has risen: its bar shows the title, and the textClipped audit finds no
+    /// The sheet titled `title` has risen: its bar shows the whole title, and the textClipped audit finds no
     /// text cut beyond `under` (the screen beneath, read before the sheet opened). Closed with Peruuta.
     private func assertSheetFits(_ title: String, beyond under: [String], file: StaticString = #filePath, line: UInt = #line) {
         let bar = app.navigationBars[title]
@@ -324,8 +325,31 @@ final class StabilityTests: WalkTestCase {
         shot("stability-17-\(title)")
         let name = bar.staticTexts[title].firstMatch
         XCTAssertTrue(name.exists && name.frame.width > 1, "\(title): the bar does not show its title", file: file, line: line)
-        let cut = clippedTexts().filter { !under.contains($0) }
-        XCTAssertEqual(cut, [], "\(title): text cut on the sheet", file: file, line: line)
+        // iOS 26 draws a half-height sheet as its full-width layout scaled into the inset card: its bar
+        // is 386 x 51.9 pt against 402 x 54 at full height, and 'Peruuta' 80.0 x 34.6 against 83.3 x 36
+        // (P0 e3-payment dump). The audit then read every snug label of Hyvitä laskua and Kirjaa maksu
+        // as cut, 'Peruuta' and 'Tallenna' included, while their screenshots show them whole (run
+        // 39322642358). The layout is the same at both heights, so such a sheet is dragged up by its
+        // bar and audited unscaled.
+        if !spansWindow(bar) {
+            bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)))
+            let deadline = Date().addingTimeInterval(5)
+            while !spansWindow(bar) && Date() < deadline { usleep(250_000) }
+            waitStill(bar)
+            shot("stability-17-\(title)-full")
+        }
+        if spansWindow(bar) {
+            // What the audit says for a real cut is unseen, so the title is measured too: cut, its frame
+            // is narrower than the whole title in the bar's 17 pt semibold (about 129 pt, run 39322642358).
+            let whole = (title as NSString).size(withAttributes: [.font: UIFont.preferredFont(forTextStyle: .headline)]).width
+            XCTAssertGreaterThanOrEqual(name.frame.width, whole - 3, "\(title): the title is cut (\(name.frame.width) of \(whole) pt)", file: file, line: line)
+            let cut = clippedTexts().filter { !under.contains($0) }
+            XCTAssertEqual(cut, [], "\(title): text cut on the sheet", file: file, line: line)
+        } else {
+            dump(app, "stability-17-not-full")
+            XCTFail("\(title): the sheet did not rise to full height (bar \(bar.frame)), so it was not audited", file: file, line: line)
+        }
         bar.buttons["Peruuta"].firstMatch.tap(); taps += 1
         XCTAssertTrue(bar.waitForNonExistence(timeout: 10), "\(title): Peruuta did not close the sheet", file: file, line: line)
     }
@@ -357,14 +381,27 @@ final class StabilityTests: WalkTestCase {
         return nil
     }
 
-    /// The texts the textClipped audit finds cut on the screen, by label; the audit itself records
-    /// nothing. P2Tests has a copy: the session gate builds this file alone onto an older ref.
+    /// A sheet's bar spans the window only at full height, where the sheet is drawn unscaled.
+    private func spansWindow(_ bar: XCUIElement) -> Bool {
+        bar.frame.width >= app.windows.firstMatch.frame.width - 1
+    }
+
+    /// The texts the textClipped audit finds cut on the screen at this text size, by label and what the
+    /// audit said; the audit itself records nothing. Its guesses at larger sizes ("may be clipped at
+    /// larger Dynamic Type sizes") are only noted, as in P2Tests.testI: those belong to B5, and the
+    /// audit makes them for whole text too (OwnerScreensTests.testD, run 39207976615). P2Tests has a
+    /// copy: the session gate builds this file alone onto an older ref.
     private func clippedTexts() -> [String] {
         let found = ClippedTexts()
         do {
             try app.performAccessibilityAudit(for: .textClipped) { issue in
                 let label = issue.element?.label ?? ""
-                found.labels.append(label.isEmpty ? issue.compactDescription : label)
+                let text = "\(label.isEmpty ? issue.compactDescription : label): \(issue.detailedDescription)"
+                if "\(issue.compactDescription) \(issue.detailedDescription)".localizedCaseInsensitiveContains("larger") {
+                    self.note("INFO 17 audit at larger sizes: \(text)")
+                } else {
+                    found.labels.append(text)
+                }
                 return true
             }
         } catch {

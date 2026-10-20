@@ -223,7 +223,8 @@ final class P2Tests: WalkTestCase {
 
     /// X026: on Lasku 4 > Muokkaa the Asiakas card shows Kauneus Oy's Y-tunnus and e-mail whole. On one
     /// line beside "Vaihda" the e-mail was cut to 'laskut@kaune…'. Text the audit finds cut on the
-    /// invoice under the form is that screen's, not the card's.
+    /// invoice under the form is that screen's, not the card's. Wrapped whole on two lines the detail
+    /// still drew the audit's guess for larger sizes (p2j-customer-card, run 39322642358): that is B5's.
     func testJ_CustomerCardFits() {
         XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
         // The seed's draft (demo-seed.ts): Kauneus Oy, Y-tunnus 2454577-7, laskut@kauneus.example.
@@ -238,6 +239,10 @@ final class P2Tests: WalkTestCase {
         guard card.waitForExistence(timeout: 15) else { dump(app, "p2j-no-card"); XCTFail("the form has no Asiakas card for Kauneus Oy"); return }
         waitStill(card)
         shot("p2j-customer-card")
+        // What the audit says for a real cut is unseen, so the line is measured too: whole, the caption
+        // wraps to two lines (lineLimit 2); cut, it was one line beside Vaihda.
+        let detail = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Y-tunnus 2454577-7")).firstMatch
+        XCTAssertGreaterThanOrEqual(detail.frame.height, UIFont.preferredFont(forTextStyle: .caption1).lineHeight * 1.5, "the Y-tunnus/e-mail line is on one line beside Vaihda, where it was cut: \(detail.frame)")
         let cut = clippedTexts(within: card.frame).filter { !under.contains($0) }
         XCTAssertEqual(cut, [], "text cut on the Asiakas card")
     }
@@ -368,8 +373,10 @@ final class P2Tests: WalkTestCase {
         return !shared.isNull && shared.width > 0.5 && shared.height > 0.5
     }
 
-    /// The texts the textClipped audit finds cut on the screen (within `area` when one is given), by
-    /// label; the audit itself records nothing. StabilityTests has its own copy, without the area.
+    /// The texts the textClipped audit finds cut on the screen at this text size (within `area` when one
+    /// is given), by label and what the audit said; the audit itself records nothing. Its guesses at
+    /// larger sizes are only noted, as in testI: they belong to B5. StabilityTests has its own copy,
+    /// without the area.
     private func clippedTexts(within area: CGRect? = nil) -> [String] {
         let found = ClippedTexts()
         do {
@@ -378,7 +385,12 @@ final class P2Tests: WalkTestCase {
                     guard let frame = issue.element?.frame, self.overlaps(frame, area) else { return true }
                 }
                 let label = issue.element?.label ?? ""
-                found.labels.append(label.isEmpty ? issue.compactDescription : label)
+                let text = "\(label.isEmpty ? issue.compactDescription : label): \(issue.detailedDescription)"
+                if "\(issue.compactDescription) \(issue.detailedDescription)".localizedCaseInsensitiveContains("larger") {
+                    self.note("INFO P2 audit at larger sizes: \(text)")
+                } else {
+                    found.labels.append(text)
+                }
                 return true
             }
         } catch {
