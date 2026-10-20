@@ -108,14 +108,20 @@ public enum NextPrefetch {
     }
 
     /// Kirjanpito chosen: Pankkitapahtumat's first page, the bank connections (the feed's menu and
-    /// Pankkiyhteys), the month-close checklist and lock, and the ALV return the screen opens on
-    /// (`alvPeriod`, known once the profile tells the VAT period's kind).
+    /// Pankkiyhteys), the month-close checklist and lock, the ALV return the screen opens on
+    /// (`alvPeriod`, known once the profile tells the VAT period's kind), and Ostolaskut's list with
+    /// the three answers above it. Ostolaskut paints from the cache only with all four: without
+    /// them its first visit was a spinner the page then replaced (M072).
     public static func kirjanpito(month: String, alvPeriod: String?) -> [PrefetchRequest] {
         var requests = [
             PrefetchRequest(path: "/api/statements", query: CursorPaging.firstQuery(BankFeed.query(month: nil)), persist: false),
             PrefetchRequest(path: "/api/bank/connections", persist: false),
             PrefetchRequest(path: "/api/dashboard/month", query: ["month": PeriodClose.startMonth(nil, current: month)], persist: false),
             PrefetchRequest(path: "/api/period-lock", persist: false),
+            PrefetchRequest(path: "/api/purchase-invoices", persist: false),
+            PrefetchRequest(path: "/api/purchase-invoices/counts", persist: false),
+            PrefetchRequest(path: "/api/recurring-purchases", persist: false),
+            PrefetchRequest(path: "/api/purchase-invoices/match", persist: false),
         ]
         if let alvPeriod, !alvPeriod.isEmpty {
             requests.append(PrefetchRequest(path: "/api/alv", query: ["period": alvPeriod], persist: false))

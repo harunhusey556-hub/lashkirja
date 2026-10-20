@@ -273,6 +273,18 @@ private struct Report: Decodable, Equatable { let n: Int; let extra: String? }
         #expect(NextPrefetch.kirjanpito(month: "2026-10", alvPeriod: nil).allSatisfy { $0.path != "/api/alv" })
     }
 
+    @Test func kirjanpitoWarmsEverythingOstolaskutPaintsFrom() {
+        let requests = NextPrefetch.kirjanpito(month: "2026-10", alvPeriod: nil)
+        // The list as Ostolaskut asks for it on Kaikki (no status), and the three answers its cached
+        // first paint needs beside it: the chips' counts, Toistuvat ostolaskut and the suggestions.
+        #expect(requests.contains(PrefetchRequest(path: "/api/purchase-invoices", persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/purchase-invoices/counts", persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/recurring-purchases", persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/purchase-invoices/match", persist: false)))
+        // Kept in memory only, as every request warmed when a tab is chosen.
+        #expect(requests.allSatisfy { !$0.persist })
+    }
+
     @Test func myyntiWarmsTheNewInvoiceForm() {
         #expect(NextPrefetch.myynti().map(\.path) == ["/api/customers", "/api/catalog", "/api/recurring-invoices"])
         // Toistuvat laskut opens on its active plans: no query, so the screen finds this answer.
