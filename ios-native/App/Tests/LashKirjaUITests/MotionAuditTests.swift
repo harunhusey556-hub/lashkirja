@@ -334,6 +334,15 @@ final class MotionAuditTests: WalkTestCase {
     var kotiHome: XCUIElement { app.buttons["Edellinen kuukausi"] }
     var myyntiHome: XCUIElement { app.navigationBars["Myynti"] }
     func scrollToTop() { app.statusBars.firstMatch.exists ? app.statusBars.firstMatch.tap() : (); sleep(1) }
+    /// An item of the bar's Toiminnot, the menu opened before the recording; nil, the menu closed
+    /// again, when it has no such item. The invoice's actions live there besides its primary (N6).
+    func menuItem(_ label: String) -> XCUIElement? {
+        guard press(find("label == %@", "Toiminnot", scrolls: 0)) else { return nil }
+        if let item = find("label == %@", label, scrolls: 0) { return item }
+        // At the leading edge, which the trailing menu never reaches.
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap()
+        return nil
+    }
 
     /// Back to `home` outside any recording: a discard question answered, else the back button, at
     /// most twice. A walk left on the wrong screen measured it in place of the next steps (M043).
@@ -660,8 +669,9 @@ final class MotionAuditTests: WalkTestCase {
         let numbered = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
         let title = numbered.waitForExistence(timeout: 10) ? numbered.identifier : invoiceBar.identifier
         let detail = app.navigationBars[title]
-        // The tile, or the primary when the payment is the next step.
-        if let pay = find("label == %@ OR label == %@", "Maksu", "Kirjaa maksu", scrolls: 3) {
+        // The primary when the invoice waits for its payment, else a Toiminnot item: the Maksu and
+        // Kopioi tiles are gone (N6).
+        if let pay = find("label == %@", "Kirjaa maksu", scrolls: 0) ?? menuItem("Kirjaa maksu") {
             let sheet = app.navigationBars["Kirjaa maksu"]
             let shown = step("lasku-payment-sheet", from: "Lasku", to: "Kirjaa maksu", kind: "sheet", seconds: 5, presents: true,
                              reached: { sheet.waitForExistence(timeout: 8) }) { press(pay) }
@@ -673,8 +683,7 @@ final class MotionAuditTests: WalkTestCase {
         }
         // Toiminnot > Kopioi luonnokseksi, the menu opened outside the recording: 'Kopioi' found the
         // reference number's copy glyph (M095). The copy is a new draft, pushed over this invoice.
-        let menu = press(find("label == %@", "Toiminnot", scrolls: 0))
-        if menu, let copy = find("label == %@", "Kopioi luonnokseksi", scrolls: 0) {
+        if let copy = menuItem("Kopioi luonnokseksi") {
             let copied = app.navigationBars.matching(NSPredicate(format: "(identifier == %@ OR identifier BEGINSWITH %@) AND identifier != %@",
                                                                  "Lasku", "Lasku ", title)).firstMatch
             let made = step("lasku-copy", from: "Lasku", to: "Lasku (kopio)", seconds: 5, reached: { copied.waitForExistence(timeout: 10) },
@@ -686,8 +695,6 @@ final class MotionAuditTests: WalkTestCase {
             }
         } else {
             note("SKIP lasku/lasku-copy: no Kopioi luonnokseksi in Toiminnot")
-            // A menu left open would take the back step's tap.
-            if menu { app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap() }
         }
         step("lasku-back", from: "Lasku", to: "Myynti", reached: { self.myyntiHome.waitForExistence(timeout: 8) },
              recover: { self.goBack(until: self.myyntiHome) }) { press(backButton()) }

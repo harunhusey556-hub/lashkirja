@@ -21,7 +21,6 @@ struct InvoiceFormView: View {
     /// midnight drew as the day before west of Helsinki, and a picked day saved one day late.
     @State private var issueDate = APIDate.pickerDate(APIDate.dayString(Date())) ?? Date()
     @State private var customers: [Customer] = []
-    @State private var showNewCustomer = false
     @State private var showCustomerPicker = false
     @State private var showCatalog = false
     /// One key per invoice being created: a retry after a lost answer gets the same invoice back.
@@ -161,9 +160,6 @@ struct InvoiceFormView: View {
                 if existing == nil, let owner { SalesDraftStore.shared.clear(owner: owner) }
                 close()
             }
-            .sheet(isPresented: $showNewCustomer) {
-                CustomerFormSheet(existing: nil) { created in addCreatedCustomer(created) }
-            }
             .sheet(isPresented: $showCustomerPicker) {
                 CustomerPickerSheet(customers: customers, selectedId: draft.customerId,
                                     onPick: { pickCustomer($0.id) },
@@ -208,6 +204,8 @@ struct InvoiceFormView: View {
                 InvoiceCustomerCard(name: existing.customer.name, detail: InvoiceForm.customerDetail(existing.customer)) { showCustomerPicker = true }
                     .id(rowId(.customer))
             } else {
+                // One row (X141): the picker it opens has its own "Uusi asiakas" on top. Offered here
+                // too, it was a second accent row of the same weight.
                 Button { showCustomerPicker = true } label: {
                     HStack {
                         Label("Valitse asiakas", systemImage: "person.crop.circle")
@@ -218,8 +216,6 @@ struct InvoiceFormView: View {
                 }
                 .foregroundStyle(Theme.accentDark)
                 .id(rowId(.customer))
-                Button { showNewCustomer = true } label: { Label("Uusi asiakas", systemImage: "person.badge.plus") }
-                    .foregroundStyle(Theme.accentDark)
             }
             if let message = errors[.customer] { InvoiceFieldError(message: message) }
         } header: {
