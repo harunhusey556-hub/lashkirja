@@ -942,6 +942,111 @@ final class StabilityTests: WalkTestCase {
         shot("stability-receipt-bar")
     }
 
+    /// X092 (N9): the K-Market 1 row's sheet (Kuitti puuttuu) shows one primary, Kuvaa kuitti, on the
+    /// medium detent without a scroll, and its Toiminnot holds the other four. Five rows of the same
+    /// weight stood in the body, and the medium detent cut the last ones off.
+    func test16_BankRowSheetHasOnePrimary() {
+        openHubRow("Pankki")
+        let anyRow = app.buttons.matching(NSPredicate(format: "label MATCHES %@", Self.bankRow)).firstMatch
+        XCTAssertTrue(anyRow.waitForExistence(timeout: 15), "Pankki shows no bank row")
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "K-Market 1,")).firstMatch
+        guard reveal(row) else {
+            dump(app, "stability-16-no-row"); XCTFail("Pankki has no K-Market 1 row: is the seed demo-seed.ts --ci?"); return
+        }
+        XCTAssertTrue(row.label.contains("· Kuitti puuttuu, "), "K-Market 1 does not wait for a kuitti: \(row.label)")
+        row.tap(); taps += 1
+        let sheet = app.navigationBars["Kuitti puuttuu"]
+        guard sheet.waitForExistence(timeout: 10) else { dump(app, "stability-16-no-sheet"); XCTFail("K-Market 1 did not open its sheet"); return }
+        waitStill(sheet)
+        let window = app.windows.firstMatch.frame
+        // The medium detent: the sheet starts well down the screen, not under the status bar.
+        XCTAssertGreaterThan(sheet.frame.minY, window.height / 3, "the sheet opened at \(sheet.frame.minY), not at the medium detent")
+        guard let primary = reachable("Kuvaa kuitti") else {
+            dump(app, "stability-16-no-primary"); XCTFail("the sheet has no Kuvaa kuitti a tap reaches"); return
+        }
+        note("INFO stability 16: sheet bar \(sheet.frame), Kuvaa kuitti \(primary.frame), window \(window)")
+        XCTAssertTrue(primary.frame.minY > sheet.frame.maxY && primary.frame.maxY <= window.maxY,
+                      "Kuvaa kuitti (\(primary.frame)) is not on the sheet's medium detent")
+        let primaries = app.buttons.matching(NSPredicate(format: "label == %@", "Kuvaa kuitti")).allElementsBoundByIndex.filter { $0.isHittable }
+        XCTAssertEqual(primaries.count, 1, "Kuvaa kuitti is on the sheet \(primaries.count) times")
+        let others = ["Kuittia ei tarvita", "Kohdista ostolaskuun", "Etsi kuitti", "Avaa tiliote"]
+        let inBody = others.filter { reachable($0, timeout: 0) != nil }
+        XCTAssertEqual(inBody, [], "the sheet's body still has \(inBody)")
+        shot("stability-bank-row-sheet")
+
+        let actions = sheet.buttons["Toiminnot"].firstMatch
+        guard actions.exists else { dump(app, "stability-16-no-toiminnot"); XCTFail("the sheet has no Toiminnot"); return }
+        actions.tap(); taps += 1
+        for label in others {
+            XCTAssertNotNil(reachable(label), "Toiminnot has no \(label)")
+        }
+        shot("stability-bank-row-menu")
+        // Closed by a tap on the bar's empty leading end, clear of the menu under the trailing button.
+        sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["Kuittia ei tarvita"].firstMatch.waitForNonExistence(timeout: 5), "Toiminnot did not close")
+        sheet.buttons["Valmis"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Valmis did not close the sheet")
+    }
+
+    /// X093 (N9): the Käyttötili sheet keeps Muokkaa and Poista in Toiminnot, not as two plain rows
+    /// one above the other, and Poista still asks first. Its caption leaves the IBAN to the IBAN row:
+    /// it repeated the list row word for word, masked IBAN included.
+    func test21_AccountSheetActionsInToiminnot() {
+        openHubRow("Pankki")
+        XCTAssertTrue(tapLabel("label BEGINSWITH %@", "Saldo yhteensä"), "Pankki has no Saldo yhteensä row")
+        guard app.navigationBars["Pankkiyhteys ja tilit"].waitForExistence(timeout: 15) else {
+            dump(app, "stability-17-no-accounts"); XCTFail("Saldo yhteensä did not open Pankkiyhteys ja tilit"); return
+        }
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Käyttötili,")).firstMatch
+        guard reveal(row) else { dump(app, "stability-17-no-row"); XCTFail("Pankkiyhteys ja tilit has no Käyttötili row"); return }
+        // "Käyttötili, <saldo>, <the row's line>": neither the saldo nor the line has a ", " of its own.
+        let line = row.label.components(separatedBy: ", ").last ?? ""
+        row.tap(); taps += 1
+        let sheet = app.navigationBars["Käyttötili"]
+        guard sheet.waitForExistence(timeout: 10) else { dump(app, "stability-17-no-sheet"); XCTFail("Käyttötili did not open its sheet"); return }
+        waitStill(sheet)
+        let caption = app.staticTexts["bank-account-caption"].firstMatch
+        if caption.waitForExistence(timeout: 5) {
+            note("INFO stability 17: list row line '\(line)', sheet caption '\(caption.label)'")
+            XCTAssertNotEqual(caption.label, line, "the sheet's caption repeats the list row")
+            XCTAssertFalse(caption.label.contains("••••"), "the caption repeats the masked IBAN over the IBAN row: \(caption.label)")
+        } else {
+            XCTFail("the sheet has no caption")
+        }
+        let inBody = ["Muokkaa", "Poista"].filter { reachable($0, timeout: 0) != nil }
+        XCTAssertEqual(inBody, [], "the sheet's body still has \(inBody)")
+        shot("stability-account-sheet")
+
+        let actions = sheet.buttons["Toiminnot"].firstMatch
+        guard actions.exists else { dump(app, "stability-17-no-toiminnot"); XCTFail("the sheet has no Toiminnot"); return }
+        actions.tap(); taps += 1
+        XCTAssertNotNil(reachable("Muokkaa"), "Toiminnot has no Muokkaa")
+        guard let remove = reachable("Poista") else { dump(app, "stability-17-menu"); XCTFail("Toiminnot has no Poista"); return }
+        shot("stability-account-menu")
+        remove.tap(); taps += 1
+        // The seed's account has tiliotteet, so a Poista that went through would archive it: only Peruuta here.
+        let question = app.descendants(matching: .any).matching(identifier: "confirm-sheet").firstMatch
+        guard question.waitForExistence(timeout: 5) else { dump(app, "stability-17-no-question"); XCTFail("Poista did not ask first"); return }
+        XCTAssertEqual(app.staticTexts["confirm-sheet-title"].firstMatch.label, "Poistetaanko pankkitili?")
+        app.buttons["confirm-sheet-cancel"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(question.waitForNonExistence(timeout: 5), "Peruuta left the question up")
+        XCTAssertTrue(sheet.exists, "Peruuta closed the account sheet")
+        sheet.buttons["Valmis"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Valmis did not close the sheet")
+    }
+
+    /// The button labelled `label` that a tap reaches, once there is one: not one behind a sheet or
+    /// in another tab, which share its label. `timeout` 0 looks once.
+    private func reachable(_ label: String, timeout: TimeInterval = 5) -> XCUIElement? {
+        let buttons = app.buttons.matching(NSPredicate(format: "label == %@", label))
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let button = buttons.allElementsBoundByIndex.first(where: { $0.isHittable }) { return button }
+            if timeout > 0 { usleep(250_000) }
+        } while Date() < deadline
+        return nil
+    }
+
     /// X025 (B11): a picked chip turns semibold and moves nothing. Its wider label pushed every chip
     /// after it by about 3 pt, on Myynti, on an invoice's tabs, on Kuitit and on Ostolaskut. The
     /// outline did too: drawn centred on the edge, it made an unpicked chip 1 pt wider (run 39334173559).
