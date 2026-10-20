@@ -135,8 +135,13 @@ final class CaptureQueueModel {
 
     /// A page the owner sees change: the bar's buttons go in the same 0.4 s fade as the page. Set
     /// plainly, the bar showed "Sulje" and ⋯ over the picker for the length of the fade (M002).
-    private func show(_ next: Step) {
-        withMotion(.linear(duration: 0.4)) { step = next }
+    /// `along` is a change of the page going away made in the same transaction: made before it, in
+    /// one of its own, the page is drawn once more with it and fades out showing it.
+    private func show(_ next: Step, along change: () -> Void = {}) {
+        withMotion(.linear(duration: 0.4)) {
+            change()
+            step = next
+        }
     }
 
     /// Binds the queue to the signed-in owner and brings back the readings an earlier run kept, so
@@ -485,13 +490,19 @@ final class CaptureQueueModel {
             startSaveWorker()
             return
         }
-        queue.markReady(id, draft: reading)
+        // The first reading that needs the owner opens by itself, only while the screen is up. Its
+        // row turns ready in the fade that opens the form: marked ready first, the queue drew the
+        // read row (its words and "Käytä lomakkeessa", 18 pt taller) and faded out with it, where
+        // the owner had last seen "Käsitellään" (motion gate 39374914516, bad-capture-upload).
+        var next = queue
+        next.markReady(id, draft: reading)
+        if visible, case .queue = step, let row = next.takeAutoOpen(), let draft = row.draft {
+            show(.edit(rowId: row.id, draft: draft)) { queue = next }
+        } else {
+            queue = next
+        }
         dropSource(id)
         persist()
-        // The first reading that needs the owner opens by itself, only while the screen is up.
-        if visible, case .queue = step, let row = queue.takeAutoOpen(), let draft = row.draft {
-            show(.edit(rowId: row.id, draft: draft))
-        }
     }
 
     private func keepOffline(_ id: String, _ file: Encoded) {

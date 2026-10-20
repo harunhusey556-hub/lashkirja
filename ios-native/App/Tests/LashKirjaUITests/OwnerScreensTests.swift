@@ -227,8 +227,8 @@ final class OwnerScreensTests: WalkTestCase {
         // Only a queue of this one file: a row kept from an earlier run would be measured instead.
         // The read is quick (w64's c1 shot already showed the form), so each frame is one snapshot: a
         // row gone to the form leaves nothing measured instead of a failed query. The row is taken
-        // after the primary; with no "Käytä lomakkeessa" yet (a read row is taller by it), it was
-        // still being read when the primary was.
+        // after the primary; with no "Käytä lomakkeessa" yet (a read row has it), it was still being
+        // read when the primary was.
         let rows = app.cells.containing(queueRow)
         func isRead(_ element: XCUIElementSnapshot) -> Bool {
             (element.elementType == .button && element.label == "Käytä lomakkeessa") || element.children.contains { isRead($0) }
@@ -286,6 +286,14 @@ final class OwnerScreensTests: WalkTestCase {
         keep("c-read-row", "Valmis texts \(app.staticTexts.matching(NSPredicate(format: "label == %@", "Valmis")).count), Odottaa tarkistusta \(waiting.count)")
         XCTAssertFalse(app.staticTexts["Valmis"].exists, "the read row still says Valmis beside the Valmis button")
         XCTAssertEqual(waiting.count, 1, "'Odottaa tarkistusta' is said \(waiting.count) times on a queue of one read file")
+        // The read row's action stands on its second line: the row is as tall as the saved row c5
+        // measures, and "Valmis" stays where it is through the save (motion gate 39374914516: on a
+        // line of its own it made the row 18 pt taller). Only a queue of this one file, as above.
+        var read: (row: CGRect, primary: CGRect)?
+        let readRow = rows.firstMatch
+        if readRow.exists { waitStill(readRow) }
+        if rows.count == 1, readRow.exists, queuePrimary.exists { read = (readRow.frame, queuePrimary.frame) }
+        keep("c-read-geometry", read.map { "row \($0.row), primary \($0.primary)" } ?? "not measured: \(rows.count) rows")
         guard reopen.exists else { return }
 
         reopen.tap()
@@ -367,7 +375,7 @@ final class OwnerScreensTests: WalkTestCase {
         if outcome == "toast" {
             XCTAssertTrue(toastLabel.contains("lasku"), "toast: \(toastLabel)")
             XCTAssertGreaterThan(toastFrame.minY, window.height * 0.6, "the toast is at \(toastFrame.minY): not at the bottom")
-            assertMinimalQueue(reading: reading)
+            assertMinimalQueue(reading: reading, read: read)
         } else if ProcessInfo.processInfo.environment["LK_READER_STUB"] == "1" {
             // The UI suite's OwnerScreensTests job reads uploads through scripts/sim/reader-stub.py,
             // which calls every file a "lasku": this save had to file an ostolasku and say so.
@@ -422,8 +430,9 @@ final class OwnerScreensTests: WalkTestCase {
 
     /// O1 and X051 after a bill was saved from the form: "Valmis" is the queue's one action, adding
     /// files is in Toiminnot, the row's kind is quiet text changed from the row's own menu, and
-    /// neither that change nor the save moves the row or the button.
-    func assertMinimalQueue(reading: (row: CGRect, primary: CGRect)?) {
+    /// neither that change nor the save moves the row or the button. `read`: the row waiting for
+    /// the form (c3).
+    func assertMinimalQueue(reading: (row: CGRect, primary: CGRect)?, read: (row: CGRect, primary: CGRect)?) {
         // The queue's list, not Kuitit's under the cover.
         let list = app.collectionViews.containing(queueRow).firstMatch
         guard list.waitForExistence(timeout: 5) else { tree("c5-no-queue"); XCTFail("the queue is not on the screen after the save"); return }
@@ -483,6 +492,10 @@ final class OwnerScreensTests: WalkTestCase {
         if let reading {
             XCTAssertEqual(saved.row.height, reading.row.height, accuracy: 1, "the saved row is \(saved.row.height) pt, \(reading.row.height) pt while read")
             XCTAssertEqual(saved.primary.minY, reading.primary.minY, accuracy: 1, "the save moved the primary from \(reading.primary.minY) to \(saved.primary.minY)")
+        }
+        if let read {
+            XCTAssertEqual(saved.row.height, read.row.height, accuracy: 1, "the saved row is \(saved.row.height) pt, \(read.row.height) pt while it waited for the form")
+            XCTAssertEqual(saved.primary.minY, read.primary.minY, accuracy: 1, "the primary was at \(read.primary.minY) beside the read row, at \(saved.primary.minY) after the save")
         }
         guard row.exists else { tree("c6-no-row-menu"); XCTFail("the saved row has no menu to change its kind"); return }
         // The file name is set aside: only the words after it name the kind.

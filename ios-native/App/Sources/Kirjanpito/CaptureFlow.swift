@@ -476,28 +476,36 @@ struct CaptureFlow: View {
             // "Lähetetään" under it moved every row below, and the buttons under the queue, by a line.
             // And one line only: a saved bill's outcome wrapped to two and moved "Valmis" down by
             // 16 pt (X051). A failure's reason is never cut, nor any line at the largest text sizes.
+            // The row's action stands at the end of that line, never on a line of its own: under the
+            // rest, "Käytä lomakkeessa" made a read row 18 pt taller and moved the rows and "Valmis"
+            // below it (motion gate 39374914516). A read row has no words of its own there.
             let detail = row.detailText
-            Text(detail ?? " ")
-                .font(.caption)
-                .foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
-                .lineLimit(row.status == .failed || typeSize.isAccessibilitySize ? nil : 1)
-                .contentTransition(.opacity)
-                .accessibilityHidden(detail == nil)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(detail ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
+                    .lineLimit(row.status == .failed || typeSize.isAccessibilitySize ? nil : 1)
+                    .contentTransition(.opacity)
+                    .accessibilityHidden(detail == nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                // A save the server refused: the form takes the reading from there (web "Käytä lomakkeessa").
+                if row.canOpenForm {
+                    Button("Avaa lomake") { openForm(row) }
+                        .font(.caption.bold())
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.accent)
+                        .layoutPriority(1)
+                }
+                if row.status == .ready && row.draft != nil {
+                    Button("Käytä lomakkeessa") { openForm(row) }
+                        .font(.caption.bold())
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.accent)
+                        .layoutPriority(1)
+                }
+            }
             if let error = row.error, error != detail {
                 Text(error).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2).transition(.opacity)
-            }
-            // A save the server refused: the form takes the reading from there (web "Käytä lomakkeessa").
-            if row.canOpenForm {
-                Button("Avaa lomake") { openForm(row) }
-                    .font(.caption.bold())
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.accent)
-            }
-            if row.status == .ready && row.draft != nil {
-                Button("Käytä lomakkeessa") { openForm(row) }
-                    .font(.caption.bold())
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.accent)
             }
         }
         // A row's own lines change as its file goes through: the row eases to its new height.
@@ -507,20 +515,25 @@ struct CaptureFlow: View {
     /// The steps a file goes through on its way share one slot, each word faded in over the others:
     /// as one Text swapping its words, "Lähetetään" → "Käsitellään" moved the word's left edge 3–9 pt
     /// after the screen had settled (motion audit bad-capture-upload, shift_probe, run 39067168826).
-    @ViewBuilder private func statusLabel(_ row: UploadQueueRow) -> some View {
-        if Self.onTheWay.contains(row.status) {
-            ZStack(alignment: .trailing) {
+    /// The outcome's word ("Odottaa tarkistusta") fades in over them in the same slot, on one line,
+    /// and the name gives way to it. As a view of its own beside the slot, it crossed the last
+    /// step's word one above the other while the row grew (motion gate 39374914516).
+    private func statusLabel(_ row: UploadQueueRow) -> some View {
+        ZStack(alignment: .trailing) {
+            if Self.onTheWay.contains(row.status) {
                 ForEach(Self.onTheWay, id: \.rawValue) { status in
                     Text(status.label)
                         .opacity(status == row.status ? 1 : 0)
                         .accessibilityHidden(status != row.status)
                 }
+            } else {
+                Text(row.slotText).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
             }
-            .font(.caption)
-            .foregroundStyle(Theme.ink2)
-        } else {
-            Text(row.slotText).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
         }
+        .font(.caption)
+        .foregroundStyle(Theme.ink2)
+        .lineLimitUnlessLarge()
+        .layoutPriority(typeSize.isAccessibilitySize ? 0 : 1)
     }
 
     /// Short words only: the slot is as wide as the longest of them.
