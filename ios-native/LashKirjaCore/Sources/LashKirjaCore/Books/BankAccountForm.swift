@@ -148,16 +148,29 @@ public struct BankAccountDraft: Sendable, Equatable {
 public enum BankAccountText {
     /// "Nordea · FI•••• 0785 · Oletus · 2 tiliotetta", the web's accountSecondary.
     public static func subtitle(_ a: BankAccount) -> String {
-        let parts = [a.bankName, a.iban.map(BankIBAN.mask), a.currency.flatMap { $0 == "EUR" ? nil : $0 }]
+        line(a, maskedIban: true)
+    }
+
+    /// The account sheet's caption: the list row's line less the masked IBAN, which the IBAN row
+    /// under it shows in full (X093). Nil when nothing is left to say.
+    public static func detailCaption(_ a: BankAccount) -> String? {
+        let caption = line(a, maskedIban: false)
+        return caption.isEmpty ? nil : caption
+    }
+
+    private static func line(_ a: BankAccount, maskedIban: Bool) -> String {
+        let iban: String? = maskedIban ? a.iban.map(BankIBAN.mask) : nil
+        let parts = [a.bankName, iban, a.currency.flatMap { $0 == "EUR" ? nil : $0 }]
             .compactMap { $0 }.filter { !$0.isEmpty }
-        let base = parts.isEmpty ? "Ei IBANia" : parts.joined(separator: " · ")
+        // "Ei IBANia" only where no IBAN row stands under the line to say otherwise.
+        let base: String? = parts.isEmpty ? (maskedIban || a.iban == nil ? "Ei IBANia" : nil) : parts.joined(separator: " · ")
         var flags: [String] = []
         if a.isDefault == true { flags.append("Oletus") }
         if a.archivedAt != nil { flags.append("Arkistoitu") }
         if let n = a.mismatchCount, n > 0 { flags.append("\(n) kk ei täsmää") }
         if let m = a.lastReconciledMonth { flags.append("Saldo täsmää \(StatementText.month(m))") }
         if let n = a.statementCount { flags.append(n == 1 ? "1 tiliote" : "\(n) tiliotetta") }
-        return flags.isEmpty ? base : "\(base) · \(flags.joined(separator: " · "))"
+        return ([base].compactMap { $0 } + flags).joined(separator: " · ")
     }
 
     /// The remove confirmation's body.
