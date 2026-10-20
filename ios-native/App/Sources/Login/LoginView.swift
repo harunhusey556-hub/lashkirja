@@ -120,8 +120,10 @@ struct LoginView: View {
         }
     }
 
+    /// The notice the screen opened with, and the passkey note that takes the button's place. A
+    /// refused sign-in is said under the password (`form`), so the fields being retyped never move.
     @ViewBuilder private var notices: some View {
-        if let info, failure == nil {
+        if let info {
             Label(info, systemImage: "info.circle")
                 .font(.footnote)
                 .foregroundStyle(Theme.ink)
@@ -129,8 +131,8 @@ struct LoginView: View {
                 .padding(12)
                 .background(Theme.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
         }
-        if let message = failure ?? notice {
-            Label(message, systemImage: "exclamationmark.circle")
+        if let notice {
+            Label(notice, systemImage: "exclamationmark.circle")
                 .font(.footnote)
                 .foregroundStyle(Theme.danger)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -142,7 +144,9 @@ struct LoginView: View {
     private var form: some View {
         VStack(alignment: .leading, spacing: 16) {
             AuthField(label: "Sähköposti", problem: emailProblem, focused: focus == .email) {
-                TextField("Sähköposti", text: $email, prompt: Text("nimi@yritys.fi"))
+                // Verbatim: parsed as Markdown, the address became a link, drawn in the link blue
+                // instead of the placeholder grey (X124).
+                TextField("Sähköposti", text: $email, prompt: Text(verbatim: "nimi@yritys.fi"))
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
@@ -151,7 +155,9 @@ struct LoginView: View {
                     .submitLabel(.next)
                     .onSubmit { focus = .password }
             }
-            AuthField(label: "Salasana", focused: focus == .password) {
+            // A refused password or passkey is said here, under the field, as the web says it, in
+            // room held from the first frame so the link and buttons below stay put.
+            AuthField(label: "Salasana", problem: failure, focused: focus == .password, holdsProblem: true) {
                 Group {
                     if showPassword {
                         TextField("Salasana", text: $password)
@@ -175,7 +181,9 @@ struct LoginView: View {
             .frame(minHeight: 44)
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .onChange(of: email) { emailProblem = nil }
+        // A refusal is about what was sent: it goes as soon as the owner starts correcting it.
+        .onChange(of: email) { emailProblem = nil; failure = nil }
+        .onChange(of: password) { failure = nil }
         // A typo in the address shows as soon as the owner moves on, not only after a failed sign-in.
         .onChange(of: focus) { old, _ in
             if old == .email, !email.isEmpty { emailProblem = EmailCheck.problem(email) }
