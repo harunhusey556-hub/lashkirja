@@ -48,6 +48,17 @@ class AnswerTimes(unittest.TestCase):
         self.assertIn("::warning::api-server.log:2: GET /api/receipts 200 3566 ms (host stall: GET /api/sync/version 6542 ms", out)
         self.assertNotIn("::error::", out)
 
+    def test_a_paged_list_is_placed_on_its_path(self):
+        # Run 39360602636: the server logged "GET /api/receipts?cursor"; the proxy line has the path.
+        server = self.write("api-server.log", "warm\n" + server_line("GET /api/receipts?cursor", 4627))
+        proxy = self.write("api-proxy.log", "\n".join([
+            "2026-10-20T03:01:34.100 c5 GET /api/receipts?cursor 200 4700ms",
+            "2026-10-20T03:01:35.000 c3 GET /api/sync/version 200 5200ms",
+        ]) + "\n")
+        code, out = self.run_check(server, proxy)
+        self.assertEqual(code, 0, out)
+        self.assertIn("::warning::api-server.log:2: GET /api/receipts?cursor 200 4627 ms (host stall:", out)
+
     def test_a_slow_list_alone_fails_its_class(self):
         server = self.write("api-server.log", "warm\n" + server_line("GET /api/receipts", 3566))
         proxy = self.write("api-proxy.log", "\n".join([

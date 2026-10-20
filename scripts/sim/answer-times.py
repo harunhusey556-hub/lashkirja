@@ -56,6 +56,9 @@ def classify(slow, requests):
     for number, message, status, ms in slow:
         text = f"api-server.log:{number}: {message} {status} {ms} ms"
         method, _, route = message.partition(" ")
+        # The paged list names its query keys ("/api/receipts?cursor", run 39360602636); the proxy
+        # line is matched on the path alone, as the other routes are.
+        route = route.split("?")[0]
         # The proxy's time holds the server's: the closest one at least as long is this answer.
         mine = [i for i, r in enumerate(requests) if i not in used and r[2] == method and r[3] == route and r[4] >= ms]
         if not mine:
