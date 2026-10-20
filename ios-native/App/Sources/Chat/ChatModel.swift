@@ -74,14 +74,23 @@ final class ChatModel {
 
     func startPrefetch() {
         prefetch = Task {
-            async let status: Void = loadStatus()
+            // When Koti's prefetch (NextPrefetch.afterKoti) left both in the cache, the sheet rises on
+            // the conversation as it stays, and the server's answers below refresh it in place.
+            // Waiting for them showed a blank sheet that then filled in (M012 M068).
+            let status = await paintCachedStatus()
+            let history = await paintCachedHistory()
+            if status && history {
+                ready = true
+            } else {
+                // Offline the history can take a minute to fail: the conversation shows after 1.5 s anyway.
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    ready = true
+                }
+            }
+            async let fresh: Void = loadStatus()
             await loadLatest()
-            await status
-            ready = true
-        }
-        // Offline the history can take a minute to fail: the conversation shows after 1.5 s anyway.
-        Task {
-            try? await Task.sleep(for: .seconds(1.5))
+            await fresh
             ready = true
         }
     }
@@ -109,12 +118,23 @@ final class ChatModel {
     var canAttach: Bool { !streaming && cooldownUntil == nil && !receiptBusy }
 
     func loadStatus() async {
+        await paintCachedStatus()
         do {
-            let status: AssistantStatus = try await app.api.get("/api/ai/status")
+            // Memory only: through the cache so Koti's prefetch can leave it for the first open.
+            let status: AssistantStatus = try await app.cachedGet("/api/ai/status", force: true)
             aiAvailable = status.available
         } catch {
             // Unknown: behave as available; a failed question still explains itself.
         }
+    }
+
+    /// The status as Koti's prefetch left it, until the server's arrives. True once it is known.
+    @discardableResult
+    private func paintCachedStatus() async -> Bool {
+        if aiAvailable == nil, let cached: AssistantStatus = await app.cachedValue("/api/ai/status"), aiAvailable == nil {
+            aiAvailable = cached.available
+        }
+        return aiAvailable != nil
     }
 
     private func startCooldown(retryAfter: String?) {
@@ -139,16 +159,8 @@ final class ChatModel {
         do {
             var query: [String: String] = [:]
             if let conversationId { query["conversationId"] = conversationId }
-            // First open: the latest conversation as Koti's prefetch left it, at once. The server's
-            // always follows (a chat is not marked stale by the app's writes).
-            if !historyLoaded, conversationId == nil, messages.isEmpty,
-               let cached: ChatHistory = await app.cachedValue("/api/ai/chat", query: query),
-               loads.isCurrent(generation), !streaming, pendingReceipts.isEmpty, !historyLoaded {
-                messages = cached.messages.uniquedById()
-                historyLoaded = true
-                conversationId = cached.conversation?.id
-                title = cached.conversation?.title ?? "Avustaja"
-            }
+            // The server's always follows the cached one (a chat is not marked stale by the app's writes).
+            await paintCachedHistory()
             let history: ChatHistory = try await app.cachedGet("/api/ai/chat", query: query, force: true)
             guard loads.isCurrent(generation), !streaming, pendingReceipts.isEmpty else { return }
             messages = history.messages.uniquedById()
@@ -160,6 +172,20 @@ final class ChatModel {
             guard loads.isCurrent(generation), !streaming else { return }
             failure = error.userMessage
         }
+    }
+
+    /// First open: the latest conversation as Koti's prefetch left it, at once. True when it was there.
+    @discardableResult
+    private func paintCachedHistory() async -> Bool {
+        let generation = loads.current
+        guard !historyLoaded, conversationId == nil, messages.isEmpty,
+              let cached: ChatHistory = await app.cachedValue("/api/ai/chat"),
+              loads.isCurrent(generation), !streaming, pendingReceipts.isEmpty, !historyLoaded else { return false }
+        messages = cached.messages.uniquedById()
+        historyLoaded = true
+        conversationId = cached.conversation?.id
+        title = cached.conversation?.title ?? "Avustaja"
+        return true
     }
 
     /// A conversation was renamed in the list: the open one shows its new name.
