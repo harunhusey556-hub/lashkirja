@@ -205,6 +205,7 @@ struct PurchaseInvoicesView: View {
             Section {
                 chips.listRowBackground(Color.clear).listRowInsets(EdgeInsets())
             }
+            .chipRowSection()
         }
 
         if !rows.isEmpty {
@@ -307,7 +308,10 @@ struct PurchaseInvoicesView: View {
                 }
             }
             .padding(.vertical, 4)
+            .padding(.horizontal, ChipRow.inset)
         }
+        .accessibilityIdentifier("purchase-chips")
+        .chipRowScroll()
     }
 
     private func chip(_ option: PurchaseFilter, label: String) -> some View {
@@ -317,12 +321,12 @@ struct PurchaseInvoicesView: View {
             pick(option)
         } label: {
             Text(label)
-                .font(.subheadline.weight(selected ? .semibold : .regular))
+                .chipFont(selected: selected)
                 .foregroundStyle(selected ? Theme.onInk : Theme.ink)
                 .padding(.horizontal, 14)
                 .frame(minHeight: 36)
                 .background(selected ? Theme.ink : Theme.surface, in: Capsule())
-                .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
+                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: selected ? 0 : 1))
         }
         .buttonStyle(.pressable)
         .accessibilityAddTraits(selected ? .isSelected : [])

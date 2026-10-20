@@ -120,10 +120,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Virheellinen viestin tunniste" }, { status: 400 });
     }
 
+    // A retry of a send whose answer was lost: the lost answer also carried a new chat's id,
+    // so the retry names no conversation and belongs in the one its first send opened.
+    let userRow = clientId
+      ? await prisma.chatMessage.findFirst({
+          where: { userId: session.userId, clientId },
+        })
+      : null;
+    if (
+      userRow &&
+      (userRow.content !== message || (requestedConversation && userRow.conversationId !== requestedConversation))
+    ) {
+      return NextResponse.json({ error: "Viestin tunniste on jo käytössä" }, { status: 409 });
+    }
+
+    const conversationId = userRow?.conversationId ?? requestedConversation;
     const conversation = await (async () => {
       try {
-        return requestedConversation
-          ? await requireOpenConversation(session.userId, requestedConversation)
+        return conversationId
+          ? await requireOpenConversation(session.userId, conversationId)
           : await createConversation(session.userId);
       } catch (error) {
         if (error instanceof ChatConversationMissingError) return null;
@@ -137,17 +152,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Keskustelu on arkistoitu." }, { status: 409 });
     }
 
-    let userRow = clientId
-      ? await prisma.chatMessage.findFirst({
-          where: { userId: session.userId, clientId },
-        })
-      : null;
-    if (clientId && userRow && userRow.conversationId !== conversation.id) {
-      return NextResponse.json({ error: "Viestin tunniste on jo käytössä" }, { status: 409 });
-    }
-    if (clientId && userRow && userRow.content !== message) {
-      return NextResponse.json({ error: "Viestin tunniste on jo käytössä" }, { status: 409 });
-    }
     if (!userRow) {
       userRow = await prisma.chatMessage.create({
         data: {
