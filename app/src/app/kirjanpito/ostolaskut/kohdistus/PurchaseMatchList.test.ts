@@ -12,6 +12,7 @@ vi.mock("next/link", async () => {
 });
 
 import {
+  AcceptAllSureButton,
   PurchaseMatchList,
   isSureSuggestion,
   purchaseMatchRows,
@@ -94,5 +95,24 @@ describe("Kohdista ostolaskujen maksut page", () => {
     const html = renderToStaticMarkup(createElement(PurchaseMatchPage));
     expect(html).toContain("Kohdista ostolaskujen maksut");
     expect(html).toContain("Ladataan");
+  });
+
+  // X168: with no sure proposal the page's one button did nothing ("Ei varmoja maksuja kohdistettavaksi.").
+  it("offers Hyväksy kaikki varmat only while a sure proposal waits", () => {
+    const button = (suggestions: PaymentSuggestion[]) =>
+      renderToStaticMarkup(
+        createElement(AcceptAllSureButton, {
+          sureCount: suggestions.filter(isSureSuggestion).length,
+          busy: false,
+          disabled: false,
+          onClick: noop,
+        })
+      );
+    const none = button([{ ...SUGGESTION, score: 0.72 }]);
+    expect(none).not.toContain("<button");
+    expect(none).not.toContain("Hyväksy kaikki varmat");
+    const one = button([SUGGESTION, { ...SUGGESTION, invoiceId: "b", score: 0.72 }]);
+    expect(one.match(/<button/g)).toHaveLength(1);
+    expect(one).toContain("Hyväksy kaikki varmat (1)");
   });
 });

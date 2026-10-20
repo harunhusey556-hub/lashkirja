@@ -818,10 +818,7 @@ final class StabilityTests: WalkTestCase {
         let unlinked = app.buttons["receipt-tab-unlinked"].firstMatch
         guard unlinked.waitForExistence(timeout: 15) else { dump(app, "stability-15-kuitit"); XCTFail("no Ei kohdistettu chip"); return }
         // The chips scroll sideways; the fifth may sit past the edge.
-        if !unlinked.isHittable {
-            app.buttons["receipt-tab-all"].firstMatch.swipeLeft()
-            _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: unlinked)], timeout: 5)
-        }
+        revealChip(unlinked, inRow: "receipt-chips")
         unlinked.tap(); taps += 1
         // The seed's two sure pairs. At the top of the list, rows run on under the bar.
         let sure = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kohdista varmat")).firstMatch
@@ -837,6 +834,28 @@ final class StabilityTests: WalkTestCase {
         guard approve.waitForExistence(timeout: 15) else { dump(app, "stability-15-no-hyvaksy"); XCTFail("the pending receipt has no Hyväksy"); return }
         assertCanvasUnderBar(approve, "Kuitti, Hyväksy")
         shot("stability-receipt-bar")
+    }
+
+    /// X025 (B11): a picked chip turns semibold and moves nothing. Its wider label pushed every chip
+    /// after it by about 3 pt, on Myynti, on an invoice's tabs, on Kuitit and on Ostolaskut. The
+    /// outline did too: drawn centred on the edge, it made an unpicked chip 1 pt wider (run 39334173559).
+    func test18_ChipsKeepTheirWidth() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        assertChipsHoldStill("sales-chips", "Myynti", counted: true)
+        // Lasku 2, the seed's overdue invoice: listed on Kaikki and on Myöhässä alike.
+        guard tapLabel("label CONTAINS %@", "Lasku 2 · "), app.navigationBars["Lasku 2"].waitForExistence(timeout: 20) else {
+            dump(app, "stability-18-no-invoice"); XCTFail("Lasku 2 did not open from Myynti"); return
+        }
+        assertChipsHoldStill("invoice-tabs", "Lasku 2", counted: false)
+        openHubRow("Kuitit")
+        assertChipsHoldStill("receipt-chips", "Kuitit", counted: true)
+        shot("stability-chips-kuitit")
+        // Ostolaskut draws its own copy of the chip. Its pick is kept between visits (ostolaskut.filter):
+        // Kaikki is picked again after.
+        backToBooks("Kuitit")
+        openHubRow("Ostolaskut")
+        assertChipsHoldStill("purchase-chips", "Ostolaskut", counted: true)
+        app.scrollViews.matching(identifier: "purchase-chips").firstMatch.buttons.element(boundBy: 0).tap(); taps += 1
     }
 
     /// The first picked-mode row of a list on screen below `top`, not under the bottom of the
@@ -873,6 +892,60 @@ final class StabilityTests: WalkTestCase {
     private func backToBooks(_ title: String) {
         app.navigationBars[title].buttons["BackButton"].firstMatch.tap(); taps += 1
         XCTAssertTrue(app.navigationBars["Kirjanpito"].waitForExistence(timeout: 10), "Back from \(title) did not reach Kirjanpito")
+    }
+
+    /// X025: picks the first chip of the row not picked yet (one wholly on the screen, so XCTest does
+    /// not scroll the row to reach it), waits until it reports itself selected, and compares every
+    /// chip's place and width with before the tap.
+    private func assertChipsHoldStill(_ identifier: String, _ screen: String, counted: Bool,
+                                      file: StaticString = #filePath, line: UInt = #line) {
+        let row = app.scrollViews.matching(identifier: identifier).firstMatch
+        guard row.waitForExistence(timeout: 20) else {
+            dump(app, "stability-18-\(identifier)"); XCTFail("\(screen): no chip row '\(identifier)'", file: file, line: line); return
+        }
+        let chips = row.buttons
+        let before = chipFrames(chips, counted: counted)
+        let window = app.windows.firstMatch.frame
+        let shown = chips.allElementsBoundByIndex
+        guard let index = shown.indices.first(where: {
+            !shown[$0].isSelected && shown[$0].frame.minX >= window.minX && shown[$0].frame.maxX <= window.maxX
+        }) else {
+            dump(app, "stability-18-\(identifier)"); XCTFail("\(screen): no chip on the screen to pick", file: file, line: line); return
+        }
+        let chip = chips.element(boundBy: index)
+        let label = chip.label
+        chip.tap(); taps += 1
+        let picked = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: chip)
+        guard XCTWaiter().wait(for: [picked], timeout: 10) == .completed else {
+            dump(app, "stability-18-\(identifier)"); XCTFail("\(screen): '\(label)' did not report itself selected", file: file, line: line); return
+        }
+        let after = chipFrames(chips, counted: counted)
+        func places(_ frames: [CGRect]) -> String { frames.map { "\($0.minX)+\($0.width)" }.joined(separator: " ") }
+        note("INFO stability 18 \(screen): picked '\(label)'; x+width before \(places(before)), after \(places(after))")
+        XCTAssertEqual(after.count, before.count, "\(screen): the row has \(after.count) chips after the pick, \(before.count) before",
+                       file: file, line: line)
+        for (position, (old, new)) in zip(before, after).enumerated() {
+            XCTAssertEqual(new.minX, old.minX, accuracy: 0.5, "\(screen): chip \(position) moved from x \(old.minX) to \(new.minX)",
+                           file: file, line: line)
+            XCTAssertEqual(new.width, old.width, accuracy: 0.5, "\(screen): chip \(position) went from \(old.width) pt wide to \(new.width)",
+                           file: file, line: line)
+        }
+    }
+
+    /// The row's chip frames once two looks half a second apart agree, and in a counted row once every
+    /// chip shows its count: a count arriving widens its chip, which is not the pick's doing.
+    private func chipFrames(_ chips: XCUIElementQuery, counted: Bool) -> [CGRect] {
+        var last: [CGRect] = []
+        let deadline = Date().addingTimeInterval(15)
+        repeat {
+            let shown = chips.allElementsBoundByIndex
+            let frames = shown.map(\.frame)
+            let ready = !counted || shown.allSatisfy { $0.label.contains(where: \.isNumber) }
+            if ready, !frames.isEmpty, frames == last { return frames }
+            last = frames
+            usleep(500_000)
+        } while Date() < deadline
+        return last
     }
 
     /// The toolbar's Valmis ends the mode: the bar and Valitse kaikki go.

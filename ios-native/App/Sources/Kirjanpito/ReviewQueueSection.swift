@@ -32,12 +32,24 @@ struct ReviewQueueSection: View {
     var body: some View {
         let groups = ReviewQueue.groups(pending: pending, rejectedCount: rejected.count)
         if let current = GroupChoice.pick(group, available: groups) {
-            Section {
-                if groups.count > 1 {
+            let title = Text(current == .rejected ? "Hylätyt kuitit · \(rejectedTotal)" : "Odottaa hyväksyntää · \(pending.count)")
+            // The chips get a section of their own: at no margins, the rows' section would stretch their
+            // card to the screen's edges too. Both sections dim and move alike, so the queue dims as one.
+            if groups.count > 1 {
+                Section {
                     chips(groups, current: current)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                } header: {
+                    // The section's margins hold its header too: it keeps the other sections' line.
+                    title.padding(.horizontal, ChipRow.inset)
                 }
+                .chipRowSection()
+                .motion(listMotion.animation(.snappy), value: pendingHasMore)
+                .disabled(dimmed)
+                .opacity(dimmed ? 0.4 : 1)
+            }
+            Section {
                 Text(current.description).font(.caption).foregroundStyle(Theme.ink2)
                 if current == .rejected {
                     rejectedRows
@@ -45,7 +57,7 @@ struct ReviewQueueSection: View {
                     pendingRows(ReviewQueue.split(pending)[current] ?? [])
                 }
             } header: {
-                Text(current == .rejected ? "Hylätyt kuitit · \(rejectedTotal)" : "Odottaa hyväksyntää · \(pending.count)")
+                if groups.count <= 1 { title }
             }
             // The last page arriving removes "Lataa lisää" at the foot of the list: it fades out
             // instead of vanishing, and the rows below don't jump.
@@ -69,8 +81,9 @@ struct ReviewQueueSection: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ChipRow.inset)
         }
+        .chipRowScroll()
     }
 
     @ViewBuilder private func pendingRows(_ rows: [Receipt]) -> some View {
