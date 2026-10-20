@@ -67,6 +67,9 @@ struct MainTabView: View {
             guard let pending else { return }
             app.pendingRoute = nil
             // A notification tap or a sheet's hand-off: the screen must not open under a sheet.
+            // The assistant's keyboard goes first: left to the closing sheet it stayed over the
+            // screen, tab bar hidden, for 1.5 s (M064).
+            if showAssistant { Keyboard.dismiss() }
             showSettings = false
             showAssistant = false
             showAdd = false
@@ -89,6 +92,8 @@ struct MainTabView: View {
         .onChange(of: app.pendingQuickAction, initial: true) { _, action in
             guard let action else { return }
             app.pendingQuickAction = nil
+            // As for a route above: the assistant's keyboard does not outlive its sheet.
+            if showAssistant { Keyboard.dismiss() }
             showSettings = false
             showAdd = false
             showAssistant = false

@@ -239,7 +239,9 @@ final class P1Tests: WalkTestCase {
     /// on the first screen, above Rahatilanne: its row opens the receipt, whose Hyväksy is the second
     /// tap. The task ends on Hyväksy, as test04 does.
     func test15_ApproveFromKoti() {
-        let party = app.staticTexts["Lumo Kosmetiikka Oy"].firstMatch
+        // Not Lumo Kosmetiikka Oy: test04 approves it (N3), and nothing reseeds between tests, so
+        // Koti had no row of it (run 39382398509). The seed's other pending one leads the tasks.
+        let party = app.staticTexts["Audit Hyvitys Odottaa Oy"].firstMatch
         let shown = party.waitForExistence(timeout: 20) && reveal(party, scrolls: 0)
         let heading = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rahatilanne")).firstMatch
         // Above the balance card (Q3); the old order drew the tasks under it.
@@ -251,6 +253,59 @@ final class P1Tests: WalkTestCase {
         if !reached { dump(app, "p1-15-approve-from-koti") }
         check("P1 15 pending row on the first screen \(shown), above Rahatilanne \(first), Hyväksy \(reached)", reached)
         measure("approve receipt from Koti", reached: reached, maxTaps: 2)
+    }
+
+    /// N7 (O3, Q4): the camera is two taps from any tab, Lisää and then Kuvaa kuitti; through Lisää
+    /// tiedosto's page it was three. The simulator has no camera, so the capture page opens on its
+    /// picker either way and says, under `-LKUITest` (hence the second launch), that it asked for one.
+    /// The imports moved behind Lisää's ⋯.
+    func test16_CameraFromLisaa() {
+        app.terminate()
+        app.launchArguments += ["-LKUITest", "-notifications.asked.v1", "YES"]
+        launchSignedIn()
+        dismissSystemPrompts()
+        tab("Lisää")
+        let sheet = app.navigationBars["Lisää"]
+        var opened = false
+        // Koti under the sheet can carry a "Kuvaa kuitti" of its own; only the sheet's row can be tapped.
+        if sheet.waitForExistence(timeout: 10), let row = firstHittable(app.buttons.matching(NSPredicate(format: "label == %@", "Kuvaa kuitti")), timeout: 10) {
+            row.tap(); taps += 1
+            opened = app.navigationBars["Uusi kuitti"].waitForExistence(timeout: 15)
+        }
+        let marker = app.descendants(matching: .any).matching(identifier: "capture-camera-asked").firstMatch
+        let asked = opened && marker.waitForExistence(timeout: 5)
+        if !asked { dump(app, "p1-16-camera") }
+        check("P1 16 Lisää open \(sheet.exists), Uusi kuitti \(opened), the camera asked for \(asked)", asked)
+        measure("camera from Lisää", reached: asked, maxTaps: 2, maxScrolls: 0)
+        guard opened else { return }
+
+        // Not a step of the task: closing the page takes Lisää down with it, and Lisää opens again.
+        app.navigationBars["Uusi kuitti"].buttons.matching(NSPredicate(format: "label IN %@", ["Peruuta", "Sulje"])).firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Uusi kuitti"].waitForNonExistence(timeout: 10), "Peruuta did not close the capture page")
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Lisää stayed up under the closed capture page")
+        tab("Lisää")
+        guard sheet.waitForExistence(timeout: 10) else { XCTFail("Lisää did not open again"); return }
+        let statement = app.buttons.matching(NSPredicate(format: "label == %@", "Tuo tiliote"))
+        XCTAssertNil(firstHittable(statement, timeout: 2), "Tuo tiliote is still a row of Lisää, not in ⋯")
+        let menu = sheet.buttons["Toiminnot"].firstMatch
+        guard menu.waitForExistence(timeout: 5) else { dump(app, "p1-16-no-menu"); XCTFail("Lisää has no ⋯ (Toiminnot)"); return }
+        menu.tap()
+        let inMenu = firstHittable(statement, timeout: 5) != nil
+        let mail = firstHittable(app.buttons.matching(NSPredicate(format: "label IN %@", ["Hae sähköpostista", "Yhdistä sähköposti"])), timeout: 2) != nil
+        shot("p1-16-lisaa-toiminnot")
+        check("P1 16 ⋯ has Tuo tiliote \(inMenu) and the mailbox \(mail)", inMenu && mail)
+        XCTAssertTrue(inMenu, "Lisää's ⋯ has no Tuo tiliote")
+        XCTAssertTrue(mail, "Lisää's ⋯ has neither Hae sähköpostista nor Yhdistä sähköposti")
+    }
+
+    /// The first hittable element of `query`, looked for until `timeout`; nil when none was.
+    private func firstHittable(_ query: XCUIElementQuery, timeout: TimeInterval) -> XCUIElement? {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let element = query.allElementsBoundByIndex.first(where: { $0.isHittable }) { return element }
+            usleep(250_000)
+        } while Date() < deadline
+        return nil
     }
 
     /// The screen on top is `title`; recorded under `step` and asserted, and a miss keeps the tree.

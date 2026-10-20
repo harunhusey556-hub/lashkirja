@@ -558,9 +558,16 @@ final class OwnerScreensTests: WalkTestCase {
     // ostolasku's credit instead.
     func testJ_CreditNoteIsNotABillPaidLater() {
         guard openKuitit() else { capture("j0-no-kuitit"); XCTFail("Kuitit did not open"); return }
-        guard tapLabel("label CONTAINS %@", "Audit Hyvitys Oy,") else {
-            capture("j0-no-row"); XCTFail("Kuitit lists no Audit Hyvitys Oy"); return
+        // Kuitit shows ten rows before "Näytä enemmän". The credit note shares its day with the seed's
+        // Lidl 3, and the server orders one day's rows by id, a random uuid: with nine rows newer than
+        // that day it is the tenth row or the eleventh, behind the fold (run 39382398509). The owner
+        // opens the fold, and so does the walk.
+        var found = tapLabel("label CONTAINS %@", "Audit Hyvitys Oy,")
+        for _ in 0..<2 where !found {
+            guard tapLabel("label BEGINSWITH %@", "Näytä enemmän") else { break }
+            found = tapLabel("label CONTAINS %@", "Audit Hyvitys Oy,")
         }
+        guard found else { capture("j0-no-row"); XCTFail("Kuitit lists no Audit Hyvitys Oy"); return }
         let offer = app.staticTexts["Onko tämä ostolaskun hyvitys?"].firstMatch
         let bill = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "maksetaan myöhemmin")).firstMatch
         // The notice comes with its own request, after the receipt.
@@ -571,5 +578,190 @@ final class OwnerScreensTests: WalkTestCase {
         XCTAssertFalse(bill.exists, "the credit note is asked whether it is a bill paid later")
         XCTAssertTrue(offer.exists, "the credit note is not offered as an ostolasku's credit")
         XCTAssertTrue(app.buttons["Merkitse ostolaskun hyvitykseksi"].exists, "no 'Merkitse ostolaskun hyvitykseksi'")
+    }
+
+    // X165 X164 X133 X134 X162 X168, on the seed's overdue Ripsitukku Oy bill: its list row says
+    // "Myöhässä" once and carries the year; the open bill has one next step at the bottom, 'Kohdista
+    // pankkiin', two taps from Ostolaskut, and everything else in Toiminnot; the bank picker does not
+    // explain a row by its date alone; and Kohdista ostolaskujen maksut offers "Hyväksy kaikki
+    // varmat" only when a sure pair waits.
+    func testJ_PurchaseDetailOnePrimary() {
+        // What the server holds decides the picker's footer and the bulk button. Each receipt save
+        // (testC's) runs the matcher, which links the seed's Ripsitukku Oy bank row (−139,00 €) to its
+        // kuitti: the bill then has only date-only rows and no sure pair. On a fresh seed that row is
+        // still free, matches the bill, and both answers flip.
+        guard let bearer = demoAPI("/api/auth/token", body: ["email": "demo@lashkirja.fi", "password": "demo123"])?["token"] as? String else {
+            XCTFail("the demo API gave no token"); return
+        }
+        let bills = demoAPI("/api/purchase-invoices", bearer: bearer)?["invoices"] as? [[String: Any]] ?? []
+        guard let bill = bills.first(where: { $0["supplierName"] as? String == "Ripsitukku Oy" }),
+              let billId = bill["id"] as? String, let due = bill["dueDate"] as? String else {
+            XCTFail("the demo API lists no Ripsitukku Oy ostolasku"); return
+        }
+        XCTAssertEqual(bill["displayStatus"] as? String, "overdue", "the seed's Ripsitukku Oy bill is not overdue")
+        let dueParts = due.prefix(10).split(separator: "-").compactMap { Int($0) }
+        guard dueParts.count == 3 else { XCTFail("Ripsitukku Oy's due date reads \(due)"); return }
+        let dueShown = "\(dueParts[2]).\(dueParts[1]).\(dueParts[0])"
+        let candidates = demoAPI("/api/purchase-invoices/\(billId)/payments/candidates", bearer: bearer)?["candidates"] as? [[String: Any]] ?? []
+        let anyMatch = candidates.contains { (($0["score"] as? Double) ?? 0) > 0 }
+        let suggestions = demoAPI("/api/purchase-invoices/match", bearer: bearer)?["suggestions"] as? [[String: Any]] ?? []
+        // As PurchaseMatch.sureSuggestions: sure, and carrying what a payment needs.
+        let sure = suggestions.filter { suggestion in
+            let score: Double = (suggestion["score"] as? Double) ?? 0
+            let amount: Double = (suggestion["amount"] as? Double) ?? 0
+            return score >= 0.8 && amount > 0 && suggestion["transactionId"] as? String != nil && suggestion["paidDate"] as? String != nil
+        }.count
+        keep("j-server", "Ripsitukku Oy due \(dueShown): \(candidates.count) bank rows, one scored: \(anyMatch); sure pairs: \(sure)")
+
+        guard selectTab("Kirjanpito") else { capture("j0-no-tab"); XCTFail("Kirjanpito did not open"); return }
+        let list = app.navigationBars["Ostolaskut"]
+        for _ in 0..<2 where !list.exists {
+            tapLabel("label BEGINSWITH %@", "Ostolaskut")
+            _ = list.waitForExistence(timeout: 10)
+        }
+        guard list.exists else { capture("j0-no-ostolaskut"); tree("j0-no-ostolaskut"); XCTFail("Ostolaskut did not open"); return }
+
+        // The row reads as one element: name, second line, amount and badge.
+        let row = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Ripsitukku Oy", "139,00")).firstMatch
+        guard row.waitForExistence(timeout: 20), reveal(row) else {
+            capture("j1-no-row"); tree("j1-no-row"); XCTFail("Ostolaskut lists no Ripsitukku Oy row"); return
+        }
+        let rowLabel = row.label
+        keep("j-row", rowLabel)
+        capture("j1-ostolaskut")
+        let overdueWords = rowLabel.lowercased().components(separatedBy: "myöhässä").count - 1
+        XCTAssertEqual(overdueWords, 1, "the row says Myöhässä \(overdueWords) times: \(rowLabel)")
+        XCTAssertTrue(rowLabel.contains(dueShown), "the row's due date is not \(dueShown), with its year: \(rowLabel)")
+
+        // Ostolaskut row → the primary: two taps, no scroll.
+        taps = 0
+        scrolls = 0
+        row.tap(); taps += 1
+        guard app.navigationBars["Ripsitukku Oy"].waitForExistence(timeout: 20) else {
+            capture("j2-no-detail"); tree("j2-no-detail"); XCTFail("the Ripsitukku Oy ostolasku did not open"); return
+        }
+        let primary = app.buttons["ostolasku-primary"]
+        guard primary.waitForExistence(timeout: 20) else {
+            capture("j2-no-primary"); tree("j2-no-primary"); XCTFail("the open bill has no primary at the bottom"); return
+        }
+        capture("j2-detail")
+        XCTAssertEqual(primary.label, "Kohdista pankkiin")
+        XCTAssertTrue(primary.isHittable, "Kohdista pankkiin is not hittable without a scroll")
+        let tabBar = app.tabBars.firstMatch
+        if tabBar.exists {
+            XCTAssertLessThanOrEqual(primary.frame.maxY, tabBar.frame.minY + 1, "Kohdista pankkiin \(primary.frame) is under the tab bar \(tabBar.frame)")
+        }
+        let paymentActions = app.buttons.matching(NSPredicate(format: "label IN %@", ["Kohdista pankkiin", "Kohdista pankkitapahtumaan", "Kirjaa maksu"]))
+        XCTAssertEqual(paymentActions.count, 1, "the body shows \(paymentActions.count) payment actions")
+        primary.tap(); taps += 1
+        let picker = app.navigationBars["Kohdista pankkiin"]
+        let opened = picker.waitForExistence(timeout: 10)
+        measure("ostolasku-kohdista-pankkiin", reached: opened, maxTaps: 2, maxScrolls: 0)
+        guard opened else { capture("j3-no-picker"); tree("j3-no-picker"); return }
+
+        // Only a row that shares the amount, the viite or the name says why; and when none does,
+        // the footer says so instead of calling the top rows the best matches.
+        let rowsHeader = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Pankkitapahtumat")).firstMatch
+        _ = rowsHeader.waitForExistence(timeout: 20)
+        capture("j3-picker")
+        if rowsHeader.exists {
+            let dateOnly = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Miksi: maksettu"))
+            let dateOnlyCount = dateOnly.count
+            XCTAssertEqual(dateOnlyCount, 0, "a row is explained by its date alone: \(dateOnlyCount > 0 ? dateOnly.firstMatch.label : "")")
+            let noMatch = app.staticTexts["Mikään tapahtuma ei vastaa summaa, viitettä tai nimeä. Hae nimellä tai summalla."]
+            let best = app.staticTexts["Valitse pankkitapahtuma, jolla tämä ostolasku maksettiin. Parhaat osumat ovat ylimpänä."]
+            if anyMatch {
+                XCTAssertTrue(best.waitForExistence(timeout: 5), "a row matches the bill, but the footer does not say the best are on top")
+            } else {
+                XCTAssertTrue(noMatch.waitForExistence(timeout: 5), "no row matches the bill, but the footer does not say so")
+                XCTAssertFalse(best.exists, "no row matches the bill, yet the footer calls the top rows the best matches")
+            }
+        } else {
+            tree("j3-picker"); XCTFail("Kohdista pankkiin listed no bank rows")
+        }
+        picker.buttons["Sulje"].tap()
+        XCTAssertTrue(waitGone(picker, timeout: 10), "Sulje did not close Kohdista pankkiin")
+
+        // The bill to its last section: no second payment action, no inline delete.
+        for _ in 0..<3 { app.windows.firstMatch.swipeUp(velocity: .fast) }
+        capture("j4-detail-end")
+        XCTAssertEqual(paymentActions.count, 1, "scrolled to the end, the body shows \(paymentActions.count) payment actions")
+        XCTAssertFalse(app.buttons["Poista ostolasku"].exists, "the body repeats Poista ostolasku")
+
+        let menu = app.navigationBars["Ripsitukku Oy"].buttons["Toiminnot"]
+        guard menu.waitForExistence(timeout: 5) else { capture("j5-no-menu"); tree("j5-no-menu"); XCTFail("no Toiminnot"); return }
+        menu.tap()
+        let menuLink = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Kohdista pankkiin", "ostolasku-primary")).firstMatch
+        let menuPay = app.buttons["Kirjaa maksu"].firstMatch
+        guard menuLink.waitForExistence(timeout: 5) else {
+            capture("j5-toiminnot"); tree("j5-toiminnot"); XCTFail("Toiminnot has no Kohdista pankkiin"); return
+        }
+        capture("j5-toiminnot")
+        XCTAssertTrue(menuPay.exists, "Toiminnot has no Kirjaa maksu")
+        XCTAssertTrue(app.buttons["Poista ostolasku"].exists, "Toiminnot has no Poista ostolasku")
+        // X164: on one line, not hyphenated onto a second. The item's own text when iOS exposes it,
+        // otherwise the whole item against Kirjaa maksu, a one-line item of the same menu.
+        let line = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let text = menuLink.staticTexts.firstMatch
+        keep("j-menu", "Kohdista pankkiin \(menuLink.frame), text \(text.exists ? "\(text.frame)" : "none"); Kirjaa maksu \(menuPay.frame); line \(line) pt")
+        if text.exists {
+            XCTAssertLessThanOrEqual(text.frame.height, 1.5 * line, "the item wraps: \(text.frame.height) pt for a \(line) pt line")
+        } else {
+            XCTAssertLessThanOrEqual(menuLink.frame.height, menuPay.frame.height + 0.5 * line,
+                                     "the item wraps: \(menuLink.frame.height) pt beside Kirjaa maksu's \(menuPay.frame.height) pt")
+        }
+        menuLink.tap()
+        XCTAssertTrue(picker.waitForExistence(timeout: 10), "Toiminnot > Kohdista pankkiin opened no sheet of that title")
+        capture("j6-menu-picker")
+        if picker.exists {
+            picker.buttons["Sulje"].tap()
+            _ = waitGone(picker, timeout: 10)
+        }
+
+        // Back to Kirjanpito, then the matching screen: Ostolaskut sits above it in the hub.
+        edgeSwipeBack()
+        if !list.waitForExistence(timeout: 5) { app.navigationBars["Ripsitukku Oy"].buttons.firstMatch.tap() }
+        edgeSwipeBack()
+        let hub = app.navigationBars["Kirjanpito"]
+        if !hub.waitForExistence(timeout: 5) && list.exists { list.buttons.firstMatch.tap() }
+        guard hub.waitForExistence(timeout: 5) else { capture("j7-no-hub"); tree("j7-no-hub"); XCTFail("back on Kirjanpito failed"); return }
+        let matching = app.navigationBars["Kohdista ostolaskujen maksut"]
+        guard tapLabel("label BEGINSWITH %@", "Kohdista ostolaskujen maksut"), matching.waitForExistence(timeout: 10) else {
+            capture("j7-no-matching"); tree("j7-no-matching"); XCTFail("Kohdista ostolaskujen maksut did not open"); return
+        }
+        // The footer line stays when the button goes; it is there once the open bills have loaded.
+        let footer = app.staticTexts["Pankin maksut avoimille ostolaskuille."]
+        let footerShown = footer.waitForExistence(timeout: 20)
+        capture("j7-matching")
+        if !footerShown { tree("j7-matching") }
+        XCTAssertTrue(footerShown, "Kohdista ostolaskujen maksut shows no 'Pankin maksut avoimille ostolaskuille.'")
+        let bulk = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Hyväksy kaikki varmat")).firstMatch
+        if sure == 0 {
+            XCTAssertFalse(bulk.exists, "no sure pair, yet the screen offers \(bulk.exists ? bulk.label : "")")
+        } else {
+            XCTAssertTrue(app.buttons["Hyväksy kaikki varmat (\(sure))"].exists, "\(sure) sure pair(s), but no Hyväksy kaikki varmat (\(sure))")
+        }
+    }
+
+    /// One answer from the demo API the app uses (the runner shares the Mac's loopback), as testH
+    /// reads back its save. Test values from app/scripts/demo-seed.ts; only ever the throwaway demo API.
+    private func demoAPI(_ path: String, bearer: String? = nil, body: [String: String]? = nil) -> [String: Any]? {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:3999\(path)")!)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        if let body {
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "content-type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
+        if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "authorization") }
+        var result: [String: Any]?
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            result = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 30)
+        return result
     }
 }

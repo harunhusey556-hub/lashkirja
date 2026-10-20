@@ -34,24 +34,33 @@ struct CaptureFlow: View {
     /// Kuitit under the cover: takes the review queue "Näytä tarkistettavat" asked for, before the cover goes.
     let onReviewQueue: ((ReceiptList) -> Void)?
 
-    /// `opensCamera`: a missing-receipt action goes straight to the camera; "+" → "Lisää tiedosto"
-    /// opens this page so the owner picks camera, photos or files. Kuitit's "Jatka" opens on the
-    /// unfinished files instead.
-    init(transactionId: String?, onSaved: (() -> Void)? = nil, opensCamera: Bool = true, onClose: (() -> Void)? = nil,
-         onReviewQueue: ((ReceiptList) -> Void)? = nil) {
+    /// The page's title: the entry that opened it ("+" → "Lisää tiedosto" names it so), else "Uusi kuitti" (X140).
+    let title: String
+
+    /// `opensCamera`: "+" → "Kuvaa kuitti" and a missing-receipt action go straight to the camera;
+    /// "+" → "Lisää tiedosto" opens this page so the owner picks camera, photos or files. Kuitit's
+    /// "Jatka" opens on the unfinished files instead.
+    init(transactionId: String?, onSaved: (() -> Void)? = nil, opensCamera: Bool = true, title: String = "Uusi kuitti",
+         onClose: (() -> Void)? = nil, onReviewQueue: ((ReceiptList) -> Void)? = nil) {
         self.transactionId = transactionId
         self.onSaved = onSaved
+        self.title = title
         self.onClose = onClose
         self.onReviewQueue = onReviewQueue
         let model = transactionId == nil ? CaptureQueueModel.shared : CaptureQueueModel(transactionId: transactionId)
         _model = State(initialValue: model)
-        _showCamera = State(initialValue: opensCamera && CaptureFlow.cameraAvailable && !model.resuming)
+        let asksCamera = opensCamera && !model.resuming
+        _showCamera = State(initialValue: asksCamera && CaptureFlow.cameraAvailable)
+        _askedCamera = State(initialValue: asksCamera)
     }
 
     @State private var model: CaptureQueueModel
     /// The model is opened once per presentation, not again when the camera cover closes.
     @State private var opened = false
     @State private var showCamera: Bool
+    /// UI tests only (`-LKUITest`): this opening asked for the camera. The simulator has none, so
+    /// the page opens on its picker either way, and this says which entry it was (P1Tests.test16).
+    @State private var askedCamera: Bool
     @State private var showFiles = false
     /// The photo library, opened from the queue's "Lisää tiedostoja" menu.
     @State private var showPhotos = false
@@ -132,8 +141,14 @@ struct CaptureFlow: View {
                 }
             }
             .motion(.snappy, value: model.notice)
+            .overlay(alignment: .topLeading) {
+                if UITestHooks.active && askedCamera {
+                    Text("kamera").font(.caption2).opacity(0.01).allowsHitTesting(false)
+                        .accessibilityIdentifier("capture-camera-asked")
+                }
+            }
             .formKeyboard()
-            .navigationTitle("Uusi kuitti")
+            .navigationTitle(title)
             .onAppear {
                 EventLog.shared.log(.screen(transactionId.map { "capture.forBankRow(\($0))" } ?? "capture"))
                 model.onSaved = onSaved

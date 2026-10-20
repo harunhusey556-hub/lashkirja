@@ -11,6 +11,10 @@ struct InvoiceFormView: View {
     /// Called with the new invoice's id after a create, before the sheet closes: the presenter
     /// opens the invoice once the sheet is gone (the web replaces the form with the invoice).
     let onCreated: ((String) -> Void)?
+    /// Presented over a sheet (Lisää): Peruuta, the discard question and a save close through that
+    /// sheet, whose dismissal takes this one down with it in one movement, as CaptureFlow's
+    /// `onClose`. This sheet going first showed Lisää again before it went too (X139).
+    let onClose: (() -> Void)?
 
     @State private var draft = InvoiceDraft(customerId: "", issueDate: APIDate.dayString(Date()), paymentTermDays: 14)
     /// The picked day as the DatePicker draws it (`APIDate.pickerDate`), in any device zone: Helsinki
@@ -49,10 +53,12 @@ struct InvoiceFormView: View {
     /// `preview` (`AppModel.invoiceFormPreview`) opens the form finished in its first frame: line,
     /// customers, catalog and a kept draft in place. Without it `.task` fills them in after the
     /// first frame (the "Lisää → Uusi lasku" flash, w44).
-    init(existing: Invoice?, presetCustomerId: String? = nil, preview: InvoiceFormPreview? = nil, onCreated: ((String) -> Void)? = nil) {
+    init(existing: Invoice?, presetCustomerId: String? = nil, preview: InvoiceFormPreview? = nil, onCreated: ((String) -> Void)? = nil,
+         onClose: (() -> Void)? = nil) {
         self.existing = existing
         self.presetCustomerId = presetCustomerId
         self.onCreated = onCreated
+        self.onClose = onClose
         guard let preview else { return }
         let opening = InvoiceForm.opening(existing: existing, presetCustomerId: presetCustomerId, customers: preview.customers,
                                           sellerRegistered: preview.sellerRegistered, kept: preview.kept,
@@ -130,7 +136,7 @@ struct InvoiceFormView: View {
                     ToolbarItem(placement: .principal) { InvoiceFormTitle(nextNumber: nextNumber) }
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { close() } }.disabled(busy)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     // Navigation only: the total is in the bar under the form, and a long amount or a
@@ -149,11 +155,11 @@ struct InvoiceFormView: View {
                 message: existing == nil ? "Laskua ei ole vielä luotu." : "Muutoksia ei ole tallennettu.",
                 confirmTitle: "Hylkää muutokset",
                 // Kept in memory: "Uusi lasku" opens with it again.
-                secondary: existing == nil ? ConfirmRequest.Action(title: "Säilytä luonnos ja sulje", run: { dismiss() }) : nil,
+                secondary: existing == nil ? ConfirmRequest.Action(title: "Säilytä luonnos ja sulje", run: { close() }) : nil,
                 cancelTitle: "Jatka muokkausta"
             ) {
                 if existing == nil, let owner { SalesDraftStore.shared.clear(owner: owner) }
-                dismiss()
+                close()
             }
             .sheet(isPresented: $showNewCustomer) {
                 CustomerFormSheet(existing: nil) { created in addCreatedCustomer(created) }
@@ -671,6 +677,10 @@ struct InvoiceFormView: View {
         }
     }
 
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
+    }
+
     private func save() async {
         guard !busy else { return }
         focus = nil
@@ -705,7 +715,7 @@ struct InvoiceFormView: View {
             // Saved: nothing left to lose, so the sheet may close without asking.
             baseline = snapshot
             Haptics.success()
-            dismiss()
+            close()
         } catch {
             failure = error.userMessage
             Haptics.error()
