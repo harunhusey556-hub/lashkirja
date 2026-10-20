@@ -420,6 +420,15 @@ public struct ReceiptForm: Sendable, Equatable {
         return errors
     }
 
+    /// The error highest on the capture form, in the order it shows the fields: what a failed save
+    /// scrolls to, since the save is pinned under the form and the rows below it are out of sight.
+    public func firstErrorKey(in errors: [String: String]) -> String? {
+        let order = ["vendor", "date", "totalAmount", "originalAmount", "category"]
+            + vatRows.indices.map { "vat-\($0)" }
+            + ["reference", "invoiceNumber", "notes"]
+        return order.first { errors[$0] != nil } ?? errors.keys.sorted().first
+    }
+
     /// What to send for this form compared with the receipt as loaded.
     public func makePatch(baseline: ReceiptForm, expectedUpdatedAt: String?) -> ReceiptPatchOutcome {
         var errors = fieldErrors()

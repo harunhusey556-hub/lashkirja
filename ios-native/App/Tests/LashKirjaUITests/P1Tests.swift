@@ -170,6 +170,8 @@ final class P1Tests: WalkTestCase {
         guard onTop("Lasku 2", "P1 12") else { return }
         let customer = app.buttons["Kauneus Oy"].firstMatch
         XCTAssertTrue(customer.waitForExistence(timeout: 15), "Lasku 2 does not name its customer")
+        // Once the pushed invoice holds still: a tap during the push stayed on Lasku 2 (UI suite 39326372755).
+        waitStill(customer)
         customer.tap(); taps += 1
         guard onTop("Kauneus Oy", "P1 12") else { return }
         let other = app.buttons.matching(NSPredicate(format: "label MATCHES %@ AND NOT (label BEGINSWITH %@)", "Lasku [0-9]+.*", "Lasku 2"))
