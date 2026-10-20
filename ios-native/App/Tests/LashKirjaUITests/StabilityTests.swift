@@ -594,10 +594,17 @@ final class StabilityTests: WalkTestCase {
         XCTAssertEqual(chips.frame.minY, before, accuracy: 1, "the chips moved when picking ended")
         backToBooks("Kuitit")
 
-        // Ostolaskut: the CI seed's rent bill, filed as an ostolasku.
+        // Ostolaskut: the CI seed's rent bill, filed as an ostolasku. Valitse is in Toiminnot from
+        // the first frame (B6) and picks once the bills are in, which the Toistuvat row's count comes with.
         openHubRow("Ostolaskut")
-        let pick = app.navigationBars["Ostolaskut"].buttons["Valitse"].firstMatch
-        guard pick.waitForExistence(timeout: 15) else { dump(app, "stability-14-ostolaskut"); XCTFail("Ostolaskut has no Valitse"); return }
+        let purchases = app.navigationBars["Ostolaskut"]
+        let purchaseActions = purchases.buttons["Toiminnot"].firstMatch
+        guard purchaseActions.waitForExistence(timeout: 15), purchasesLoaded(under: purchases) else {
+            dump(app, "stability-14-ostolaskut"); XCTFail("Ostolaskut has no Toiminnot, or its bills did not arrive"); return
+        }
+        purchaseActions.tap(); taps += 1
+        let pick = app.buttons["Valitse"].firstMatch
+        guard pick.waitForExistence(timeout: 5), pick.isEnabled else { dump(app, "stability-14-ostolaskut"); XCTFail("Ostolaskut has no Valitse"); return }
         pick.tap(); taps += 1
         guard tapLabel("label CONTAINS %@", "Kiinteistö Oy Kauppakatu 1") else {
             dump(app, "stability-14-ostolaskut-no-row"); XCTFail("Ostolaskut: no Kiinteistö Oy Kauppakatu 1 row to pick"); return
@@ -680,6 +687,127 @@ final class StabilityTests: WalkTestCase {
         openHubRow("Ostolaskut")
         assertChipsHoldStill("purchase-chips", "Ostolaskut", counted: true)
         app.scrollViews.matching(identifier: "purchase-chips").firstMatch.buttons.element(boundBy: 0).tap(); taps += 1
+    }
+
+    /// M072 M074 (B6): Ostolaskut's bar holds '+' and Toiminnot from the push to the settled page. It
+    /// held Valitse, which came with the bills and moved the bar, and a repeat icon that opened the
+    /// screen the 'Toistuvat ostolaskut' row opens; that row came with the list and pushed it down.
+    /// Toiminnot holds Valitse and 'Hae ostolaskujen maksut pankista', which is no longer a row.
+    func test28_PurchasesBarIsFixed() {
+        openHubRow("Ostolaskut")
+        let bar = app.navigationBars["Ostolaskut"]
+        // At push, read first: the row is in the list (under the bar), not a bar item.
+        let recurring = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Toistuvat ostolaskut"))
+        let rowAtPush = recurring.allElementsBoundByIndex.contains { $0.frame.minY >= bar.frame.maxY - 1 }
+        assertPurchasesBar(bar, "at push")
+        XCTAssertTrue(rowAtPush, "at push: no Toistuvat ostolaskut row in the list")
+        guard purchasesLoaded(under: bar) else {
+            dump(app, "stability-28-not-loaded"); XCTFail("the Toistuvat ostolaskut row never showed its count"); return
+        }
+        assertPurchasesBar(bar, "after the load")
+        shot("stability-ostolaskut-bar")
+        XCTAssertFalse(app.buttons["Hae ostolaskujen maksut pankista"].exists, "the list still has its own Hae ostolaskujen maksut pankista row")
+        bar.buttons["Toiminnot"].firstMatch.tap(); taps += 1
+        let valitse = app.buttons["Valitse"].firstMatch
+        XCTAssertTrue(valitse.waitForExistence(timeout: 5) && valitse.isHittable, "Toiminnot has no Valitse")
+        XCTAssertTrue(valitse.isEnabled, "Valitse is off with the bills in")
+        XCTAssertTrue(app.buttons["Hae ostolaskujen maksut pankista"].firstMatch.isHittable, "Toiminnot has no Hae ostolaskujen maksut pankista")
+        dump(app, "stability-28-menu")
+    }
+
+    /// M071 (B6): Pankkiyhteys ja tilit opens in its final shape. It opened on a spinner, and 'Saldo
+    /// yhteensä' and 'Kirjanpidon tilit' came in a beat later and pushed the page down 226 pt: too
+    /// soon for a look from here, so the app says what its first frame was built from (`-LKUITest`).
+    /// The first visit may draw the greyed shape; the second opens on what the first painted.
+    func test29_BankAccountsFirstFrame() {
+        app.terminate()
+        app.launchArguments.append("-LKUITest")
+        launchSignedIn()
+        dismissSystemPrompts()
+        openHubRow("Pankki")
+        guard let first = openBankAccounts(1) else { return }
+        XCTAssertTrue(["valmis", "paikka"].contains(first), "visit 1: the first frame did not show Saldo yhteensä (\(first))")
+        guard let settled = assertTotalHolds(1) else { return }
+        shot("stability-pankkiyhteys")
+        app.navigationBars["Pankkiyhteys ja tilit"].buttons["BackButton"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(app.navigationBars["Pankki"].waitForExistence(timeout: 10), "Back did not return to Pankki")
+        guard let second = openBankAccounts(2) else { return }
+        XCTAssertEqual(second, "valmis", "visit 2: the first frame was not the accounts and connections painted on visit 1")
+        _ = assertTotalHolds(2, opensAt: settled)
+    }
+
+    /// Ostolaskut's bar: '+' and Toiminnot beside Back, and no Toistuvat ostolaskut item (M074).
+    private func assertPurchasesBar(_ bar: XCUIElement, _ moment: String, file: StaticString = #filePath, line: UInt = #line) {
+        let items = barItems(bar).sorted()
+        check("ostolaskut bar \(moment): items \(items)", items == ["Toiminnot", "Uusi ostolasku"])
+        XCTAssertEqual(items, ["Toiminnot", "Uusi ostolasku"], "\(moment): the bar's items besides Back", file: file, line: line)
+        XCTAssertFalse(bar.buttons["Toistuvat ostolaskut"].exists, "\(moment): the bar has a Toistuvat ostolaskut item", file: file, line: line)
+    }
+
+    /// Ostolaskut's bills are in: the Toistuvat ostolaskut row, in the list under the bar, shows its
+    /// count, which comes in the same update as the bills.
+    private func purchasesLoaded(under bar: XCUIElement, timeout: TimeInterval = 20) -> Bool {
+        let counted = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Toistuvat ostolaskut, "))
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if counted.allElementsBoundByIndex.contains(where: { $0.frame.minY >= bar.frame.maxY - 1 }) { return true }
+            usleep(250_000)
+        } while Date() < deadline
+        return false
+    }
+
+    /// From Pankki: its first row, once it shows its figure and its consent line (both answers are then
+    /// in hand), opens Pankkiyhteys ja tilit. Returns what the screen's first frame was built from
+    /// ("valmis": the accounts and the connections; "paikka": the greyed shape).
+    private func openBankAccounts(_ visit: Int) -> String? {
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Saldo yhteensä")).firstMatch
+        // "Saldo yhteensä, 1 234,00 €, Tilit, saldot ja pankkiyhteys": the figure (or a dash), then the line.
+        let painted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label MATCHES %@", "Saldo yhteensä, .*(€|–), .+"), object: row)
+        guard row.waitForExistence(timeout: 15), XCTWaiter().wait(for: [painted], timeout: 20) == .completed else {
+            dump(app, "stability-29-pankki-\(visit)"); XCTFail("visit \(visit): Pankki's first row shows no figure and consent line (\(row.exists ? row.label : "no row"))"); return nil
+        }
+        row.tap(); taps += 1
+        guard app.navigationBars["Pankkiyhteys ja tilit"].waitForExistence(timeout: 10) else {
+            dump(app, "stability-29-no-screen-\(visit)"); XCTFail("visit \(visit): Pankkiyhteys ja tilit did not open"); return nil
+        }
+        let opening = app.descendants(matching: .any).matching(identifier: "bank-accounts-opening").firstMatch
+        guard opening.waitForExistence(timeout: 5) else {
+            dump(app, "stability-29-no-marker-\(visit)")
+            XCTFail("visit \(visit): the screen did not say what its first frame was (a Debug build launched with -LKUITest?)"); return nil
+        }
+        note("INFO stability 29 visit \(visit): first frame \(opening.label)")
+        return opening.label
+    }
+
+    /// Saldo yhteensä on Pankkiyhteys ja tilit (its LabeledContent row, not Pankki's first row).
+    private func bankAccountsTotal() -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "bank-accounts-total").firstMatch
+    }
+
+    /// Saldo yhteensä is on screen now (at `opensAt`, where an earlier visit left it) and stays at the
+    /// same height once the server's accounts and connections are in. Returns its settled minY.
+    private func assertTotalHolds(_ visit: Int, opensAt expected: CGFloat? = nil,
+                                  file: StaticString = #filePath, line: UInt = #line) -> CGFloat? {
+        let total = bankAccountsTotal()
+        guard total.exists else {
+            dump(app, "stability-29-no-total-\(visit)")
+            XCTFail("visit \(visit): no Saldo yhteensä on Pankkiyhteys ja tilit", file: file, line: line); return nil
+        }
+        let before = total.frame.minY
+        if let expected {
+            XCTAssertEqual(before, expected, accuracy: 1, "visit \(visit): Saldo yhteensä opened at \(before), an earlier visit ended at \(expected)",
+                           file: file, line: line)
+        }
+        let opening = app.descendants(matching: .any).matching(identifier: "bank-accounts-opening").firstMatch
+        let loaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ladattu"), object: opening)
+        XCTAssertEqual(XCTWaiter().wait(for: [loaded], timeout: 20), .completed, "visit \(visit): the accounts and the connections did not load",
+                       file: file, line: line)
+        waitStill(total)
+        let after = total.frame.minY
+        note("INFO stability 29 visit \(visit): Saldo yhteensä at \(before) on opening, \(after) once loaded")
+        XCTAssertEqual(after, before, accuracy: 1, "visit \(visit): Saldo yhteensä moved from \(before) to \(after) when the connections loaded",
+                       file: file, line: line)
+        return after
     }
 
     /// The first picked-mode row of a list on screen below `top`, not under the bottom of the

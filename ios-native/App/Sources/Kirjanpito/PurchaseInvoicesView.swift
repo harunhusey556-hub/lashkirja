@@ -11,7 +11,8 @@ struct PurchaseInvoicesView: View {
     @State private var counts: PurchaseStatusCounts?
     /// Invoice id → its recurring template, for the "Toistuva" tag.
     @State private var recurringIds: [String: String] = [:]
-    /// Running recurring templates; nil until known, or while the server lacks the feature.
+    /// Running recurring templates; nil until known, or while the server lacks the feature (the row
+    /// then shows no count).
     @State private var recurringCount: Int?
     @State private var message: String?
     @State private var failure: String?
@@ -47,38 +48,39 @@ struct PurchaseInvoicesView: View {
 
     var body: some View {
         List {
+            if let banner = state.banner {
+                Section { RefreshFailureBanner(failure: banner, retry: load) }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+            }
+            recurringSection
             if let list = state.value {
-                if let banner = state.banner {
-                    Section { RefreshFailureBanner(failure: banner, retry: load) }
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets())
-                }
                 content(list)
-            } else {
+            } else if state.failure != nil {
                 ScreenStateView(state: state, retry: load) { (_: PurchaseInvoiceList) in EmptyView() }
                     .listRowBackground(Color.clear)
+            } else {
+                placeholder
             }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
         .navigationTitle("Ostolaskut")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                if selection.isActive {
+            if selection.isActive {
+                ToolbarItem(placement: .topBarLeading) {
                     let ids = shownInvoices.map(\.id)
                     Button(selection.allSelected(ids) ? "Poista valinnat" : "Valitse kaikki") { selection.toggleAll(ids) }
                 }
             }
+            // Toiminnot and '+' from the first frame (M074): Valitse came with the rows and moved the
+            // bar under the owner's thumb, and a repeat icon opened the screen the first row opens.
             ToolbarItem(placement: .topBarTrailing) {
                 if selection.isActive {
                     Button("Valmis") { selection.end() }
-                } else if !shownInvoices.isEmpty {
-                    Button("Valitse") { selection.begin() }
+                } else {
+                    actionsMenu
                 }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink(value: Route.recurringPurchases) { Image(systemName: "repeat") }
-                    .accessibilityLabel(RecurringPurchaseText.title)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showNew = true } label: { Image(systemName: "plus") }
@@ -144,6 +146,8 @@ struct PurchaseInvoicesView: View {
             )
         }
         .motion(.snappy, value: filter)
+        // The grey shape gives way to the bills eased, as ScreenStateView's swap does: not a cut.
+        .motion(.snappy, value: state.value == nil)
     }
 
     @ViewBuilder
@@ -153,27 +157,13 @@ struct PurchaseInvoicesView: View {
         let visibleCount = rows.count
         let noPurchases = visibleCount == 0 && filter == .all
 
-        if let recurringCount {
-            Section {
-                NavigationLink(value: Route.recurringPurchases) {
-                    HStack {
-                        Label(RecurringPurchaseText.title, systemImage: "repeat")
-                        Spacer()
-                        Text(RecurringPurchaseText.countLabel(recurringCount)).font(.subheadline).foregroundStyle(Theme.ink2)
-                    }
-                }
-            }
-        }
-
         if !noPurchases {
             if let aging = list.aging {
                 Section { summary(aging) }
             }
-            Section {
-                Button { Task { await runBankMatch() } } label: {
-                    Label("Hae ostolaskujen maksut pankista", systemImage: "arrow.left.arrow.right")
-                }
-                if !suggestions.isEmpty {
+            // "Hae ostolaskujen maksut pankista" is in Toiminnot; what it found waits here.
+            if !suggestions.isEmpty {
+                Section {
                     Button { showSuggestions = true } label: {
                         HStack {
                             Label("Maksuehdotukset", systemImage: "link")
@@ -185,9 +175,9 @@ struct PurchaseInvoicesView: View {
                         }
                     }
                     .accessibilityHint("Hyväksy tai hylkää ehdotetut maksut")
+                } footer: {
+                    Text("Kohdistaa pankin lähtevät maksut ostolaskuihin viitenumerolla. Summan ja toimittajan perusteella löytyneet ovat ehdotuksia.")
                 }
-            } footer: {
-                Text("Kohdistaa pankin lähtevät maksut ostolaskuihin viitenumerolla. Summan ja toimittajan perusteella löytyneet ovat ehdotuksia.")
             }
         }
 
@@ -248,6 +238,93 @@ struct PurchaseInvoicesView: View {
                     .font(.caption).foregroundStyle(Theme.ink2)
             }
             .listRowBackground(Color.clear)
+        }
+    }
+
+    /// Toistuvat ostolaskut, the screen's one way there: on screen from the first frame, its count
+    /// greyed until the first answer. It came with the list and pushed it down (M072).
+    private var recurringSection: some View {
+        Section {
+            NavigationLink(value: Route.recurringPurchases) {
+                HStack {
+                    Label(RecurringPurchaseText.title, systemImage: "repeat")
+                    Spacer()
+                    if let recurringCount {
+                        Text(RecurringPurchaseText.countLabel(recurringCount)).font(.subheadline).foregroundStyle(Theme.ink2)
+                    } else if state.value == nil && state.failure == nil {
+                        Text(RecurringPurchaseText.countLabel(0)).font(.subheadline)
+                            .redacted(reason: .placeholder)
+                            .accessibilityHidden(true)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Toiminnot: Valitse and the bank match. Always both, so the menu keeps its shape when the rows
+    /// arrive; nothing to pick without them.
+    private var actionsMenu: some View {
+        Menu {
+            Button { selection.begin() } label: { Label("Valitse", systemImage: "checkmark.circle") }
+                .disabled(shownInvoices.isEmpty)
+            Button { Task { await runBankMatch() } } label: {
+                Label("Hae ostolaskujen maksut pankista", systemImage: "arrow.left.arrow.right")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle").tapTarget()
+        }
+        .accessibilityLabel("Toiminnot")
+    }
+
+    /// The page's shape until the first answer (cached or the server's): the summary card, the
+    /// chips and grey rows where the bills will be. The list then fills the space it already had
+    /// instead of growing out of a spinner (M072).
+    @ViewBuilder private var placeholder: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Avoinna").font(.caption).foregroundStyle(Theme.ink2)
+                    Text("0 000,00 €").font(.title2.weight(.semibold))
+                }
+                HStack(spacing: 0) {
+                    ForEach(PurchaseInvoiceList.Aging.overdueBuckets, id: \.self) { bucket in
+                        VStack(spacing: 2) {
+                            Text("\(bucket) pv").font(.caption2).foregroundStyle(Theme.ink2)
+                            Text("000,00 €").font(.caption.weight(.medium))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+            .redacted(reason: .placeholder)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Ladataan")
+        }
+        Section {
+            chips.listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+        }
+        .chipRowSection()
+        Section {
+            ForEach(0..<6, id: \.self) { _ in
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Toimittaja Oy").foregroundStyle(Theme.ink)
+                        Text("Eräpäivä 12.10.2026").font(.caption).foregroundStyle(Theme.ink2)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("124,00 €").font(.subheadline.weight(.semibold))
+                        PurchaseStatusBadge(status: .open)
+                    }
+                }
+                .padding(.vertical, 2)
+                .redacted(reason: .placeholder)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Ladataan")
+            }
+        } header: {
+            Text(filter.label)
         }
     }
 
@@ -426,7 +503,8 @@ struct PurchaseInvoicesView: View {
             recurringIds = tagged.recurringIds
             failure = nil
             if let response = fresh.counts { counts = response.counts }
-            recurringCount = fresh.recurring.map { $0.activeCount }
+            // A count once known stays when a later answer fails: the row keeps what it said.
+            if let list = fresh.recurring { recurringCount = list.activeCount }
             if let list = fresh.pending { suggestions = list.suggestions.filter(\.canAccept) }
             timing.dataReady()
         } catch is CancellationError {
@@ -438,7 +516,7 @@ struct PurchaseInvoicesView: View {
             }
             state.fail(error)
             if let response = await freshCounts { counts = response.counts }
-            recurringCount = await recurring.map { $0.activeCount }
+            if let list = await recurring { recurringCount = list.activeCount }
             if let list = await pending { suggestions = list.suggestions.filter(\.canAccept) }
         }
     }
