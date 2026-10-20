@@ -1,19 +1,22 @@
 """Motion gate over three motion-report.json files (.github/workflows/ios-motion-gate.yml).
 A row is suite/step/check. NEW FAIL = PASS in the baseline and FAIL (or crash) in both PR runs, so
-one noisy run neither fails nor clears a row. FIXED = a real FAIL in the baseline and PASS in both
+one noisy run neither fails nor clears a row; it is listed for the PR's review and does not fail
+the job, as its summary line says. FIXED = a real FAIL in the baseline and PASS in both
 PR runs: a check that saw nothing (NO-MOTION, UNREACHED, SKIPPED, 'n/a (no settle)', no row) never
 fixes anything. NEW MISS = judged (PASS or FAIL) in the baseline and judged in neither PR run: the
 branch lost what the gate could see, so the gate exits 1. So does a walk with no step at all: three
 empty reports compare as equal (F003, run 39355446040: the scripts stopped at once, the job passed).
 usage: motion-gate.py <baseline.json> <pr-run1.json> <pr-run2.json>"""
 import json, sys
-KS = ['intermediate', 'flash', 'shift_video', 'shift_probe']
-MISSES = ['NO-MOTION', 'UNREACHED', 'SKIPPED', 'n/a (no settle)']
+KS = ['intermediate', 'flash', 'shift_video', 'shift_probe', 'stall']
+MISSES = ['NO-MOTION', 'UNREACHED', 'SKIPPED', 'MISS-WINDOW', 'NO-TOUCH', 'n/a (no settle)']
 
 def rows(path):
     out = {}
     for r in json.load(open(path, encoding='utf-8')):
         for k in KS:
+            # A report from before the stall check has no row for it.
+            if k not in r['checks']: continue
             v = r['checks'][k]
             if r.get('crashed'): v = 'CRASH'
             out[(r['suite'], r['id'], k)] = v
@@ -34,7 +37,7 @@ def main(argv):
         print(f"{name}: " + ", ".join(f"{k} {sum(1 for x, v in d.items() if x[2] == k and v == 'FAIL')}" for k in KS)
               + f", crashed {len({x[:2] for x, v in d.items() if v == 'CRASH'})}, steps {len({x[:2] for x in d})}; not judged: "
               + ", ".join(f"{m} {len({x[:2] for x, v in d.items() if v == m})}" for m in MISSES))
-    print(f"\nNEW FAIL (PASS in baseline, FAIL in both PR runs): {len(new)}")
+    print(f"\nNEW FAIL (PASS in baseline, FAIL in both PR runs; listed for review, the job does not fail on it): {len(new)}")
     print(f"FIXED (FAIL in baseline, PASS in both PR runs): {len(fixed)}")
     print(f"NEW MISS (judged in baseline, in neither PR run): {len(miss)}\n")
     empty = [name for name, d in (('baseline', b), ('pr-run1', p1), ('pr-run2', p2)) if not d]

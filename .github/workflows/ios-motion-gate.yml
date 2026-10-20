@@ -1,11 +1,12 @@
 name: iOS motion gate
 
 # PR #14's motion gate (docs/quality/SIMULATOR.md §4). On one runner, one simulator and one demo
-# API: MotionAuditTests on native with the audit instrument laid on (baseline) once, then on this
-# branch twice. Before every walk the demo DB is seeded afresh, the app is uninstalled and the API
-# is warmed, so no walk inherits another's data or cache. scripts/sim/motion-gate.py: a row is
-# NEW FAIL when it PASSes in the baseline and FAILs in both branch runs, and NEW MISS when the
-# baseline judged it and neither branch run did; a NEW MISS fails the job.
+# API: a warm-up walk whose results are dropped, then MotionAuditTests on native with the audit
+# instrument laid on (baseline) once, then on this branch twice. Before every walk the demo DB is
+# seeded afresh, the app is uninstalled and the API is warmed, so no walk inherits another's data
+# or cache. scripts/sim/motion-gate.py: a row is NEW FAIL when it PASSes in the baseline and FAILs
+# in both branch runs, and NEW MISS when the baseline judged it and neither branch run did; a NEW
+# MISS fails the job, a NEW FAIL is listed for the PR's review.
 # Artifact motion-gate-<suite>: {baseline,pr-run1,pr-run2}/motion-report.{json,md} and gate.md.
 on:
   push:
@@ -138,6 +139,11 @@ jobs:
             echo "::endgroup::"
           }
           mkdir -p "$OUT"
+          # The freshly booted simulator's first walk ran cold (12 s main-thread stalls, first-run
+          # system prompts) and was always the baseline, so the gate reported noise as fixed (M000,
+          # M087). A walk of the same suite takes that first, and its results are dropped.
+          walk warm-up "$RUNNER_TEMP/baseline"
+          rm -rf "$OUT/warm-up"
           walk baseline "$RUNNER_TEMP/baseline"
           walk pr-run1 "$GITHUB_WORKSPACE"
           walk pr-run2 "$GITHUB_WORKSPACE"
@@ -159,6 +165,7 @@ jobs:
             motion-gate/*/*/notes.txt
             motion-gate/*/*/steps.json
             motion-gate/*/*/probe.log
+            motion-gate/*/*/xcui.log
             motion-gate/*/*/sheet-*.png
       - uses: actions/upload-artifact@v4
         if: always()

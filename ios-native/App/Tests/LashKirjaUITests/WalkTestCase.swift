@@ -169,10 +169,14 @@ class WalkTestCase: XCTestCase {
             last = now
         }
     }
+    /// Pressed 0.1 s, dragged slowly and held 0.3 s before the release, so where the finger stops
+    /// decides the pop: let go while moving fast, the interactive pop was cancelled at about 46 % on
+    /// the slow simulator and the walk went on on the screen it meant to leave (M001).
     func edgeSwipeBack() {
         let w = app.windows.firstMatch
         w.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
-            .press(forDuration: 0.05, thenDragTo: w.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+            .press(forDuration: 0.1, thenDragTo: w.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)),
+                   withVelocity: .slow, thenHoldForDuration: 0.3)
     }
     /// Drags a sheet down by its navigation bar (the grab area), like a thumb would.
     func swipeSheetDown(_ title: String) {
