@@ -255,6 +255,8 @@ private struct Report: Decodable, Equatable { let n: Int; let extra: String? }
         #expect(requests.contains(PrefetchRequest(path: "/api/receipts/counts", query: ReceiptListQuery.pendingCountQuery, persist: false)))
         #expect(requests.contains(PrefetchRequest(path: "/api/reports/profit-loss", query: ["from": "2026-01", "to": "2026-12"], persist: false)))
         #expect(requests.contains(PrefetchRequest(path: "/api/ai/chat", persist: false)))
+        // The assistant opens on its status too (M068), kept in memory only.
+        #expect(requests.contains(PrefetchRequest(path: "/api/ai/status", persist: false)))
         // "+" → "Uusi myyntilasku" opens from Koti on these (InvoiceFormPreview), not only from Myynti.
         #expect(requests.contains(PrefetchRequest(path: "/api/customers", persist: false)))
         #expect(requests.contains(PrefetchRequest(path: "/api/catalog", persist: false)))

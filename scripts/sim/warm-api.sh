@@ -23,3 +23,6 @@ for p in /api/bootstrap /api/auth/me /api/sync/version /api/profile /api/onboard
 inv=$(curl -s -H "authorization: Bearer $tok" "$B/api/invoices" | $PY -c 'import json,sys; print(json.load(sys.stdin)["invoices"][0]["id"])')
 cus=$(curl -s -H "authorization: Bearer $tok" "$B/api/customers" | $PY -c 'import json,sys; print(json.load(sys.stdin)["customers"][0]["id"])')
 for p in "/api/invoices/$inv" "/api/invoices/$inv/reminders" "/api/invoices/$inv/payments" "/api/customers/$cus"; do get "$p"; done
+# The warm-up's own session goes: the Laitteet walk lists every live session as a device.
+curl -s -o /dev/null -w "%{http_code} %{time_total}s POST /api/auth/logout\n" --max-time 120 -X POST \
+  -H "authorization: Bearer $tok" -H 'accept: application/json' "$B/api/auth/logout"
