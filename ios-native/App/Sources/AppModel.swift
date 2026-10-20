@@ -539,6 +539,8 @@ final class AppModel {
             // Koti is painted: the other tabs' first screens next, before the owner taps them.
             guard !Task.isCancelled else { return }
             await self.warmAll(NextPrefetch.afterKoti(month: MonthKey.current()))
+            // For a walk that opens one of these screens on its cache (P4Tests: the assistant).
+            UITestHooks.mark("afterKoti")
             await self.primePainted(replacing: true)
         }
     }

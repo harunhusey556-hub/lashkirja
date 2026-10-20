@@ -91,8 +91,9 @@ public enum LaunchPrefetch {
 /// `ResourceCache` and refreshes in place. Kept in memory only; the launch lists are the ones on disk.
 public enum NextPrefetch {
     /// With Koti on screen: Myynti's list and chip counts, the Kirjanpito hub's waiting count,
-    /// Raportit's year, the assistant's latest conversation, and the new-invoice form's customers
-    /// and catalog: "+" → "Uusi myyntilasku" opens from Koti, and without them the form opened
+    /// Raportit's year, the assistant's latest conversation and status (without the status its
+    /// sheet rose blank and then filled in, M068), and the new-invoice form's customers and
+    /// catalog: "+" → "Uusi myyntilasku" opens from Koti, and without them the form opened
     /// empty and its line came in a frame later (w44).
     public static func afterKoti(month: String) -> [PrefetchRequest] {
         let year = String(month.prefix(4))
@@ -102,6 +103,7 @@ public enum NextPrefetch {
             PrefetchRequest(path: "/api/receipts/counts", query: ReceiptListQuery.pendingCountQuery, persist: false),
             PrefetchRequest(path: "/api/reports/profit-loss", query: ["from": "\(year)-01", "to": "\(year)-12"], persist: false),
             PrefetchRequest(path: "/api/ai/chat", persist: false),
+            PrefetchRequest(path: "/api/ai/status", persist: false),
             PrefetchRequest(path: "/api/customers", persist: false),
             PrefetchRequest(path: "/api/catalog", persist: false),
         ]
