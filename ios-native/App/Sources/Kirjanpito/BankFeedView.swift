@@ -147,10 +147,13 @@ struct BankFeedView: View {
                                     }
                                 }
                                 .padding(.vertical, 4)
+                                .padding(.horizontal, ChipRow.inset)
                             }
+                            .chipRowScroll()
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets())
                         }
+                        .chipRowSection()
                     }
                     Section {
                         ForEach(group.rows.prefix(limit.visible(group.rows.count))) { row in
