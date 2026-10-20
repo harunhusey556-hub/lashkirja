@@ -191,6 +191,14 @@ public struct ReminderPreview: Decodable, Sendable, Hashable {
         return waitNote(now: now)
     }
 
+    /// Where the owner fixes what `blockedReason` names (the web sheet's links); nil while the
+    /// reminder only waits for its date, which nothing on the phone can bring forward.
+    public var blockFix: InvoiceSendFix? {
+        if recipient == nil || recipient?.isEmpty == true { return .customerEmail }
+        if mailboxMissing == true { return .connectMailbox }
+        return nil
+    }
+
     static func instant(_ iso: String) -> Date? {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

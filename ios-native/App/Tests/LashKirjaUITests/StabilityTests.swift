@@ -289,7 +289,8 @@ final class StabilityTests: WalkTestCase {
         // From Myynti, not Koti: Koti's tasks can put the overdue invoice behind "Näytä enemmän".
         XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
         let invoice = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
-        guard tapLabel("label CONTAINS %@", "· myöhässä"), invoice.waitForExistence(timeout: 20) else {
+        // The row's badge says "Myöhässä" and its line the due date, no longer "myöhässä" too (N6).
+        guard tapLabel("label CONTAINS 'Myöhässä' AND label CONTAINS %@", "· eräpäivä"), invoice.waitForExistence(timeout: 20) else {
             dump(app, "stability-17-no-invoice"); XCTFail("no overdue invoice opened from Myynti"); return
         }
         var under = clippedTexts()
@@ -312,6 +313,103 @@ final class StabilityTests: WalkTestCase {
         under = clippedTexts()
         if pickFromMenu(purchase, "Hyvitä") { assertSheetFits("Hyvitä ostolasku", beyond: under) } else { XCTFail("Ripsitukku Oy: Toiminnot has no Hyvitä") }
         if pickFromMenu(purchase, "Kirjaa maksu") { assertSheetFits("Kirjaa maksu", beyond: under) } else { XCTFail("Ripsitukku Oy: Toiminnot has no Kirjaa maksu") }
+    }
+
+    /// X027 (N6): a customer's own invoice list printed the invoice date with no label ('Lasku 2' over
+    /// '3.9.2026') where Myynti prints the labelled due date ('eräpäivä 3.10.2026'), so one invoice
+    /// read as two days. The customer's row now says what Myynti's says.
+    func test26_CustomerInvoiceRowSaysItsDueDate() {
+        guard let late = overdueInvoice() else { XCTFail("the demo API lists no overdue invoice"); return }
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        let customers = app.navigationBars["Asiakkaat"]
+        guard tapLabel("label == %@", "Asiakkaat"), customers.waitForExistence(timeout: 10) else {
+            dump(app, "stability-26-no-customers"); XCTFail("Myynti > Asiakkaat did not open"); return
+        }
+        let customer = app.navigationBars[late.customer]
+        guard tapLabel("label BEGINSWITH %@", late.customer), customer.waitForExistence(timeout: 15) else {
+            dump(app, "stability-26-no-customer"); XCTFail("Asiakkaat > \(late.customer) did not open"); return
+        }
+        let line = "Lasku \(late.number) · eräpäivä \(late.due)"
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", line)).firstMatch
+        var found = row.waitForExistence(timeout: 10)
+        // The invoices come after the contact rows and the totals.
+        for _ in 0..<4 where !found {
+            app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1
+            found = row.waitForExistence(timeout: 2)
+        }
+        shot("stability-26-customer")
+        if !found { dump(app, "stability-26-customer") }
+        XCTAssertTrue(found, "\(late.customer): no invoice row says '\(line)'")
+        let bare = app.staticTexts.matching(NSPredicate(format: "label == %@", late.issue))
+        XCTAssertEqual(bare.count, 0, "\(late.customer): an invoice row still prints the bare invoice date \(late.issue)")
+    }
+
+    /// X029 (N6): Asiakkaat's "+" opened a menu of Uusi asiakas and Tuo CSV, two taps for the screen's
+    /// primary. One tap on Uusi asiakas opens the form; the import is in Toiminnot.
+    func test27_CustomersPlusAddsOne() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        let customers = app.navigationBars["Asiakkaat"]
+        guard tapLabel("label == %@", "Asiakkaat"), customers.waitForExistence(timeout: 10) else {
+            dump(app, "stability-27-no-customers"); XCTFail("Myynti > Asiakkaat did not open"); return
+        }
+        let add = customers.buttons["Uusi asiakas"]
+        guard add.waitForExistence(timeout: 10) else {
+            dump(app, "stability-27-bar"); XCTFail("Asiakkaat's bar has no Uusi asiakas"); return
+        }
+        add.tap(); taps += 1
+        let form = app.navigationBars["Uusi asiakas"]
+        XCTAssertTrue(form.waitForExistence(timeout: 10), "one tap on Uusi asiakas did not open the form")
+        shot("stability-27-form")
+        form.buttons["Peruuta"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(form.waitForNonExistence(timeout: 10), "Peruuta did not close the untouched form")
+
+        let actions = customers.buttons["Toiminnot"]
+        guard actions.waitForExistence(timeout: 5) else { dump(app, "stability-27-bar"); XCTFail("Asiakkaat's bar has no Toiminnot"); return }
+        actions.tap(); taps += 1
+        let csv = app.buttons["Tuo CSV"].firstMatch
+        guard csv.waitForExistence(timeout: 5) else { dump(app, "stability-27-menu"); XCTFail("Toiminnot has no Tuo CSV"); return }
+        csv.tap(); taps += 1
+        let sheet = app.navigationBars["Tuo asiakkaita"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10), "Toiminnot > Tuo CSV did not open the import sheet")
+        shot("stability-27-import")
+        sheet.buttons["Peruuta"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Peruuta did not close the import sheet")
+    }
+
+    /// The seed's overdue invoice from the demo API: its number, its customer, and its due and
+    /// invoice days as the app prints them. Test values from app/scripts/demo-seed.ts; only ever
+    /// against the throwaway local server (the runner shares the Mac's loopback).
+    private func overdueInvoice() -> (number: Int, customer: String, due: String, issue: String)? {
+        func call(_ path: String, _ body: [String: String]?, _ token: String?) -> [String: Any]? {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:3999\(path)")!)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            if let body {
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "content-type")
+                request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            }
+            if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "authorization") }
+            var result: [String: Any]?
+            let done = DispatchSemaphore(value: 0)
+            URLSession.shared.dataTask(with: request) { data, _, _ in
+                result = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                done.signal()
+            }.resume()
+            _ = done.wait(timeout: .now() + 30)
+            return result
+        }
+        // "2026-10-03" as the app prints a day: "3.10.2026".
+        func shown(_ iso: String) -> String {
+            let parts = iso.prefix(10).split(separator: "-").compactMap { Int($0) }
+            return parts.count == 3 ? "\(parts[2]).\(parts[1]).\(parts[0])" : iso
+        }
+        guard let token = call("/api/auth/token", ["email": "demo@lashkirja.fi", "password": "demo123"], nil)?["token"] as? String,
+              let invoices = call("/api/invoices", nil, token)?["invoices"] as? [[String: Any]],
+              let late = invoices.first(where: { $0["displayStatus"] as? String == "overdue" }),
+              let number = late["number"] as? Int,
+              let customer = (late["customer"] as? [String: Any])?["name"] as? String,
+              let due = late["dueDate"] as? String, let issue = late["issueDate"] as? String else { return nil }
+        return (number, customer, shown(due), shown(issue))
     }
 
     /// The sheet titled `title` has risen: its bar shows the whole title, and the textClipped audit finds no

@@ -338,4 +338,32 @@ class WalkTestCase: XCTestCase {
         XCTAssertTrue(holds(read), "\(step): the band under the bar is not the flat canvas (\(said)): rows show through", file: file, line: line)
         return holds(read)
     }
+
+    /// An action on the open invoice (N6): the screen's one primary when it is that action, else
+    /// the item in the bar's Toiminnot. The tiles under the primary (PDF, Lähetä, Maksu, Kopioi)
+    /// are gone, so the menu is the only other place it is offered.
+    @discardableResult
+    func invoiceAction(_ label: String) -> Bool {
+        let bar = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
+        let menu = bar.buttons["Toiminnot"].firstMatch
+        guard menu.waitForExistence(timeout: 30) else { note("MISS \(label): no invoice with Toiminnot"); return false }
+        let primary = app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
+        if primary.exists && primary.isHittable {
+            primary.tap(); taps += 1
+            return true
+        }
+        menu.tap(); taps += 1
+        // The menu lies over the screen: its item is the last match.
+        let items = app.buttons.matching(NSPredicate(format: "label == %@", label))
+        _ = items.firstMatch.waitForExistence(timeout: 5)
+        guard let item = items.allElementsBoundByIndex.last(where: { $0.isHittable }) else {
+            note("MISS \(label) in Toiminnot")
+            // Closes the menu, so the next step starts from the screen; at the leading edge, which the
+            // trailing menu never reaches.
+            app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap()
+            return false
+        }
+        item.tap(); taps += 1
+        return true
+    }
 }

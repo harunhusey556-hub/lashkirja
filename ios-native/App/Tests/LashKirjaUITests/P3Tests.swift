@@ -29,13 +29,30 @@ final class P3Tests: WalkTestCase {
         tab("Myynti")
         let drafts = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Luonnokset'")).firstMatch
         let before = drafts.waitForExistence(timeout: 10) ? drafts.label : "?"
-        guard tapLabel("label CONTAINS %@", "· myöhässä") || { tab("Koti"); return tapLabel("label CONTAINS %@", "· myöhässä") }() else { return }
-        _ = app.buttons["Kopioi"].waitForExistence(timeout: 30)
+        // Myynti's overdue row: its badge says "Myöhässä", its line the due date (N6, M100).
+        guard tapLabel("label CONTAINS 'Myöhässä' AND label CONTAINS %@", "· eräpäivä")
+                || { tab("Koti"); return tapLabel("label CONTAINS %@", "· myöhässä") }() else { return }
+        _ = app.navigationBars.buttons["Toiminnot"].firstMatch.waitForExistence(timeout: 30)
+        // U045: the failure is said without moving the screen. Its card was inserted above the tabs
+        // and pushed them 94 pt down once the screen had settled.
+        let tabs = app.buttons["Rivit"].firstMatch
+        _ = tabs.waitForExistence(timeout: 10)
+        waitStill(tabs)
+        let tabsBefore = tabs.frame.minY
         goOffline(); sleep(1)
-        guard tap("Kopioi") else { return }
+        // Kopioi luonnokseksi is in Toiminnot (N6): the Kopioi tile is gone.
+        guard invoiceAction("Kopioi luonnokseksi") else { return }
         sleep(4); shot("p3b-copy-offline"); dump(app, "p3b-copy-offline")
         let message = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Kopio' OR label CONTAINS 'yhteys' OR label CONTAINS 'Yhteys'")).firstMatch
         check("P3 failed copy explains what happened (\(message.exists ? message.label : "no message"))", message.exists)
+        let failure = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Yhteys katkesi' OR label BEGINSWITH 'Ei verkkoyhteyttä'")).firstMatch
+        if failure.waitForExistence(timeout: 20) {
+            let moved = tabs.frame.minY - tabsBefore
+            note("INFO P3 tabs at \(tabsBefore), after the failure \(tabs.frame.minY)")
+            XCTAssertLessThanOrEqual(abs(moved), 1, "the failure moved the tabs \(moved) pt: \(failure.label)")
+        } else {
+            XCTFail("the offline copy said no Yhteys katkesi or Ei verkkoyhteyttä")
+        }
         goOnline(); sleep(10)
         app.terminate()
         // The launch every other test takes: it waits for the phase the app settles on. A bare

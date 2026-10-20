@@ -144,6 +144,15 @@ final class MotionAuditTests: WalkTestCase {
         return b.exists && b.isHittable ? b : nil
     }
     func scrollToTop() { app.statusBars.firstMatch.exists ? app.statusBars.firstMatch.tap() : (); sleep(1) }
+    /// An item of the bar's Toiminnot, the menu opened before the recording; nil, the menu closed
+    /// again, when it has no such item. The invoice's actions live there besides its primary (N6).
+    func menuItem(_ label: String) -> XCUIElement? {
+        guard press(find("label == %@", "Toiminnot", scrolls: 0)) else { return nil }
+        if let item = find("label == %@", label, scrolls: 0) { return item }
+        // At the leading edge, which the trailing menu never reaches.
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap()
+        return nil
+    }
 
     /// Tab switch as a recorded step.
     func tabStep(_ id: String, from: String, _ name: String) {
@@ -384,12 +393,14 @@ final class MotionAuditTests: WalkTestCase {
         if let invoice = find("label CONTAINS %@", "Lasku ", scrolls: 4) {
             step("lasku-open", from: "Myynti", to: "Lasku", seconds: 5) { press(invoice) }
             sleep(2)
-            if let pay = find("label == %@", "Maksu", scrolls: 3) {
+            // The primary when the invoice waits for its payment, else a Toiminnot item: the Maksu and
+            // Kopioi tiles are gone (N6).
+            if let pay = find("label == %@", "Kirjaa maksu", scrolls: 0) ?? menuItem("Kirjaa maksu") {
                 step("lasku-payment-sheet", from: "Lasku", to: "Kirjaa maksu", kind: "sheet", seconds: 5) { press(pay) }
                 sleep(1)
                 step("lasku-payment-cancel", from: "Kirjaa maksu", to: "Lasku", kind: "sheet") { press(find("label == %@", "Peruuta", scrolls: 0)) }
             }
-            if let copy = find("label == %@", "Kopioi", scrolls: 3) {
+            if let copy = menuItem("Kopioi luonnokseksi") {
                 step("lasku-copy", from: "Lasku", to: "Uusi lasku (copy)", kind: "sheet", seconds: 5) { press(copy) }
                 sleep(2)
                 step("lasku-copy-cancel", from: "Uusi lasku (copy)", to: "Lasku", kind: "sheet") { press(find("label == %@", "Peruuta", scrolls: 0)) }

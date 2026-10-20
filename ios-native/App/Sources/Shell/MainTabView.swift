@@ -20,8 +20,12 @@ struct MainTabView: View {
                             .motionProbe("tab.\(item)")
                             .toolbar {
                                 ToolbarItemGroup(placement: .topBarTrailing) {
-                                    Button { Perf.beginOpen("chat"); app.prepareChat(); showAssistant = true } label: { Image(systemName: "bubble.left") }
-                                        .accessibilityLabel("Avustaja")
+                                    // On Koti only (Q2, M035): on every root it was one more icon beside
+                                    // each tab's own primary. From another tab it is two taps away.
+                                    if item == .koti {
+                                        Button { Perf.beginOpen("chat"); app.prepareChat(); showAssistant = true } label: { Image(systemName: "bubble.left") }
+                                            .accessibilityLabel("Avustaja")
+                                    }
                                     Button { Perf.beginOpen("asetukset"); showSettings = true } label: { Image(systemName: "person.crop.circle") }
                                         .accessibilityLabel("Asetukset")
                                 }
