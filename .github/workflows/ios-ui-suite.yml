@@ -167,6 +167,11 @@ jobs:
             xcrun xcresulttool get test-results summary --path UITestResults.xcresult --compact > result/summary.json \
               || echo "::warning::xcresulttool summary failed"
           fi
+          # H8: scroll shots that repeat their page, and the x12 pair that must differ, as notes lines.
+          if [ -d ui-shots ]; then
+            python3 ../../scripts/sim/diffshots.py ui-shots x07 x08 x14 x15 --differ x12-asetukset-offline x12-ostolaskut-offline >> ui-shots/notes.txt \
+              || echo "::warning::diffshots found repeated scroll shots (notes.txt)"
+          fi
           cp ui-shots/notes.txt result/notes.txt 2>/dev/null || touch result/notes.txt
           # One line for the suite table: class, passed, failed, skipped, soft-check FAILs (notes.txt).
           python3 - "${{ matrix.class }}" result <<'PY'
