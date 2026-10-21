@@ -66,6 +66,9 @@ final class P0Tests: WalkTestCase {
         let named = message.exists && message.label.hasPrefix("Selain")
         shot("b4-one-confirm")
         check("P0.5 sign out one device asks first (\(asked); names Selain \(named))", asked == "Kirjataanko laite ulos?" && named)
+        // The rows stay in the tree under the question (b2). A destructive swipe took this one off
+        // the list at the tap, before any answer, and Peruuta did not bring it back (run 39538176287).
+        XCTAssertTrue(browser.exists, "the swipe's Kirjaa ulos took the Selain row off the list before the question was answered")
         if cancel.exists { cancel.tap(); taps += 1 }
         XCTAssertTrue(title.waitForNonExistence(timeout: 10), "Peruuta did not close the one-device question")
         XCTAssertTrue(browser.exists, "Peruuta signed the Selain session out")

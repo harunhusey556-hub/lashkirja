@@ -462,8 +462,11 @@ struct DevicesView: View {
                         Text("Käytetty \(InvoiceDetailView.timestamp(s.lastSeenAt ?? s.createdAt))" + (s.trusted == true ? " · Luotettu laite" : ""))
                             .font(.caption).foregroundStyle(Theme.ink2)
                     }
+                    // Not a destructive role: the list animates such a row out at once, before the
+                    // question is answered, and after Peruuta the session still signed in stayed
+                    // off the list (P0 testB, run 39538176287). The fill is the one it had.
                     .swipeActions {
-                        if !s.current { Button("Kirjaa ulos", role: .destructive) { confirmSession = s } }
+                        if !s.current { Button("Kirjaa ulos") { confirmSession = s }.tint(Theme.accentFill) }
                     }
                 }
                 ShowMoreButton(limit: $limit, total: list.count)

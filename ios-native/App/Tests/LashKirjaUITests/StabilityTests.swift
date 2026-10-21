@@ -68,7 +68,9 @@ final class StabilityTests: WalkTestCase {
 
     /// Opens a Kirjanpito hub row ("Kuitit, 28 kuittia") and checks the screen really opened.
     func openHubRow(_ title: String) {
-        tab("Kirjanpito")
+        // Selected, not only tapped: test01's tap came 1 s after 'Not Now' on the password manager's
+        // offer and was lost, and the walk grew Koti's task list as if it were Kuitit (run 39538176287).
+        XCTAssertTrue(selectTab("Kirjanpito"), "Kirjanpito is not selected")
         for _ in 0..<2 where !app.navigationBars[title].exists {
             tapLabel("label BEGINSWITH %@", title)
             _ = app.navigationBars[title].waitForExistence(timeout: 10)

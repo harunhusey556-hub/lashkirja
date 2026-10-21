@@ -2,7 +2,19 @@ import XCTest
 
 /// P4: assistant without an AI provider (the demo server has none), and retry after a lost answer.
 final class P4Tests: WalkTestCase {
-    func openAssistant() { app.buttons["Avustaja"].firstMatch.tap(); taps += 1; sleep(3) }
+    /// Taps Avustaja until its sheet is up, then lets the sheet settle. The first tap after sign-in
+    /// can land while the password manager's 'Save Password?' is still leaving, and is lost: in run
+    /// 39538176287 it came 0.7 s after 'Not Now', the screen never changed again, and testA looked
+    /// for the notice on Koti.
+    func openAssistant() {
+        let sheet = app.navigationBars.buttons["Keskustelut"].firstMatch
+        for _ in 0..<3 where !sheet.exists {
+            dismissSystemPrompts()
+            app.buttons["Avustaja"].firstMatch.tap(); taps += 1
+            _ = sheet.waitForExistence(timeout: 10)
+        }
+        if sheet.exists { waitStill(sheet) }
+    }
     var composer: XCUIElement { app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch }
 
     /// U058: what the name promises, not only a composer: the unavailable note, each shortcut whole
