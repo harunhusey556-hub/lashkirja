@@ -235,11 +235,13 @@ class WalkTestCase: XCTestCase {
     }
     /// Scrolls the screen (each swipe counted) until `element` sits inside the window, as tapLabel
     /// does before it taps, and taps nothing: a task can end on the button that does it.
-    func reveal(_ element: XCUIElement, scrolls maxScrolls: Int = 6) -> Bool {
+    /// `bottomBar` is what covers the window's foot: the tab bar on a tab, only the home
+    /// indicator in a sheet, where a list's last row stops 54 pt above the edge.
+    func reveal(_ element: XCUIElement, scrolls maxScrolls: Int = 6, bottomBar: CGFloat = 60) -> Bool {
         let window = app.windows.firstMatch
         for attempt in 0...maxScrolls {
             if element.waitForExistence(timeout: attempt == 0 ? 3 : 1), element.isHittable,
-               element.frame.minY > 30, element.frame.maxY < window.frame.maxY - 60 { return true }
+               element.frame.minY > 30, element.frame.maxY < window.frame.maxY - bottomBar { return true }
             if attempt < maxScrolls { window.swipeUp(velocity: .slow); scrolls += 1 }
         }
         return false

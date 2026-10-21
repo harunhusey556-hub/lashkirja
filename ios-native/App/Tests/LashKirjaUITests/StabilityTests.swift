@@ -900,7 +900,9 @@ final class StabilityTests: WalkTestCase {
                           "the password field is not empty: the step tests nothing")
             XCTAssertFalse(hint.exists, "\(title): the hint shows before the tap")
             let button = app.buttons[title].firstMatch
-            guard reveal(button, scrolls: 8) else { dump(app, "stability-32-\(index)"); XCTFail("Tietosuoja has no \(title)"); return }
+            // Asetukset is a sheet: the closing request is the list's last row, 54 pt above the
+            // window's foot with no tab bar under it (run 39538188381 dump: 768-820 of 874).
+            guard reveal(button, scrolls: 8, bottomBar: 34) else { dump(app, "stability-32-\(index)"); XCTFail("Tietosuoja has no \(title)"); return }
             button.tap(); taps += 1
             XCTAssertTrue(hint.waitForExistence(timeout: 5), "\(title) with no password did not say 'Kirjoita nykyinen salasana.'")
             XCTAssertFalse(sent.exists, "\(title) with no password sent the request")
