@@ -13,6 +13,11 @@ struct RaportitView: View {
     /// Tulot or Menot by category: one list at a time instead of two stacked (nil = the default).
     @State private var categoryChoice: ReportCategoryKind?
     @State private var categoryLimit = ShowMore()
+    /// Clear room over Kirjanpitopaketti, under Luokittain's rows: what a swap to the shorter list gave
+    /// up at the end of the page, held until it is off screen below (F012, `ListEndHold`).
+    @State private var categoryHold: CGFloat = 0
+    /// Where Luokittain's rows sit and how far the page still scrolls, for a swap to read.
+    @State private var categoryFrames = CategoryFrames()
     /// The month picked on the chart; nil = the latest month with figures.
     @State private var selectedMonth: String?
     /// Reloads after a change elsewhere (`dataVersion`) as well as on another year.
@@ -100,10 +105,25 @@ struct RaportitView: View {
                 .buttonStyle(.primary)
                 .listRowBackground(Color.clear)
             } header: {
+                // Over the title, so the package stays put while the rows above it get shorter.
                 Text("Kirjanpitopaketti")
+                    .padding(.top, categoryHold)
+                    .onAppear { categoryFrames.carrierShown = true }
+                    .onDisappear {
+                        categoryFrames.carrierShown = false
+                        releaseCategoryHold()
+                    }
             } footer: {
                 Text("Lähetä kirjanpitäjälle kuun sulun jälkeen. Zip kuukaudelta, neljännekseltä tai koko vuodelta: tuloslaskelma, ALV, CSV, kohdistukset ja kuitit.")
             }
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            // At its top the page has nothing to clamp, however short it gets.
+            guard geometry.contentOffset.y > 0.5 - geometry.contentInsets.top else { return .infinity }
+            return geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height - geometry.contentOffset.y
+        } action: { _, room in
+            categoryFrames.room = room
+            releaseCategoryHold()
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
@@ -231,7 +251,7 @@ struct RaportitView: View {
             let rows = kind.rows(total)
             if kinds.count > 1 {
                 Section("Luokittain") {
-                    Picker("Luokittain", selection: Binding(get: { kind }, set: { categoryChoice = $0; categoryLimit.reset() })) {
+                    Picker("Luokittain", selection: Binding(get: { kind }, set: { swapCategories(to: $0, from: kind, in: total) })) {
                         ForEach(kinds) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.segmented)
@@ -241,7 +261,12 @@ struct RaportitView: View {
             }
             Section {
                 categories(Array(rows.prefix(categoryLimit.visible(rows.count))), kind: kind)
-                ShowMoreButton(limit: $categoryLimit, total: rows.count)
+                // Measured only while it shows: a swap counts its row with the rows it takes away.
+                if categoryLimit.buttonTitle(total: rows.count) != nil {
+                    ShowMoreButton(limit: $categoryLimit, total: rows.count)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { categoryFrames.button = $0 }
+                        .onDisappear { categoryFrames.button = nil }
+                }
             } header: {
                 // With the picker above, its label already names the list.
                 if kinds.count == 1 { Text("\(kind.title) luokittain") }
@@ -261,7 +286,57 @@ struct RaportitView: View {
                     }
                 }
             }
+            // Off screen a row keeps no place: its last one goes stale as the page scrolls on.
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { categoryFrames.rows[row.id] = $0 }
+            .onDisappear { categoryFrames.rows[row.id] = nil }
         }
+    }
+
+    /// Tulot in place of Menot, or back. At the end of the page the shorter list let the List clamp
+    /// its offset, and the picker with everything above it slid a row down under the finger (F012,
+    /// motion gates 39580643433 and 39636460950: SCROLLJUMP dy=-66, Menot 3 rows to Tulot 2). What
+    /// the page cannot give back from its room below is held over Kirjanpitopaketti instead.
+    private func swapCategories(to next: ReportCategoryKind, from shown: ReportCategoryKind, in total: ProfitLoss.Period) {
+        let rows = shown.rows(total)
+        let visible = rows.prefix(categoryLimit.visible(rows.count))
+        let frames = visible.map { categoryFrames.rows[$0.id].map(Self.measured) }
+        // No two rows on screen: the block starts below it, and the page has all of it as room.
+        if next != shown, let rowHeight = ListEndHold.rowHeight(frames) {
+            let button = categoryLimit.buttonTitle(total: rows.count) != nil
+            let buttonHeight = ListEndHold.buttonHeight(button ? categoryFrames.button.map(Self.measured) : nil,
+                                                        under: frames.last ?? nil, rowHeight: rowHeight)
+            let fresh = ShowMore(step: categoryLimit.step)
+            let count = next.rows(total).count
+            let before = ListEndHold.blockHeight(rows: visible.count, button: button, rowHeight: rowHeight, buttonHeight: buttonHeight)
+            let after = ListEndHold.blockHeight(rows: fresh.visible(count), button: fresh.buttonTitle(total: count) != nil,
+                                                rowHeight: rowHeight, buttonHeight: buttonHeight)
+            categoryHold = CGFloat(ListEndHold.held(before: before, after: after, held: Double(categoryHold), room: Double(categoryFrames.room)))
+        }
+        categoryChoice = next
+        categoryLimit.reset()
+    }
+
+    /// The held room goes once the header that carries it is off screen and the page has that much
+    /// room below it: the page gets shorter out of sight.
+    private func releaseCategoryHold() {
+        guard ListEndHold.canRelease(held: Double(categoryHold), carrierShown: categoryFrames.carrierShown,
+                                     room: Double(categoryFrames.room)) else { return }
+        categoryHold = 0
+    }
+
+    private static func measured(_ frame: CGRect) -> ListEndHold.Frame {
+        ListEndHold.Frame(top: Double(frame.minY), height: Double(frame.height))
+    }
+
+    /// Written on every layout and scroll, so a class: kept in @State, a write re-renders nothing.
+    private final class CategoryFrames {
+        var rows: [String: CGRect] = [:]
+        var button: CGRect?
+        /// How far the page still scrolls down; infinite at its top, where nothing can clamp.
+        var room: CGFloat = .infinity
+        /// Kirjanpitopaketti's header, which carries `categoryHold`, is on screen: taken as so until it
+        /// says it left, so held room never goes while it may still be in sight.
+        var carrierShown = true
     }
 
     /// A figure that opens the rows it is made of (web `DrillFigure`): with one list behind it the

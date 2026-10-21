@@ -1007,6 +1007,104 @@ final class StabilityTests: WalkTestCase {
         return nil
     }
 
+    /// F012: a Luokittain swap at the end of Raportit holds the page still. With the page ending
+    /// under Lataa zip (X078), Menot (3 rows in the --ci seed) to Tulot (2) shrank the page under its
+    /// scroll offset: the List clamped it, and the picker with everything above the rows slid a row
+    /// down under the finger while Lataa zip, at the page's foot, stayed (motion gates 39580643433
+    /// and 39636460950: SCROLLJUMP dy=-66). Back to Menot, Lataa zip fell a row. Away from the end
+    /// nothing is held: Kirjanpitopaketti follows the shorter list up, with no blank room under it.
+    func test33_RaportitCategorySwapHoldsThePage() {
+        XCTAssertTrue(selectTab("Raportit"), "Raportit is not selected")
+        let zip = app.buttons["Lataa zip"].firstMatch
+        guard app.staticTexts["Kuukausittain"].firstMatch.waitForExistence(timeout: 15), reveal(zip, scrolls: 8) else {
+            dump(app, "stability-33-no-zip"); XCTFail("Lataa zip is not hittable on Raportit"); return
+        }
+        // To the end, where the motion walk's fling left the page: only there has the offset nowhere
+        // to go, so one more swipe must move nothing.
+        let window = app.windows.firstMatch
+        window.swipeUp(velocity: .fast); scrolls += 1
+        waitStill(zip)
+        let endY = zip.frame.minY
+        window.swipeUp(velocity: .slow); scrolls += 1
+        waitStill(zip)
+        XCTAssertEqual(zip.frame.minY, endY, accuracy: 1, "Raportit was not at its end: the swaps below would prove nothing")
+        let picker = app.segmentedControls.firstMatch
+        guard picker.exists, picker.isHittable else {
+            dump(app, "stability-33-no-picker"); XCTFail("Luokittain has no picker on screen at the end of Raportit (the seed books Tulot and Menot)"); return
+        }
+        // Shrinking first (the seed opens on Menot, the longer list), then growing back.
+        for pass in 1...2 {
+            let other = picker.buttons.matching(NSPredicate(format: "selected == false")).firstMatch
+            guard other.exists else { dump(app, "stability-33-segment-\(pass)"); XCTFail("pass \(pass): Luokittain has no other segment"); return }
+            let name = other.label
+            let pickerY = picker.frame.minY
+            let zipY = zip.frame.minY
+            other.tap(); taps += 1
+            // Polled through the swap, not read once after it: the clamp landed with the segment's lens.
+            var pickerDrift: CGFloat = 0
+            var zipDrift: CGFloat = 0
+            let deadline = Date().addingTimeInterval(2.5)
+            repeat {
+                pickerDrift = max(pickerDrift, abs(picker.frame.minY - pickerY))
+                zipDrift = max(zipDrift, abs(zip.frame.minY - zipY))
+                usleep(100_000)
+            } while Date() < deadline
+            waitStill(zip)
+            pickerDrift = max(pickerDrift, abs(picker.frame.minY - pickerY))
+            zipDrift = max(zipDrift, abs(zip.frame.minY - zipY))
+            note("INFO stability 33 pass \(pass): to \(name) the picker moved \(pickerDrift) pt, Lataa zip \(zipDrift) pt")
+            XCTAssertTrue(picker.buttons[name].isSelected, "pass \(pass): \(name) is not selected after its tap")
+            XCTAssertLessThanOrEqual(pickerDrift, 1, "pass \(pass): to \(name) the picker moved \(pickerDrift) pt under the finger")
+            XCTAssertLessThanOrEqual(zipDrift, 1, "pass \(pass): to \(name) Lataa zip moved \(zipDrift) pt")
+            XCTAssertTrue(picker.isHittable, "pass \(pass): the picker left the screen after \(name)")
+            shot("stability-33-\(name.lowercased())")
+        }
+
+        // Away from the end, back on Menot: the page has room below to take the shorter list, so no
+        // room is held and the header after the rows sits as far under the last row as before.
+        let header = app.staticTexts["Kirjanpitopaketti"].firstMatch
+        let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", " kpl"))
+        func gapUnderRows() -> CGFloat? {
+            let top = picker.frame.maxY
+            let headerTop = header.frame.minY
+            let bottoms = rows.allElementsBoundByIndex.map(\.frame).filter { $0.minY > top && $0.maxY <= headerTop + 1 }.map(\.maxY)
+            return bottoms.max().map { headerTop - $0 }
+        }
+        guard header.exists else { dump(app, "stability-33-no-header"); XCTFail("Raportit has no Kirjanpitopaketti header"); return }
+        let headerEndY = header.frame.minY
+        // Down by less than the room under the header, so the rows and the header stay on screen.
+        let drag = min(150, window.frame.maxY - 40 - header.frame.maxY)
+        guard drag >= 100 else {
+            dump(app, "stability-33-header-low"); XCTFail("Kirjanpitopaketti sits at \(header.frame.maxY): no room to drag Raportit off its end"); return
+        }
+        // From the rows, clear of the picker, and held before the release, so the page stops where
+        // the finger does instead of gliding on.
+        let from = window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.frame.midX, dy: (picker.frame.maxY + header.frame.minY) / 2))
+        from.press(forDuration: 0.1, thenDragTo: from.withOffset(CGVector(dx: 0, dy: drag)), withVelocity: .slow, thenHoldForDuration: 0.3)
+        scrolls += 1
+        waitStill(header)
+        let away = header.frame.minY - headerEndY
+        let other = picker.buttons.matching(NSPredicate(format: "selected == false")).firstMatch
+        // More than the row Tulot is short of Menot (66 pt): the page then has room to give it back.
+        guard away >= 90, other.exists, let gap = gapUnderRows() else {
+            dump(app, "stability-33-away"); XCTFail("away from the end: Raportit moved \(away) pt, or Luokittain shows no other segment or no rows"); return
+        }
+        let name = other.label
+        let pickerY = picker.frame.minY
+        let headerBefore = header.frame.minY
+        other.tap(); taps += 1
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: picker.buttons[name])
+        XCTAssertEqual(XCTWaiter().wait(for: [selected], timeout: 5), .completed, "away: \(name) is not selected after its tap")
+        waitStill(header)
+        guard let after = gapUnderRows() else { dump(app, "stability-33-away-after"); XCTFail("away: no rows under Luokittain after \(name)"); return }
+        note("INFO stability 33 away \(away) pt: to \(name) the gap under the rows went \(gap) -> \(after) pt, the header moved \(header.frame.minY - headerBefore) pt")
+        XCTAssertLessThan(header.frame.minY, headerBefore - 30, "away: \(name) did not make the list shorter, so the gap check proves nothing")
+        XCTAssertEqual(after, gap, accuracy: 1, "away from the end, \(name) left \(after - gap) pt of blank room under its last row")
+        XCTAssertEqual(picker.frame.minY, pickerY, accuracy: 1, "away from the end, the picker moved on the swap to \(name)")
+        shot("stability-33-away-\(name.lowercased())")
+    }
+
     static let monthNames = ["Tammikuu", "Helmikuu", "Maaliskuu", "Huhtikuu", "Toukokuu", "Kesäkuu",
                              "Heinäkuu", "Elokuu", "Syyskuu", "Lokakuu", "Marraskuu", "Joulukuu"]
 
