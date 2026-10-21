@@ -59,19 +59,21 @@ struct PrivacyView: View {
                 Text("Nykyinen salasana vahvistaa, että pyyntö tulee sinulta. Tuki käsittelee pyynnön ja ilmoittaa sinulle sähköpostilla.")
             }
 
+            // Live without a password: a tap says what is missing. Disabled, both rows still looked
+            // live and a tap did nothing (X154).
             Section {
                 Button {
-                    Task { await send(.export) }
+                    if requirePassword() { Task { await send(.export) } }
                 } label: {
                     row("Pyydä kopio tiedoista", busy: busy == .export, symbol: "square.and.arrow.down")
                 }
-                .disabled(password.isEmpty || busy != nil)
+                .disabled(busy != nil)
                 Button(role: .destructive) {
                     if requirePassword() { confirmClose = true }
                 } label: {
                     row("Pyydä tilin sulkemista", busy: busy == .close, symbol: "person.crop.circle.badge.xmark")
                 }
-                .disabled(password.isEmpty || busy != nil)
+                .disabled(busy != nil)
             } footer: {
                 if let formError {
                     Text(formError).foregroundStyle(Theme.danger)

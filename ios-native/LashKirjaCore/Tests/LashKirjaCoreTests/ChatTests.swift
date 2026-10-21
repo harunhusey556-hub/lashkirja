@@ -23,6 +23,14 @@ private func fixture(_ name: String) throws -> Data {
     #expect(try ChatEvent.parse(#"{"incomplete":true,"status":"busy","error":"Odota hetki"}"#) == .failed("Odota hetki"))
 }
 
+/// U055: the first frame names the conversation as the server stored it with the question, so
+/// the open sheet takes the name at once; an older server's frame has none.
+@Test func streamStartCarriesTheStoredTitle() throws {
+    #expect(try ChatEvent.parse(#"{"conversationId":"c1","userMessageId":"m1","title":"Paljonko myyntiä tässä kuussa?"}"#)
+            == .started(conversationId: "c1", title: "Paljonko myyntiä tässä kuussa?"))
+    #expect(try ChatEvent.parse(#"{"conversationId":"c1","userMessageId":"m1"}"#) == .started(conversationId: "c1", title: nil))
+}
+
 @Test func sseFinishFlushesTrailingEvent() {
     var p = SSEParser()
     #expect(p.feed(Data("data: last".utf8)).isEmpty)

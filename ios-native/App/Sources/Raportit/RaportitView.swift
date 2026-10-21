@@ -140,10 +140,13 @@ struct RaportitView: View {
         }
         .onChange(of: year) { _, _ in categoryLimit.reset() }
         .sheet(isPresented: $showPackage) {
-            DocumentPreviewSheet(path: "/api/export/package", query: ["month": packagePeriod], fileName: "kirjanpito-\(packagePeriod).zip")
+            DocumentPreviewSheet(path: "/api/export/package", query: ["month": packagePeriod], fileName: "kirjanpito-\(packagePeriod).zip",
+                                 shareTitle: "Jaa kirjanpitäjälle")
         }
         .sheet(item: $export) { kind in
-            DocumentPreviewSheet(path: "/api/export", query: ["type": kind.type, "year": String(year)], fileName: "\(kind.type)-\(year).csv")
+            // Titled in words; the file keeps the server's name (tuloslaskelma-2026.csv), X084.
+            DocumentPreviewSheet(path: "/api/export", query: ["type": kind.type, "year": String(year)], fileName: "\(kind.type)-\(year).csv",
+                                 title: "\(kind.title) \(year)")
         }
     }
 

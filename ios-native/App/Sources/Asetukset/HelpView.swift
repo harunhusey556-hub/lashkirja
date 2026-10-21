@@ -1,12 +1,10 @@
 import SwiftUI
-import UIKit
 import LashKirjaCore
 
-/// Ohje ja tuki (/asetukset/ohje): how the app works, a problem report with a
-/// support code, the build, and the way to Tuonnit ja virheet.
+/// Ohje ja tuki (/asetukset/ohje): how the app works, the way to Ilmoita ongelmasta, the build,
+/// and the way to Tuonnit ja virheet.
 struct HelpView: View {
     @State private var reference = HelpContent.reference(build: HelpView.build)
-    @State private var copied = false
 
     /// "1.0.0 (7)" from the bundle.
     static var build: String {
@@ -16,6 +14,12 @@ struct HelpView: View {
         return "\(version) (\(number))"
     }
 
+    /// A support address, when a build names one (Info.plist LKSupportEmail). None does yet, and the
+    /// footer then stays away rather than telling the owner that it is missing (X150).
+    static var supportAddress: String? {
+        (Bundle.main.object(forInfoDictionaryKey: "LKSupportEmail") as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
     var body: some View {
         List {
             Section {
@@ -23,18 +27,13 @@ struct HelpView: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.ink)
                     .padding(.vertical, 4)
-                ShareLink(item: HelpContent.reportText(reference: reference), subject: Text("LashKirja-ongelma")) {
-                    Label("Ilmoita ongelmasta", systemImage: "exclamationmark.bubble")
-                }
-                Button {
-                    UIPasteboard.general.string = reference
-                    Haptics.success()
-                    copied = true
-                } label: {
-                    Label(copied ? "Tukikoodi kopioitu" : "Kopioi tukikoodi", systemImage: copied ? "checkmark" : "doc.on.doc")
+                // The screen the Asetukset row opens, which sends the event log and gives a code: the
+                // share sheet here sent a message nobody could trace, beside a second accent action (X151).
+                NavigationLink { ReportProblemView() } label: {
+                    Label("Ilmoita ongelmasta", systemImage: "ladybug")
                 }
             } footer: {
-                Text(HelpContent.supportLine(nil))
+                if let address = Self.supportAddress { Text(HelpContent.supportLine(address)) }
             }
 
             ForEach(HelpContent.sections) { section in

@@ -161,10 +161,32 @@ final class StabilityTests: WalkTestCase {
         assertWarmCanvas(app, under: app.navigationBars["Ilmoita ongelmasta"], "ilmoita ongelmasta")
         let field = app.textFields.firstMatch.exists ? app.textFields.firstMatch : app.textViews.firstMatch
         if field.waitForExistence(timeout: 10) { type(field, "Simulaattoritesti") }
-        tap("Lähetä ilmoitus"); sleep(3)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Ilmoitus tallennettu")).firstMatch.waitForExistence(timeout: 10),
+        tap("Lähetä ilmoitus")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Ilmoitus tallennettu")).firstMatch.waitForExistence(timeout: 15),
                       "no confirmation code after sending")
+        // U081: the keyboard leaves with the sent note. It stayed up over the code's line and
+        // 'Kopioi koodi', which showed only as a red blur behind the suggestion bar.
+        let keyboardGone = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.keyboards.firstMatch)], timeout: 5)
+        XCTAssertEqual(keyboardGone, .completed, "the keyboard stayed up after the report was sent")
+        let copy = app.buttons["Kopioi koodi"].firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 5) && copy.isHittable, "Kopioi koodi is not hittable after sending")
         shot("stability-report")
+
+        // X150 X151: Ohje's 'Ilmoita ongelmasta' opens this same screen, not a share sheet beside a
+        // 'Kopioi tukikoodi', and Ohje no longer says that the support address is missing.
+        let report = app.navigationBars["Ilmoita ongelmasta"]
+        report.buttons["BackButton"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(report.waitForNonExistence(timeout: 10), "Ilmoita ongelmasta did not close")
+        XCTAssertTrue(tap("Ohje"), "Ohje missing from settings")
+        let help = app.navigationBars["Ohje ja tuki"]
+        guard help.waitForExistence(timeout: 10) else { XCTFail("Ohje did not open"); return }
+        let unfinished = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Tukiosoitetta ei ole vielä"))
+        XCTAssertEqual(unfinished.count, 0, "Ohje says the support address is missing")
+        XCTAssertFalse(app.buttons["Kopioi tukikoodi"].exists, "Ohje still has Kopioi tukikoodi")
+        shot("stability-ohje")
+        XCTAssertTrue(tap("Ilmoita ongelmasta"), "Ohje has no Ilmoita ongelmasta")
+        XCTAssertTrue(report.waitForExistence(timeout: 10), "Ohje's Ilmoita ongelmasta did not open the Asetukset row's screen")
+        XCTAssertTrue(app.buttons["Lähetä ilmoitus"].waitForExistence(timeout: 5), "Ohje's Ilmoita ongelmasta opened a screen without Lähetä ilmoitus")
     }
 
     /// X095 (P4): files of one month read apart on Tiliotteet. Each row said its month twice ('Tiliote ·
@@ -808,8 +830,83 @@ final class StabilityTests: WalkTestCase {
         }
         dump(app, "stability-19-vienti")
         app.buttons["Tuloslaskelma"].firstMatch.tap(); taps += 1
-        XCTAssertTrue(app.navigationBars["profit-loss-\(today.year).csv"].waitForExistence(timeout: 15), "Tuloslaskelma did not open its CSV sheet")
+        // X084 (P5): titled in words, no longer by the API's type key ('profit-loss-2026.csv').
+        let csv = app.navigationBars["Tuloslaskelma \(today.year)"]
+        XCTAssertTrue(csv.waitForExistence(timeout: 15), "Tuloslaskelma did not open its CSV sheet titled 'Tuloslaskelma \(today.year)'")
         shot("stability-raportit-csv")
+        // M047 (P5): a document sheet closes from its bar, not by a swipe alone.
+        let done = csv.buttons["Valmis"]
+        XCTAssertTrue(done.exists, "the CSV sheet has no Valmis")
+        guard done.exists else { return }
+        done.tap(); taps += 1
+        XCTAssertTrue(csv.waitForNonExistence(timeout: 10), "Valmis did not close the CSV sheet")
+    }
+
+    /// M047 (P5): the zip opens on its own summary, its name, its size and 'Jaa kirjanpitäjälle' as
+    /// the one primary, with Valmis to close. QuickLook drew a spinner, then a blank page with only
+    /// a share icon for over 3 s, and the sheet closed by a swipe alone.
+    func test31_ZipPackageSheet() {
+        XCTAssertTrue(selectTab("Raportit"), "Raportit is not selected")
+        let zip = app.buttons["Lataa zip"].firstMatch
+        guard app.staticTexts["Kuukausittain"].firstMatch.waitForExistence(timeout: 15), reveal(zip, scrolls: 8) else {
+            dump(app, "stability-31-no-zip"); XCTFail("Lataa zip is not hittable on Raportit"); return
+        }
+        // Kausi opens on last month, or on January when last month was another year.
+        let today = Self.helsinkiMonth()
+        let last = Self.helsinkiMonth(offset: -1)
+        let key = last.year == today.year ? String(format: "%04d-%02d", last.year, last.month) : "\(today.year)-01"
+        let name = "kirjanpito-\(key).zip"
+        zip.tap(); taps += 1
+        let bar = app.navigationBars[name]
+        guard bar.waitForExistence(timeout: 10) else { dump(app, "stability-31-sheet"); XCTFail("Lataa zip did not open \(name)"); return }
+        // The summary stands from the first frame; its primary wakes once the file is here.
+        let share = app.buttons["Jaa kirjanpitäjälle"].firstMatch
+        XCTAssertTrue(share.waitForExistence(timeout: 5), "the zip sheet has no Jaa kirjanpitäjälle")
+        let arrived = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: share)], timeout: 20)
+        XCTAssertEqual(arrived, .completed, "Jaa kirjanpitäjälle never woke: the package did not arrive")
+        let size = app.staticTexts["document-zip-size"].firstMatch
+        XCTAssertTrue(size.exists && size.label.contains(where: \.isNumber), "the summary gives no size: '\(size.exists ? size.label : "missing")'")
+        let named = app.staticTexts.matching(NSPredicate(format: "label == %@", name)).count - bar.staticTexts.matching(NSPredicate(format: "label == %@", name)).count
+        XCTAssertGreaterThan(named, 0, "the summary does not name \(name)")
+        XCTAssertTrue(share.isHittable, "Jaa kirjanpitäjälle is not hittable")
+        // One primary: the bar holds Valmis only, no share icon beside the summary's own.
+        XCTAssertEqual(barItems(bar), ["Valmis"], "the zip sheet's bar holds \(barItems(bar))")
+        shot("stability-31-zip")
+        guard bar.buttons["Valmis"].exists else { return }
+        bar.buttons["Valmis"].tap(); taps += 1
+        XCTAssertTrue(bar.waitForNonExistence(timeout: 10), "Valmis did not close the zip sheet")
+        XCTAssertTrue(app.navigationBars["Raportit"].exists, "Valmis did not return to Raportit")
+    }
+
+    /// X154 (P5): on Tietosuoja with no password typed, both requests say what is missing and send
+    /// nothing. Disabled, they looked like live rows and a tap did nothing.
+    func test32_PrivacyRequestsAskForThePassword() {
+        openSettings()
+        let screen = app.navigationBars["Tietosuoja"]
+        let hint = app.staticTexts["Kirjoita nykyinen salasana."].firstMatch
+        // The server's notes: 'Pyyntö kopiosta on kirjattu. …' and 'Pyyntö on kirjattu. …'.
+        let sent = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Pyyntö", "kirjattu")).firstMatch
+        let closing = app.navigationBars["Pyydetäänkö tilin sulkemista?"]
+        for (index, title) in ["Pyydä kopio tiedoista", "Pyydä tilin sulkemista"].enumerated() {
+            // Each request on a fresh screen: the first one's hint must not answer for the second.
+            if index > 0 {
+                screen.buttons["BackButton"].firstMatch.tap(); taps += 1
+                XCTAssertTrue(screen.waitForNonExistence(timeout: 10), "Tietosuoja did not close")
+            }
+            guard tap("Tietosuoja"), screen.waitForExistence(timeout: 10) else { XCTFail("Tietosuoja did not open"); return }
+            let password = app.secureTextFields["Nykyinen salasana"].firstMatch
+            XCTAssertTrue(reveal(password, scrolls: 8), "Tietosuoja has no Nykyinen salasana")
+            XCTAssertTrue((password.value as? String ?? "").isEmpty || password.value as? String == "Nykyinen salasana",
+                          "the password field is not empty: the step tests nothing")
+            XCTAssertFalse(hint.exists, "\(title): the hint shows before the tap")
+            let button = app.buttons[title].firstMatch
+            guard reveal(button, scrolls: 8) else { dump(app, "stability-32-\(index)"); XCTFail("Tietosuoja has no \(title)"); return }
+            button.tap(); taps += 1
+            XCTAssertTrue(hint.waitForExistence(timeout: 5), "\(title) with no password did not say 'Kirjoita nykyinen salasana.'")
+            XCTAssertFalse(sent.exists, "\(title) with no password sent the request")
+            XCTAssertFalse(closing.exists, "\(title) with no password opened the closing sheet")
+            shot("stability-32-\(index)")
+        }
     }
 
     /// X079: the list behind Menot holds the rows the figure is made of. The figure and Luokittain

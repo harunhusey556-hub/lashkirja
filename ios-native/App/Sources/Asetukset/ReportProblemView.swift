@@ -11,6 +11,7 @@ struct ReportProblemView: View {
     @State private var busy = false
     @State private var sentCode: String?
     @State private var sendFailed = false
+    @FocusState private var noteFocused: Bool
 
     var body: some View {
         List {
@@ -18,6 +19,7 @@ struct ReportProblemView: View {
                 TextField("Mitä tapahtui?", text: $note, axis: .vertical)
                     .lineLimit(3...8)
                     .disabled(busy)
+                    .focused($noteFocused)
             } header: {
                 Text("Kuvaile ongelma lyhyesti")
             } footer: {
@@ -47,11 +49,14 @@ struct ReportProblemView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .formKeyboard()
         .navigationTitle("Ilmoita ongelmasta")
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private func send() async {
+        // The keyboard goes with the note: left up, it covered the code's line and 'Kopioi koodi' (U081).
+        noteFocused = false
         busy = true
         defer { busy = false }
         let code = ProblemReport.newCode()

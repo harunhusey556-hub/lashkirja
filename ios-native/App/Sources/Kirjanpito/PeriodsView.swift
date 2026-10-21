@@ -87,7 +87,8 @@ struct PeriodsView: View {
         }
         .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
         .sheet(isPresented: $showPackage) {
-            DocumentPreviewSheet(path: "/api/export/package", query: ["month": month], fileName: "kirjanpito-\(month).zip")
+            DocumentPreviewSheet(path: "/api/export/package", query: ["month": month], fileName: "kirjanpito-\(month).zip",
+                                 shareTitle: "Jaa kirjanpitäjälle")
         }
         .confirmSheet(isPresented: $confirmClose, title: closeTitle, message: closeMessage,
                       confirmTitle: "Merkitse valmiiksi", isDestructive: false) {

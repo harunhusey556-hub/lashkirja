@@ -6,7 +6,7 @@ struct SettingsView: View {
     @State private var profile: Profile?
     @State private var profileFailure: String?
     @State private var profileAsked = false
-    @State private var lockEnabled = AppLock.shared.isEnabled
+    @State private var lockSubtitle: String = SettingsView.lockRowSubtitle(AppLock.shared)
     @State private var confirmLogout = false
     @State private var queue = OfflineReceiptQueueModel.shared
     @State private var savingAutoLink = false
@@ -64,7 +64,7 @@ struct SettingsView: View {
                 NavigationLink(value: Route.changeEmail) { SettingRow(title: "Vaihda sähköposti", subtitle: nil, symbol: "at") }
                 NavigationLink(value: Route.passkeys) { SettingRow(title: "Pääsyavaimet", subtitle: "Kirjaudu Face ID:llä ilman salasanaa", symbol: "person.badge.key") }
                 NavigationLink(value: Route.devices) { SettingRow(title: "Laitteet", subtitle: "Kirjautuneet laitteet", symbol: "iphone") }
-                NavigationLink { AppLockSettingsView() } label: { SettingRow(title: "Sovelluslukitus", subtitle: lockEnabled ? "Käytössä" : "Ei käytössä", symbol: "lock") }
+                NavigationLink { AppLockSettingsView() } label: { SettingRow(title: "Sovelluslukitus", subtitle: lockSubtitle, symbol: "lock") }
                 NavigationLink { NotificationSettingsView() } label: { SettingRow(title: "Ilmoitukset", subtitle: "Muistutukset kuiteista ja laskuista", symbol: "bell") }
             }
             Section("Tietosuoja ja ohje") {
@@ -86,7 +86,7 @@ struct SettingsView: View {
         .background(Theme.canvas)
         .navigationTitle("Asetukset")
         // The lock lives outside SwiftUI state; read it again when coming back from its screen.
-        .onAppear { lockEnabled = AppLock.shared.isEnabled }
+        .onAppear { lockSubtitle = Self.lockRowSubtitle(AppLock.shared) }
         .perfReady("asetukset", profile ?? app.profile != nil)
         .task {
             // Once per opening: the server's profile replaces the one shown, in place.
@@ -109,6 +109,13 @@ struct SettingsView: View {
                       confirmTitle: "Kirjaudu ulos") {
             Task { await app.logout() }
         }
+    }
+
+    /// The PIN lock and the idle Face ID lock are both on the Sovelluslukitus screen: either one on
+    /// reads 'Käytössä'. Read from the PIN alone, the row said 'Ei käytössä' while the app would
+    /// lock after 12 hours unused (X153).
+    static func lockRowSubtitle(_ lock: AppLock) -> String {
+        lock.isEnabled || lock.idleLockEnabled ? "Käytössä" : "Ei käytössä"
     }
 
     private func loadProfile() async {
