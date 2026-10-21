@@ -214,7 +214,10 @@ struct ToastView: View {
             .foregroundStyle(Theme.onInk)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Theme.ink.opacity(0.94), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            // Opaque, as the bulk bar and the offline pill: at 0.94 the rows under it read through
+            // its text (X064).
+            .background(Theme.ink, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .bottomClearance()
             .padding(.horizontal, 16)
             .transition(.move(edge: .bottom).combined(with: .opacity))
     }

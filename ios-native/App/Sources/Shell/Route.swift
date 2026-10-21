@@ -139,6 +139,22 @@ extension Route {
             return nil
         }
     }
+
+    /// Koti's "Näytä kaikki (N)" under a kind (web `KIND_LIST`): the list holding all of that kind.
+    /// Bank rows open Pankki on the month's rows that need action (Q1: Pankki is the rows).
+    static func forShowAll(_ kind: DashboardItem.Kind, month: String) -> Route? {
+        switch kind {
+        case .pendingReceipt: return .receipts
+        // The month's receipts without a VAT breakdown, the list the server counted.
+        case .vatGap: return .receiptsMissingVat(period: month)
+        case .missingReceipt, .receiptMatch: return .bankFeedFiltered(month: month, onlyOpen: true, focus: nil)
+        case .invoiceMatch: return .invoices
+        case .paymentDuplicate: return .workQueue
+        case .draftInvoice: return .invoicesFiltered(month: month, status: SalesFilter.draft.rawValue, customerId: "")
+        case .overdueInvoice: return .invoicesFiltered(month: "", status: SalesFilter.overdue.rawValue, customerId: "")
+        case .unknown: return nil
+        }
+    }
 }
 
 extension Route {

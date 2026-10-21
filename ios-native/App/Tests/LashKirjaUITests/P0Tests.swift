@@ -12,6 +12,17 @@ final class P0Tests: WalkTestCase {
         type(field, "x")
         shot("a3-profile-dirty")
         check("P0.5 dirty profile shows Takaisin", app.buttons["Takaisin"].firstMatch.exists)
+        // U003 (P3): the back button that asks first is drawn in ink, as the system one it replaces;
+        // in the app's accent it turned into another control with the first typed character.
+        let back = app.buttons["Takaisin"].firstMatch
+        if back.exists {
+            let ink = RGB(r: 38, g: 34, b: 31)
+            let read = darkestColour(app, in: back.frame)
+            note("INFO P0 a3 Takaisin \(back.frame): darkest \(read?.description ?? "off screen")")
+            XCTAssertTrue(read?.near(ink, within: 15) == true, "Takaisin's darkest pixel is \(read?.description ?? "off screen"), not ink \(ink)")
+        } else {
+            XCTFail("the dirty profile has no Takaisin")
+        }
         edgeSwipeBack(); sleep(2); shot("a4-after-edge-swipe")
         check("P0.5 edge swipe does not leave dirty profile", app.buttons["Takaisin"].firstMatch.exists || discardDialog.exists)
         if app.buttons["Takaisin"].firstMatch.exists { app.buttons["Takaisin"].firstMatch.tap() }

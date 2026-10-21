@@ -208,18 +208,25 @@ class WalkTestCase: XCTestCase {
     func tap(_ label: String) -> Bool { tapLabel("label == %@", label) }
     /// The overdue invoice from Koti's "Tarvitaan sinulta". Koti shows five tasks; with more waiting
     /// (the CI seed puts documents and matches before it) the overdue row is behind "Näytä enemmän",
-    /// which is then tapped first, as the owner would.
+    /// which is then tapped first, as the owner would. The tasks lead Koti (N5), so the button is
+    /// looked for before any scroll: a row behind it is not drawn, and searching for it first
+    /// scrolled the whole screen in vain.
     func openOverdueFromKoti() -> Bool {
-        if tapLabel("label CONTAINS %@", "· myöhässä") { return true }
-        // The search above scrolled past the task list and left "Näytä enemmän" under the floating
-        // bar, which took the tap (N1 run 39187969883): back up until the button is clear of it.
+        let overdue = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "· myöhässä")).firstMatch
         let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä enemmän")).firstMatch
-        for _ in 0..<8 where !(more.exists && more.isHittable && more.frame.minY > 160) {
-            app.windows.firstMatch.swipeDown(velocity: .slow); scrolls += 1
+        let deadline = Date().addingTimeInterval(20)
+        while !overdue.exists && !more.exists && Date() < deadline { usleep(250_000) }
+        if !overdue.exists && more.exists {
+            // Its centre, where the tap lands, clear of the floating tab bar, which took a tap meant
+            // for the button (N1 run 39187969883).
+            let bar = app.tabBars.firstMatch
+            for _ in 0..<4 where !(more.isHittable && (!bar.exists || more.frame.midY < bar.frame.minY)) {
+                app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1
+            }
+            guard more.isHittable else { note("MISS Näytä enemmän on Koti"); return false }
+            more.tap(); taps += 1
+            _ = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä vähemmän")).firstMatch.waitForExistence(timeout: 5)
         }
-        guard more.exists, more.isHittable else { note("MISS Näytä enemmän on Koti"); return false }
-        more.tap(); taps += 1
-        _ = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä vähemmän")).firstMatch.waitForExistence(timeout: 5)
         return tapLabel("label CONTAINS %@", "· myöhässä")
     }
     /// Scrolls the screen (each swipe counted) until `element` sits inside the window, as tapLabel

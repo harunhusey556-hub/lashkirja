@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { GET as bankCandidates } from "@/app/api/receipts/[id]/bank-candidates/route";
+import { GET as receiptDetail } from "@/app/api/receipts/[id]/route";
 import { POST as confirm } from "@/app/api/matching/confirm/route";
 import { POST as createPurchase } from "@/app/api/purchase-invoices/route";
 import { POST as addPurchasePayment } from "@/app/api/purchase-invoices/[id]/payments/route";
@@ -96,6 +97,62 @@ describe("GET /api/receipts/[id]/bank-candidates", () => {
     expect((await rowsFor(foreign.id)).status).toBe(404);
     const receipt = await createReceipt(user.id);
     expect((await rowsFor(receipt.id, "?limit=500")).status).toBe(400);
+  });
+});
+
+describe("the receipt and its bank row picker list the same rows alike (X039)", () => {
+  it("puts two equally good rows in one order, with the same Finnish reasons", async () => {
+    const receipt = await createReceipt(user.id, { totalAmountCents: 25_00, date: "2026-09-03", vendor: "Prisma" });
+    await createStatementWithTransactions(user.id, {
+      periodMonth: "2026-09",
+      transactions: [
+        { date: "2026-09-03", amountCents: -18_00, counterparty: "Prisma 18" },
+        { date: "2026-09-03", amountCents: -10_00, counterparty: "Prisma 10" },
+      ],
+    });
+
+    const detail = await receiptDetail(
+      buildRequest("GET", `/api/receipts/${receipt.id}`, undefined, { cookie }),
+      routeContext({ id: receipt.id })
+    );
+    expect(detail.status).toBe(200);
+    const candidates = (await readJson(detail)).receipt.match.matchCandidates;
+    const picker = (await rowsFor(receipt.id)).body.candidates;
+
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0].score).toBe(candidates[1].score);
+    expect(candidates.map((c: JsonValue) => c.id)).toEqual(ids({ candidates: picker }));
+    // The receipt's own words for each row are the picker's ("nimi vastaa · sama päivä"), not codes.
+    expect(candidates.map((c: JsonValue) => c.explanation)).toEqual(picker.map((c: JsonValue) => c.reasons));
+    expect(candidates[0].explanation.length).toBeGreaterThan(0);
+  });
+
+  // The rows above are only related, never gate-eligible; these two the gate itself calls a tie.
+  it("gives two rows the gate ties the same order and the same words on both lists", async () => {
+    const receipt = await createReceipt(user.id, { totalAmountCents: 25_00, date: "2026-09-03", vendor: "Prisma" });
+    await createStatementWithTransactions(user.id, {
+      periodMonth: "2026-09",
+      transactions: [
+        { date: "2026-09-03", amountCents: -25_00, counterparty: "Prisma" },
+        { date: "2026-09-03", amountCents: -25_00, counterparty: "Prisma" },
+      ],
+    });
+
+    const detail = await receiptDetail(
+      buildRequest("GET", `/api/receipts/${receipt.id}`, undefined, { cookie }),
+      routeContext({ id: receipt.id })
+    );
+    expect(detail.status).toBe(200);
+    const candidates = (await readJson(detail)).receipt.match.matchCandidates;
+    const picker = (await rowsFor(receipt.id)).body.candidates;
+
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0].score).toBe(candidates[1].score);
+    // Both eligible rivals of each other: the gate's tie, not two related rows.
+    expect(candidates.every((c: JsonValue) => c.reasons.includes("competing"))).toBe(true);
+    expect(candidates.map((c: JsonValue) => c.id)).toEqual(ids({ candidates: picker }));
+    expect(candidates.map((c: JsonValue) => c.explanation)).toEqual(picker.map((c: JsonValue) => c.reasons));
+    expect(candidates[0].explanation).toContain("summa sama");
   });
 });
 

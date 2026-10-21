@@ -1000,6 +1000,68 @@ final class StabilityTests: WalkTestCase {
         shot("stability-receipt-bar")
     }
 
+    /// X041 X064 (P3): the bulk bar and the toast are opaque ink. At 0.94 the rows under them read
+    /// through their words; an empty spot of either measured (51,47,44), not ink (38,34,31).
+    func test30_BulkBarAndToastAreOpaque() {
+        let ink = RGB(r: 38, g: 34, b: 31)
+        openHubRow("Kuitit")
+        let chips = app.buttons["receipt-tab-all"].firstMatch
+        let actions = app.navigationBars["Kuitit"].buttons["Toiminnot"].firstMatch
+        guard chips.waitForExistence(timeout: 15), actions.waitForExistence(timeout: 15) else {
+            dump(app, "stability-30-kuitit"); XCTFail("Kuitit opened without its chips or Toiminnot"); return
+        }
+        // The bulk bar over the list, as test14 brings it up.
+        actions.tap(); taps += 1
+        let select = app.buttons["Valitse kuitteja"].firstMatch
+        guard select.waitForExistence(timeout: 5) else { dump(app, "stability-30-menu"); XCTFail("Toiminnot has no Valitse kuitteja"); return }
+        select.tap(); taps += 1
+        guard app.buttons["Valitse kaikki"].firstMatch.waitForExistence(timeout: 5), let row = firstListRow(below: chips) else {
+            dump(app, "stability-30-no-row"); XCTFail("Valitse kuitteja left no receipt row to pick"); return
+        }
+        row.tap(); taps += 1
+        guard let bar = bulkBar("kuitit") else { return }
+        // Its leading padding, beside the count: nothing of the bar's own is drawn there.
+        let barRead = screenColours(app, at: [CGPoint(x: bar.frame.minX + 6, y: bar.frame.midY)]).first ?? nil
+        shot("stability-30-bulk-bar")
+        note("INFO stability 30: bulk bar \(bar.frame) reads \(barRead?.description ?? "off screen")")
+        XCTAssertTrue(barRead?.near(ink, within: 2) == true, "the bulk bar reads \(barRead?.description ?? "off screen"), not ink \(ink)")
+        endSelectMode(bar, "Kuitit", "kuitit")
+
+        // The toast: Ei kohdistettu's Kohdista varmat, then its Kumoa, which puts the seed's pairs back.
+        let unlinked = app.buttons["receipt-tab-unlinked"].firstMatch
+        revealChip(unlinked, inRow: "receipt-chips")
+        unlinked.tap(); taps += 1
+        let sure = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kohdista varmat")).firstMatch
+        guard sure.waitForExistence(timeout: 20) else {
+            dump(app, "stability-30-no-sure"); XCTFail("no Kohdista varmat on Ei kohdistettu: does the seed have its sure pairs?"); return
+        }
+        sure.tap(); taps += 1
+        // "2 kuittia kohdistettu." (or a run that stopped early); not a row's "Ei kohdistettu".
+        let linked = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@ OR label ENDSWITH %@",
+                                                          "kohdistettu.", "seuraavalla kerralla.")).firstMatch
+        guard linked.waitForExistence(timeout: 20) else { dump(app, "stability-30-no-toast"); XCTFail("Kohdista varmat showed no toast"); return }
+        // Inside the toast's 12 pt padding above its words. Read until the toast has risen whole: on
+        // its way in it is still fading, and it goes by itself after five seconds.
+        var toastRead: RGB?
+        let deadline = Date().addingTimeInterval(5)
+        repeat {
+            guard linked.exists else { break }
+            let words = linked.frame
+            toastRead = screenColours(app, at: [CGPoint(x: words.midX, y: words.minY - 6)]).first ?? nil
+            if toastRead?.near(ink, within: 2) == true { break }
+        } while Date() < deadline && linked.exists
+        // Kumoa first, while the toast is still up; the notes and the picture wait.
+        let undo = app.buttons["Kumoa"].firstMatch
+        let undoing = undo.exists
+        if undoing { undo.tap(); taps += 1 }
+        note("INFO stability 30: the toast reads \(toastRead?.description ?? "off screen")")
+        XCTAssertTrue(toastRead?.near(ink, within: 2) == true, "the toast reads \(toastRead?.description ?? "off screen"), not ink \(ink)")
+        guard undoing else { XCTFail("the toast went before its Kumoa: the seed's sure pairs stay linked"); return }
+        let restored = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "kumottu")).firstMatch
+        XCTAssertTrue(restored.waitForExistence(timeout: 20), "Kumoa did not put the sure pairs back")
+        shot("stability-30-toast-undone")
+    }
+
     /// X092 (N9): the K-Market 1 row's sheet (Kuitti puuttuu) shows one primary, Kuvaa kuitti, on the
     /// medium detent without a scroll, and its Toiminnot holds the other four. Five rows of the same
     /// weight stood in the body, and the medium detent cut the last ones off.

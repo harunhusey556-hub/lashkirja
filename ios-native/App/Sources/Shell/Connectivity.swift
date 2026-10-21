@@ -64,23 +64,52 @@ final class Connectivity {
     }
 }
 
+/// The pill over a tab's screens, just above the tab bar. In the navigation bar's row it covered
+/// Avustaja, Asetukset and a pushed screen's title (U040 U041 U054). Nothing is reserved for it, so
+/// nothing moves when it comes, and it takes no taps: whatever is under it stays usable.
 struct OfflineBanner: View {
     @State private var connectivity = Connectivity.shared
+    @State private var bottom = BottomClearance.shared
     var body: some View {
         Group {
             if let notice = connectivity.notice {
-                Label(notice.title, systemImage: notice == .offline ? "wifi.slash" : "icloud.slash")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.onInk)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(Theme.ink.opacity(0.9), in: Capsule())
-                    .padding(.top, 4)
-                    // Fades in where it stays: sliding in from the top moved the pill 17–18 pt after
-                    // the screen had settled (motion audit offline-tab-myynti, w47).
+                OfflinePill(notice: notice)
+                    // Fades in where it stays: sliding in moved the pill 17–18 pt after the screen
+                    // had settled (motion audit offline-tab-myynti, w47).
                     .transition(.opacity)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("offline-banner")
             }
         }
+        .allowsHitTesting(false)
+        // Above a bottom bar or a toast while one is up, never over a primary or a message.
+        .padding(.bottom, bottom.height > 0 ? bottom.height + 16 : 8)
+        .motion(.snappy, value: bottom.height)
+    }
+}
+
+/// Both notices in one capsule, the one not said faded out: the capsule keeps the longer one's
+/// width, so a change of notice cross-fades in place. Swapped as one label it shrank 242 → 163 pt
+/// and re-centred (M085).
+struct OfflinePill: View {
+    let notice: ReachabilityState.Notice
+
+    var body: some View {
+        ZStack {
+            label(.serverUnreachable)
+            label(.offline)
+        }
+        .motion(.easeInOut(duration: 0.25), value: notice)
+        .font(.footnote.weight(.semibold))
+        .foregroundStyle(Theme.onInk)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        // Opaque, as the toast and the bulk bar: the rows under it do not read through.
+        .background(Theme.ink, in: Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("offline-banner")
+    }
+
+    private func label(_ shown: ReachabilityState.Notice) -> some View {
+        Label(shown.title, systemImage: shown == .offline ? "wifi.slash" : "icloud.slash")
+            .opacity(shown == notice ? 1 : 0)
+            .accessibilityHidden(shown != notice)
     }
 }

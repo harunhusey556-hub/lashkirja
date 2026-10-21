@@ -20,6 +20,11 @@ export function moneyTrend(rows: readonly TrendMonth[] | null | undefined, month
   };
 }
 
+/** The percent line's colour: good news only when sales grew. '−100 % vs. syyskuu' read green (X004). */
+export function trendTone(metric: "income" | "expenses", percent: number): "success" | "neutral" {
+  return metric === "income" && percent > 0 ? "success" : "neutral";
+}
+
 export function monthIsComplete(facts: { done: number; total: number; blocking: number; otherOpen: boolean; hasErrors: boolean; hasStatement: boolean }) {
   return facts.total > 0 && facts.done === facts.total && facts.blocking === 0 && !facts.otherOpen && !facts.hasErrors && facts.hasStatement;
 }

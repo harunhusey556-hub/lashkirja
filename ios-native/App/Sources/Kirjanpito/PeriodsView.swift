@@ -318,11 +318,13 @@ struct PeriodsView: View {
         }
     }
 
+    /// Soft, as the web's ActionPill and Koti's row pills: a dark capsule on every row was one more
+    /// primary each (M008 M076).
     private func pill(_ title: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 5)
-                .foregroundStyle(Theme.onInk)
-                .background(Theme.ink, in: Capsule())
+                .foregroundStyle(Theme.accentDark)
+                .background(Theme.accentSoft, in: Capsule())
         }
         .buttonStyle(.borderless)
         .accessibilityLabel(label)

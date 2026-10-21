@@ -329,7 +329,8 @@ struct RecurringPurchaseDetailView: View {
         Section {
             LabeledContent("Veroton") { MoneyText(amount: entry.netAmount) }
             LabeledContent("ALV \(PurchaseVatRate.label(entry.vatRate))") { MoneyText(amount: entry.vatAmount) }
-            LabeledContent("Yhteensä") { MoneyText(amount: entry.grossAmount).fontWeight(.semibold) }
+            // In ink, not a LabeledContent value's pale grey (M099).
+            LabeledContent("Yhteensä") { MoneyText(amount: entry.grossAmount).fontWeight(.semibold).foregroundStyle(Theme.ink) }
         }
         Section {
             if let reference = entry.reference, !reference.isEmpty { LabeledContent("Viite", value: reference) }

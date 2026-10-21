@@ -141,10 +141,11 @@ private let trend = BalanceTrend(points: [
 
 // MARK: Order
 
-@Test func moneyComesRightAfterTheStatus() {
+// Q3 (owner, as on the web): what needs the owner sits above Rahatilanne.
+@Test func tasksComeRightAfterTheStatus() {
     let all = KotiLayout.sections(.init(setupOpen: true, partialFailure: true, balanceCard: true, hasTasks: true, failedJobs: true,
                                         hasPositions: true, cashflowMoved: true, handled: true))
-    #expect(all == [.status, .partialFailure, .balance, .tasks, .failedJobs, .money, .positions, .setup, .cashflow, .handled])
+    #expect(all == [.status, .partialFailure, .tasks, .balance, .failedJobs, .money, .positions, .setup, .cashflow, .handled])
     #expect(KotiLayout.sections(.init()) == [.status, .money])
 }
 
