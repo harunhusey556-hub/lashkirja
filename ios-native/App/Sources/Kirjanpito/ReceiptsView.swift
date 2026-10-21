@@ -248,7 +248,7 @@ struct ReceiptsView: View {
             TextField("Vähintään €", text: $minDraft).moneyInput()
             TextField("Enintään €", text: $maxDraft).moneyInput()
             Button("Käytä") { applyAmount() }
-            Button("Peru", role: .cancel) {}
+            Button("Peruuta", role: .cancel) {}
         } message: {
             Text("Jätä kenttä tyhjäksi, jos rajaa ei tarvita.")
         }

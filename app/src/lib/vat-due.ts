@@ -65,6 +65,17 @@ function endSentence(text: string): string {
   return text.endsWith(".") ? text : `${text}.`;
 }
 
+/**
+ * Step 2 of "Ilmoita ja maksa", with the period as `vatDueFor` labels it ("Syyskuu 2026",
+ * "Q3/2026", "2026"): a month is lower case mid-sentence ("kaudelle syyskuu 2026", U017).
+ */
+export function vatChooseStepText(periodLabel: string): string {
+  const label = /^[A-ZÄÖ][a-zäö]+ \d{4}$/.test(periodLabel)
+    ? periodLabel.charAt(0).toLocaleLowerCase("fi-FI") + periodLabel.slice(1)
+    : periodLabel;
+  return `Valitse Arvonlisävero ja kausiveroilmoitus kaudelle ${label}.`;
+}
+
 /** Step 3 of "Ilmoita ja maksa". */
 export function vatFileStepText(dueIso: string, periodYear?: number): string {
   return endSentence(`Kirjoita kentät tältä sivulta ja lähetä ilmoitus viimeistään ${vatDueDate(dueIso, periodYear)}`);

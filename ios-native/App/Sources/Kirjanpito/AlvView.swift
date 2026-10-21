@@ -254,7 +254,7 @@ struct AlvView: View {
                 let pay = vat.nothingToPay ? nil : VatFiling.payStepText(amount: owed, dueIso: dueIso, periodYear: periodYear)
                 VStack(alignment: .leading, spacing: 4) {
                     step(1, "Kirjaudu OmaVeroon (vero.fi/omavero).")
-                    step(2, "Valitse Arvonlisävero ja kausiveroilmoitus kaudelle \(VatDue.label(period)).")
+                    step(2, VatFiling.chooseStepText(period: period))
                     step(3, VatFiling.fileStepText(dueIso: dueIso, periodYear: periodYear))
                     if let pay { step(4, "\(pay) Viitenumero ja tilinumero ovat OmaVerossa kohdassa Maksut.") }
                 }

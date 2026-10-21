@@ -17,6 +17,17 @@ struct PasskeysView: View {
     @State private var removing = false
     @State private var creating = false
 
+    /// `preview` (the app's `lastPainted` screen, which Asetukset warms) is on screen in the first
+    /// frame, the create row with it: the push showed a spinner, then the list, then the note under
+    /// it (M057). `load` then refreshes it in place.
+    init(preview: PasskeyScreen? = nil) {
+        guard let preview else { return }
+        var shown = ScreenLoad<[Passkey]>()
+        shown.succeed(preview.passkeys)
+        _rows = State(initialValue: shown)
+        _canCreate = State(initialValue: Optional(preview.canCreate))
+    }
+
     var body: some View {
         List {
             Section {
@@ -73,10 +84,11 @@ struct PasskeysView: View {
         .navigationTitle("Pääsyavaimet")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
-        .task { if rows.value == nil { await load() } }
+        .task { await load() }
         .sheet(isPresented: $creating) {
             CreatePasskeySheet { created in
                 rows.update { $0.append(created) }
+                remember()
                 message = nil
                 success = "Pääsyavain luotu."
             }
@@ -84,7 +96,7 @@ struct PasskeysView: View {
         .alert("Pääsyavaimen nimi", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }), presenting: renaming) { key in
             TextField("Nimi", text: $newName)
             Button("Tallenna") { Task { await rename(key) } }
-            Button("Peru", role: .cancel) {}
+            Button("Peruuta", role: .cancel) {}
         }
         .confirmSheet(presenting: $deleting) { key in
             ConfirmRequest(
@@ -113,21 +125,30 @@ struct PasskeysView: View {
     }
 
     private func load() async {
+        let fromSpinner = rows.value == nil
         rows.begin()
-        do {
-            let list: PasskeyList = try await app.api.get("/api/auth/passkey")
-            rows.succeed(list.passkeys)
-        } catch is CancellationError {
-            return
-        } catch {
+        switch await PasskeyScreen.load(api: app.api) {
+        case .success(let screen):
+            // Nothing painted yet: the list and its create row ease in together where the spinner was.
+            if fromSpinner { withMotion(.snappy) { show(screen) } } else { show(screen) }
+            app.rememberPainted(screen, PasskeyScreen.listPath)
+        case .failure(let error):
+            // Offline, a 5xx or a cancel says nothing about the server's set-up: the failure with its
+            // retry, and the create button stays as it was (G001).
             rows.fail(error)
         }
+    }
+
+    private func show(_ screen: PasskeyScreen) {
+        rows.succeed(screen.passkeys)
         // `native` also needs the server's associated-domains file for this app.
-        if let status: PasskeyStatus = try? await app.api.get("/api/auth/passkey/status") {
-            canCreate = status.native
-        } else {
-            canCreate = false
-        }
+        canCreate = screen.canCreate
+    }
+
+    /// The list as edited here is what the next push paints first.
+    private func remember() {
+        guard let list = rows.value, let canCreate else { return }
+        app.rememberPainted(PasskeyScreen(passkeys: list, canCreate: canCreate), PasskeyScreen.listPath)
     }
 
     private func rename(_ key: Passkey) async {
@@ -142,6 +163,7 @@ struct PasskeysView: View {
             rows.update { list in
                 if let index = list.firstIndex(where: { $0.id == key.id }) { list[index].deviceName = body.deviceName }
             }
+            remember()
             Haptics.success()
             message = nil
             success = "Nimi tallennettu."
@@ -159,6 +181,7 @@ struct PasskeysView: View {
         do {
             let _: Ignored = try await app.api.send("DELETE", "/api/auth/passkey/\(key.id)", body: Optional<EmptyBody>.none)
             rows.update { list in list.removeAll { $0.id == key.id } }
+            remember()
             Haptics.success()
             message = nil
             success = "Pääsyavain poistettu."
@@ -213,7 +236,7 @@ private struct CreatePasskeySheet: View {
             .navigationTitle("Vahvista salasanalla")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Peru") { dismiss() }.disabled(busy) }
+                ToolbarItem(placement: .topBarLeading) { Button("Peruuta") { dismiss() }.disabled(busy) }
             }
         }
         .interactiveDismissDisabled(busy)

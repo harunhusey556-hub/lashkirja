@@ -716,9 +716,11 @@ struct ReceiptEditSheet: View {
                 }
                 Section {
                     // A label beside the field, as the capture form: a placeholder vanished once filled (U095).
+                    // A name is not a word to correct (U009).
                     LabeledContent("Myyjä") {
                         TextField("", text: $form.vendor)
                             .textContentType(.organizationName)
+                            .autocorrectionDisabled()
                             .multilineTextAlignment(.trailing)
                     }
                     fieldError("vendor")

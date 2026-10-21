@@ -2,11 +2,13 @@ import Foundation
 
 /// Koti's wording, shared by the view and its tests.
 public enum Koti {
-    public static func headline(blocking: Int) -> String {
+    /// A month already over has no "ennen kuun loppua" left: its open things are "kesken", as the
+    /// web says (`kotiHeadline`).
+    public static func headline(blocking: Int, atCurrentMonth: Bool = true) -> String {
         switch blocking {
         case ..<1: "Kaikki kunnossa"
-        case 1: "1 asia ennen kuun loppua"
-        default: "\(blocking) asiaa ennen kuun loppua"
+        case 1: atCurrentMonth ? "1 asia ennen kuun loppua" : "1 asia kesken"
+        default: atCurrentMonth ? "\(blocking) asiaa ennen kuun loppua" : "\(blocking) asiaa kesken"
         }
     }
 

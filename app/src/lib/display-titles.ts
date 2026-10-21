@@ -73,3 +73,25 @@ export function statementTitle(statement: { fileType?: string | null; periodMont
   const label = statement.fileType === "enablebanking" ? "Pankkiyhteys" : "Tiliote";
   return month ? `${label} · ${month}` : label;
 }
+
+/**
+ * The line under a tiliote file's title: the file it came from, the account and the row count.
+ * The title already names the month, so files of one month read apart by their names (X095); a
+ * bank-feed statement has no file, and one without a month says so here, where its title cannot.
+ */
+export function statementFileSecondary(statement: {
+  fileName?: string | null;
+  fileType?: string | null;
+  periodMonth?: string | null;
+  bankAccount?: { name: string } | null;
+  totals: { txCount: number };
+}): string {
+  return [
+    statement.periodMonth ? null : "Ei kuukautta",
+    statement.fileType === "enablebanking" ? null : statement.fileName,
+    statement.bankAccount?.name,
+    `${statement.totals.txCount} tapahtumaa`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}

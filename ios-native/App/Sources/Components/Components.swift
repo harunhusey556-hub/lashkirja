@@ -98,8 +98,11 @@ struct LoadFailureView: View {
             Text(failure.message)
         } actions: {
             if failure.canRetry {
+                // Named apart from the refresh banner's "Yritä uudelleen", which sits over content
+                // still shown: a check for this page must not take the banner for it.
                 Button("Yritä uudelleen") { Task { await retry() } }
                     .buttonStyle(.primary)
+                    .accessibilityIdentifier("load-failure-retry")
             }
         }
         .retryWhenBackOnline(failure, retry)

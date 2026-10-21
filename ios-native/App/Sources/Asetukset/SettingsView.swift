@@ -28,7 +28,10 @@ struct SettingsView: View {
                     NavigationLink { ProfileForm(original: profile, section: .seller) { saved($0) } } label: {
                         SettingRow(title: "Laskuttajan tiedot", subtitle: profile.invoiceIban == nil ? "Täydennä tilinumero laskuille" : (profile.businessName ?? "Nimi, Y-tunnus ja IBAN"), symbol: "doc.text")
                     }
-                    NavigationLink { EmailTemplatesView() } label: {
+                    // By route, as Laitteet and Pääsyavaimet: the screen is built when pushed, with what
+                    // the warm-up below has painted by then. A link's destination was built with this
+                    // list, before the warm-up had answered.
+                    NavigationLink(value: Route.emailTemplates) {
                         // A message's text, not a mail icon with a dot: the dot read as something unread (X116).
                         SettingRow(title: "Sähköpostimallit", subtitle: "Laskun saateviesti ja aihe", symbol: "text.bubble")
                     }
@@ -61,7 +64,7 @@ struct SettingsView: View {
                 NavigationLink { PasswordView() } label: { SettingRow(title: "Vaihda salasana", subtitle: nil, symbol: "key") }
                 NavigationLink(value: Route.changeEmail) { SettingRow(title: "Vaihda sähköposti", subtitle: nil, symbol: "at") }
                 NavigationLink(value: Route.passkeys) { SettingRow(title: "Pääsyavaimet", subtitle: "Kirjaudu Face ID:llä ilman salasanaa", symbol: "person.badge.key") }
-                NavigationLink { DevicesView() } label: { SettingRow(title: "Laitteet", subtitle: "Kirjautuneet laitteet", symbol: "iphone") }
+                NavigationLink(value: Route.devices) { SettingRow(title: "Laitteet", subtitle: "Kirjautuneet laitteet", symbol: "iphone") }
                 NavigationLink { AppLockSettingsView() } label: { SettingRow(title: "Sovelluslukitus", subtitle: lockEnabled ? "Käytössä" : "Ei käytössä", symbol: "lock") }
                 NavigationLink { NotificationSettingsView() } label: { SettingRow(title: "Ilmoitukset", subtitle: "Muistutukset kuiteista ja laskuista", symbol: "bell") }
             }
@@ -99,6 +102,9 @@ struct SettingsView: View {
             pos.bind(app)
             if pos.status == nil { await pos.refreshStatus() }
         }
+        // Laitteet, Sähköpostimallit and Pääsyavaimet, asked while the owner reads this screen: each
+        // push slid in a spinner that its list then replaced (M053 M054 M057).
+        .task { await app.warmAsetukset() }
         // Signing out deletes the receipts still on the phone (as the web does): the question says how many.
         .confirmSheet(isPresented: $confirmLogout, title: "Kirjaudutaanko ulos?", message: queue.signOutWarning ?? "",
                       confirmTitle: "Kirjaudu ulos") {
@@ -199,11 +205,19 @@ struct ProfileForm: View {
             if let binding = Binding($edited) {
                 switch section {
                 case .person:
+                    // Each field named in its row: filled, a field lost its only name, the placeholder
+                    // (U004, X146). Names are not words to correct (U009).
                     Section {
-                        TextField("Etunimi", text: binding.firstName.orEmpty)
-                            .textContentType(.givenName).textInputAutocapitalization(.words)
-                        TextField("Sukunimi", text: binding.lastName.orEmpty)
-                            .textContentType(.familyName).textInputAutocapitalization(.words)
+                        LabeledContent("Etunimi") {
+                            TextField("", text: binding.firstName.orEmpty)
+                                .textContentType(.givenName).textInputAutocapitalization(.words).autocorrectionDisabled()
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Sukunimi") {
+                            TextField("", text: binding.lastName.orEmpty)
+                                .textContentType(.familyName).textInputAutocapitalization(.words).autocorrectionDisabled()
+                                .multilineTextAlignment(.trailing)
+                        }
                     } footer: { Text("Sähköposti: \(original.email)") }
                 case .company:
                     Section {
@@ -222,23 +236,49 @@ struct ProfileForm: View {
                         }
                     }
                 case .seller:
+                    // Named in their rows, as the Perintä fields below are: a filled profile was bare
+                    // values ('0201256-6', 'NDEAFIHH') once the placeholders had gone (U004).
                     Section("Yritys") {
-                        TextField("Yrityksen nimi", text: binding.businessName.orEmpty)
-                            .textContentType(.organizationName).textInputAutocapitalization(.words)
-                        TextField("Y-tunnus", text: binding.businessId.orEmpty).codeInput(.never)
-                        TextField("Puhelin", text: binding.phone.orEmpty).phoneInput()
+                        LabeledContent("Yrityksen nimi") {
+                            TextField("", text: binding.businessName.orEmpty)
+                                .textContentType(.organizationName).textInputAutocapitalization(.words).autocorrectionDisabled()
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Y-tunnus") {
+                            TextField("1234567-8", text: binding.businessId.orEmpty).codeInput(.never).multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Puhelin") {
+                            TextField("", text: binding.phone.orEmpty).phoneInput().multilineTextAlignment(.trailing)
+                        }
                     }
                     Section("Osoite") {
-                        TextField("Katuosoite", text: binding.addressStreet.orEmpty)
-                            .textContentType(.streetAddressLine1).textInputAutocapitalization(.words)
-                        TextField("Postinumero", text: binding.addressPostalCode.orEmpty).keyboardType(.numberPad).textContentType(.postalCode)
-                        TextField("Kaupunki", text: binding.addressCity.orEmpty)
-                            .textContentType(.addressCity).textInputAutocapitalization(.words)
+                        LabeledContent("Katuosoite") {
+                            TextField("", text: binding.addressStreet.orEmpty)
+                                .textContentType(.streetAddressLine1).textInputAutocapitalization(.words)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Postinumero") {
+                            TextField("", text: binding.addressPostalCode.orEmpty).keyboardType(.numberPad).textContentType(.postalCode)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Kaupunki") {
+                            TextField("", text: binding.addressCity.orEmpty)
+                                .textContentType(.addressCity).textInputAutocapitalization(.words)
+                                .multilineTextAlignment(.trailing)
+                        }
                     }
                     Section("Maksutiedot") {
-                        TextField("IBAN", text: binding.invoiceIban.orEmpty).codeInput()
-                        TextField("BIC", text: binding.invoiceBic.orEmpty).codeInput()
-                        TextField("Maksuehdot laskulla", text: binding.invoiceTerms.orEmpty, axis: .vertical)
+                        LabeledContent("IBAN") {
+                            TextField("FI…", text: binding.invoiceIban.orEmpty).codeInput().multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("BIC") {
+                            TextField("", text: binding.invoiceBic.orEmpty).codeInput().multilineTextAlignment(.trailing)
+                        }
+                        // Several lines: the name over the text, which then has the row's width.
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Maksuehdot laskulla").font(.caption).foregroundStyle(Theme.ink2)
+                            TextField("", text: binding.invoiceTerms.orEmpty, axis: .vertical).accessibilityLabel("Maksuehdot laskulla")
+                        }
                     }
                     if let fields = Binding($collection) { collectionSection(fields) }
                 }
@@ -335,13 +375,28 @@ struct PasswordView: View {
 
     var body: some View {
         Form {
+            // Named in their rows: three rows of dots read alike once typed into (X146). A tap on a row's
+            // name opens its field too: the field starts after the name, and 'Uusi salasana uudelleen'
+            // covered the row's middle, where a tap went nowhere (P0 K, run 39374559226).
             Section {
-                SecureField("Nykyinen salasana", text: $current).textContentType(.password)
-                    .focused($focus, equals: .current).submitLabel(.next).onSubmit { focus = .new }
-                SecureField("Uusi salasana", text: $next).textContentType(.newPassword)
-                    .focused($focus, equals: .new).submitLabel(.next).onSubmit { focus = .again }
-                SecureField("Uusi salasana uudelleen", text: $again).textContentType(.newPassword)
-                    .focused($focus, equals: .again).submitLabel(.done).onSubmit { focus = nil }
+                LabeledContent("Nykyinen salasana") {
+                    SecureField("", text: $current).textContentType(.password).multilineTextAlignment(.trailing)
+                        .focused($focus, equals: .current).submitLabel(.next).onSubmit { focus = .new }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { focus = .current }
+                LabeledContent("Uusi salasana") {
+                    SecureField("", text: $next).textContentType(.newPassword).multilineTextAlignment(.trailing)
+                        .focused($focus, equals: .new).submitLabel(.next).onSubmit { focus = .again }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { focus = .new }
+                LabeledContent("Uusi salasana uudelleen") {
+                    SecureField("", text: $again).textContentType(.newPassword).multilineTextAlignment(.trailing)
+                        .focused($focus, equals: .again).submitLabel(.done).onSubmit { focus = nil }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { focus = .again }
             } footer: { Text("Vähintään 8 merkkiä.") }
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
@@ -374,6 +429,7 @@ struct PasswordView: View {
 }
 
 struct DevicesView: View {
+    static let path = "/api/auth/sessions"
     @Environment(AppModel.self) private var app
     @State private var sessions = ScreenLoad<[DeviceSession]>()
     @State private var failure: String?
@@ -381,6 +437,16 @@ struct DevicesView: View {
     @State private var signingOut = false
     @State private var confirmSession: DeviceSession?
     @State private var confirmOthers = false
+
+    /// `preview` (the app's `lastPainted` list, which Asetukset warms) is on screen in the first
+    /// frame: the push slid in a 200 pt spinner card that the rows replaced 0.9 s later (M053).
+    /// `load` then refreshes it in place.
+    init(preview: [DeviceSession]? = nil) {
+        guard let preview else { return }
+        var shown = ScreenLoad<[DeviceSession]>()
+        shown.succeed(preview)
+        _sessions = State(initialValue: shown)
+    }
 
     var body: some View {
         List {
@@ -435,8 +501,14 @@ struct DevicesView: View {
     }
 
     private func load() async {
+        let fromSpinner = sessions.value == nil
         sessions.begin()
-        do { sessions.succeed(DeviceSession.currentFirst((try await app.api.get("/api/auth/sessions") as DeviceSessions).sessions)) }
+        do {
+            let list = DeviceSession.currentFirst((try await app.api.get(Self.path) as DeviceSessions).sessions)
+            // Nothing painted yet: the rows ease in where the spinner was instead of cutting in.
+            if fromSpinner { withMotion(.snappy) { sessions.succeed(list) } } else { sessions.succeed(list) }
+            app.rememberPainted(list, Self.path)
+        }
         catch is CancellationError {}
         catch { sessions.fail(error) }
     }

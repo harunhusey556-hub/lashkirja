@@ -21,9 +21,13 @@ public enum StatementFiles {
         s.totals?.net ?? s.transactions.reduce(Decimal(0)) { $0 + $1.amount }
     }
 
-    /// "Syyskuu 2026 · Käyttötili · 12 tapahtumaa"
+    /// "tiliote-syyskuu.csv · Käyttötili · 12 tapahtumaa". The title already names the month, so
+    /// three files of one month read apart by the file they came from (X095); a bank-feed statement
+    /// has no file, and one without a month says so here, where its title cannot.
     public static func secondary(_ s: Statement) -> String {
-        [StatementText.month(s.periodMonth), s.bankAccount?.name, "\(txCount(s)) tapahtumaa"]
+        let parts: [String?] = [s.periodMonth == nil ? StatementText.month(nil) : nil, isBankFeed(s) ? nil : s.fileName,
+                                s.bankAccount?.name, "\(txCount(s)) tapahtumaa"]
+        return parts
             .compactMap { $0 }
             .filter { !$0.isEmpty }
             .joined(separator: " · ")

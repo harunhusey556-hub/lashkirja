@@ -264,6 +264,13 @@ public enum VatFiling {
     /// A sentence ending in a date like "12.10." already carries its full stop.
     private static func endSentence(_ text: String) -> String { text.hasSuffix(".") ? text : text + "." }
 
+    /// "Valitse … kaudelle syyskuu 2026.": a month is lower case mid-sentence; a quarter or a year as
+    /// `VatDue.label` names it.
+    public static func chooseStepText(period: String) -> String {
+        let label = VatDue.Period(period)?.kind == .month ? PeriodLock.formatMonth(period) : VatDue.label(period)
+        return "Valitse Arvonlisävero ja kausiveroilmoitus kaudelle \(label)."
+    }
+
     public static func fileStepText(dueIso: String, periodYear: Int) -> String {
         endSentence("Kirjoita kentät tältä sivulta ja lähetä ilmoitus viimeistään \(VatDue.dueDateText(dueIso, periodYear: periodYear))")
     }

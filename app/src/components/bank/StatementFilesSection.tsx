@@ -8,8 +8,8 @@ import { apiFetch, isUnauthorized, readJson, redirectToLogin } from "@/component
 import { Button, controlClass } from "@/components/ui";
 import { ListRow, Section, StatusTag } from "@/components/ds";
 import { formatEurSigned } from "@/lib/format";
-import { statementTitle } from "@/lib/display-titles";
-import { formatMonth, type StatementData } from "@/lib/statement-client";
+import { statementFileSecondary, statementTitle } from "@/lib/display-titles";
+import { type StatementData } from "@/lib/statement-client";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { showToast } from "@/lib/toast";
 import { detailHref } from "@/lib/routes";
@@ -103,26 +103,17 @@ export function StatementFilesSection() {
           </p>
         )}
       </div>
-      {visible.map((statement) => {
-        const secondary = [
-          formatMonth(statement.periodMonth),
-          statement.bankAccount?.name,
-          `${statement.totals.txCount} tapahtumaa`,
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        return (
-          <ListRow
-            key={statement.id}
-            href={detailHref("statement", statement.id)}
-            title={statementTitle(statement)}
-            secondary={secondary}
-            amount={formatEurSigned(statement.totals.net)}
-            amountTone={statement.totals.net >= 0 ? "positive" : "default"}
-            trailing={statement.fileType === "enablebanking" ? <StatusTag tone="neutral">Pankki</StatusTag> : undefined}
-          />
-        );
-      })}
+      {visible.map((statement) => (
+        <ListRow
+          key={statement.id}
+          href={detailHref("statement", statement.id)}
+          title={statementTitle(statement)}
+          secondary={statementFileSecondary(statement)}
+          amount={formatEurSigned(statement.totals.net)}
+          amountTone={statement.totals.net >= 0 ? "positive" : "default"}
+          trailing={statement.fileType === "enablebanking" ? <StatusTag tone="neutral">Pankki</StatusTag> : undefined}
+        />
+      ))}
       {list.length > RECENT_LIMIT && (
         <div className="px-4 py-3">
           <button

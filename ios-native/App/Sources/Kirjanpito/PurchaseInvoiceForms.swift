@@ -33,9 +33,11 @@ struct PurchaseInvoiceFormView: View {
         NavigationStack {
             Form {
                 Section {
+                    // A name is not a word to correct (U009).
                     TextField("Toimittaja", text: $form.supplierName, prompt: Text("Tukku Oy"))
                         .textContentType(.organizationName)
                         .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
                     fieldError(.supplierName)
                 } header: {
                     Text("Toimittaja")

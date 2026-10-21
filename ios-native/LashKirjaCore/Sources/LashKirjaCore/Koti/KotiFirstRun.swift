@@ -131,11 +131,12 @@ extension Koti {
     }
 
     /// 0 of 0 is not "100 % · Kaikki kunnossa": a month with nothing in it says so.
-    public static func monthStatus(done: Int, total: Int, blocking: Int) -> MonthStatus {
+    public static func monthStatus(done: Int, total: Int, blocking: Int, atCurrentMonth: Bool = true) -> MonthStatus {
+        let text = headline(blocking: blocking, atCurrentMonth: atCurrentMonth)
         guard total > 0 else {
-            return MonthStatus(progress: nil, headline: blocking > 0 ? headline(blocking: blocking) : nothingToCountYet, detail: nil)
+            return MonthStatus(progress: nil, headline: blocking > 0 ? text : nothingToCountYet, detail: nil)
         }
-        return MonthStatus(progress: min(1, Double(done) / Double(total)), headline: headline(blocking: blocking),
+        return MonthStatus(progress: min(1, Double(done) / Double(total)), headline: text,
                            detail: "\(done) / \(total) tapahtumaa on kunnossa")
     }
 }
