@@ -394,7 +394,10 @@ final class MotionAuditTests: WalkTestCase {
 
     func test01_Koti() {
         suite = "koti"
-        tabStep("koti-from-myynti-setup", from: "launch", "Koti")
+        // From Myynti, as the step says: the app opens on Koti, so a tap on Koti right after launch
+        // moved nothing and the step was NO-MOTION (final gate 39580643433).
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        tabStep("koti-from-myynti-setup", from: "Myynti", "Koti")
         step("koti-refresh", from: "Koti", to: "Koti", kind: "load", expect: "content stays put while refreshing", seconds: 5) {
             pullToRefresh()
         }
@@ -617,7 +620,9 @@ final class MotionAuditTests: WalkTestCase {
 
     func test06_SalesInvoiceFlow() {
         suite = "lasku"
-        tab("Myynti")
+        // Selected, not only tapped: the first tap after sign-in was lost, Koti stayed up and every
+        // lasku step was skipped (final gate 39580643433).
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
         let form = app.navigationBars["Uusi lasku"]
         step("lasku-new", from: "Myynti", to: "Uusi lasku", kind: "sheet", seconds: 5, presents: true, reached: navBar("Uusi lasku")) {
             press(app.buttons["Uusi lasku"].firstMatch)
