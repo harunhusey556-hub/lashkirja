@@ -33,23 +33,45 @@ final class P0Tests: WalkTestCase {
         check("P0.5 discard returns to settings", app.staticTexts["Sähköpostimallit"].waitForExistence(timeout: 5))
     }
 
-    // P0.5 #4: device sign-out asks first.
+    // P0.5 #4: device sign-out asks first. U001: the swipe is on the row's cell, not on its 46 pt
+    // "Selain" text, which revealed nothing; and the action is matched whole: CONTAINS 'Kirjaa ulos'
+    // also matched the always-visible 'Kirjaa ulos kaikki muut laitteet', and any sheet passed.
+    // Both questions are read by their titles. Peruuta each time: the session stays.
     func testB_DevicesSignOut() {
         openSettings()
-        guard tap("Laitteet") else { return }
-        sleep(3); shot("b1-devices"); dump(app, "b1-devices")
-        _ = app.staticTexts["Selain"].waitForExistence(timeout: 15)
-        guard tap("Kirjaa ulos kaikki muut laitteet") else { return }
-        sleep(2); shot("b2-signout-confirm"); dump(app, "b2-signout-confirm")
-        check("P0.5 sign out all other devices shows a confirmation", app.sheets.count > 0 || app.alerts.count > 0 || app.buttons["Peruuta"].exists)
-        if app.buttons["Peruuta"].exists { app.buttons["Peruuta"].tap() } else { app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap() }
-        sleep(1)
-        let row = app.staticTexts["Selain"].firstMatch
-        if row.exists { row.swipeLeft(); sleep(1); shot("b3-row-swipe"); dump(app, "b3-row-swipe")
-            let one = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Kirjaa ulos'")).firstMatch
-            if one.exists { one.tap(); sleep(1); shot("b4-one-confirm")
-                check("P0.5 sign out one device shows a confirmation", app.sheets.count > 0 || app.alerts.count > 0 || app.buttons["Peruuta"].exists) }
-            else { note("INFO no per-row sign-out action on swipe") } }
+        guard tap("Laitteet") else { XCTFail("Asetukset has no Laitteet"); return }
+        // The browser-like session scripts/sim/run-ui.sh signs in before the run.
+        let browser = app.cells.containing(NSPredicate(format: "label == %@", "Selain")).firstMatch
+        let listed = browser.waitForExistence(timeout: 15)
+        shot("b1-devices"); dump(app, "b1-devices")
+        guard listed else { XCTFail("Laitteet lists no Selain session"); return }
+        let title = app.staticTexts["confirm-sheet-title"].firstMatch
+        let cancel = app.buttons["confirm-sheet-cancel"].firstMatch
+        guard tap("Kirjaa ulos kaikki muut laitteet") else { XCTFail("Laitteet has no Kirjaa ulos kaikki muut laitteet"); return }
+        let others = title.waitForExistence(timeout: 5) ? title.label : "no question"
+        shot("b2-signout-confirm"); dump(app, "b2-signout-confirm")
+        check("P0.5 sign out all other devices asks first (\(others))", others == "Kirjataanko kaikki muut laitteet ulos?")
+        if cancel.exists { cancel.tap(); taps += 1 }
+        XCTAssertTrue(title.waitForNonExistence(timeout: 10), "Peruuta did not close the all-others question")
+
+        browser.swipeLeft()
+        // The row's own action; the question's confirm button carries the same words.
+        let action = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Kirjaa ulos", "confirm-sheet-confirm")).firstMatch
+        let revealed = action.waitForExistence(timeout: 5)
+        shot("b3-row-swipe"); dump(app, "b3-row-swipe")
+        // A long swipe can run the row's one action at once: the question is then up already.
+        if revealed && !title.exists { action.tap(); taps += 1 }
+        let asked = title.waitForExistence(timeout: 5) ? title.label : "no question"
+        let message = app.staticTexts["confirm-sheet-message"].firstMatch
+        let named = message.exists && message.label.hasPrefix("Selain")
+        shot("b4-one-confirm")
+        check("P0.5 sign out one device asks first (\(asked); names Selain \(named))", asked == "Kirjataanko laite ulos?" && named)
+        // The rows stay in the tree under the question (b2). A destructive swipe took this one off
+        // the list at the tap, before any answer, and Peruuta did not bring it back (run 39538176287).
+        XCTAssertTrue(browser.exists, "the swipe's Kirjaa ulos took the Selain row off the list before the question was answered")
+        if cancel.exists { cancel.tap(); taps += 1 }
+        XCTAssertTrue(title.waitForNonExistence(timeout: 10), "Peruuta did not close the one-device question")
+        XCTAssertTrue(browser.exists, "Peruuta signed the Selain session out")
     }
 
     // P0.4 #5: template editor asks before swipe-dismiss when dirty, not when clean.

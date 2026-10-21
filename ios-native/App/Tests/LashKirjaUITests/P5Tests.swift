@@ -24,13 +24,13 @@ final class P5Tests: WalkTestCase {
         }
         if !opened {
             // Twenty slow swipes through Koti at AX5 now and then end elsewhere; the invoice itself
-            // is what this checks, so it is opened from Myynti's overdue chip instead (noted above).
+            // is what this checks, so the overdue row is opened from Myynti instead (noted above), by
+            // the status its label ends with. 'Myöhäs' matched the receivables bar's 10 pt segment,
+            // left under the navigation bar by the scrolled list: the bar took the tap, the list
+            // stayed on Kaikki, and the next 'Lasku ' row was the paid Lasku 1 (run 39538176287).
             shot("p5-koti-miss"); dump(app, "p5-koti-miss")
             tab("Myynti"); sleep(3)
-            if tapLabel("label BEGINSWITH %@", "Myöhäs", scrolls: 4) {
-                sleep(2)
-                opened = tapLabel("label CONTAINS %@", "Lasku ", scrolls: 10)
-            }
+            opened = tapLabel("label CONTAINS 'Lasku ' AND label ENDSWITH %@", ", Myöhässä", scrolls: 10)
         }
         if opened { sleep(4); shot("p5-invoice-detail") }
         check("P5 invoice detail opens at AX5", app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Myöhässä '")).firstMatch.exists)

@@ -7,7 +7,10 @@ final class P1Tests: WalkTestCase {
     }
 
     func test01_CreateInvoiceFromMyynti() {
-        tab("Myynti"); let opened = tap("Uusi lasku")
+        // Selected, not only tapped: the class's first tap comes right after sign-in and was lost
+        // twice, Koti stayed up and the walk scrolled it for Uusi lasku (runs 39538176287, 39557094935).
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        let opened = tap("Uusi lasku")
         measure("create invoice (Myynti)", reached: opened && app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15))
     }
     func test02_CreateInvoiceFromAdd() {
