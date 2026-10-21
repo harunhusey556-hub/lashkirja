@@ -195,6 +195,10 @@ class WalkTestCase: XCTestCase {
         for _ in 0...maxScrolls {
             let e = q.firstMatch
             if e.exists && e.frame.minY > 30 && e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 {
+                // A list still gliding after a swipe takes the tap as a stop, not a choice: the row was
+                // tapped mid-glide and nothing opened (OwnerScreens testJ and testM, run 39528413225).
+                waitStill(e)
+                guard e.frame.minY > 30, e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 else { continue }
                 e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); taps += 1; return true
             }
             app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1
