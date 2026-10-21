@@ -54,6 +54,15 @@ public enum Koti {
         /// A bank to reconnect or to scope opens the account list, where that is done.
         public let fixesBank: Bool
         public var id: Kind { kind }
+        /// Under the "Avoimet laskut" heading the rows need not say "Avoimet" again; VoiceOver
+        /// keeps the whole title, as it reads a row without its heading.
+        public var shortTitle: String {
+            switch kind {
+            case .bank: title
+            case .receivables: "Myyntilaskut"
+            case .payables: "Ostolaskut"
+            }
+        }
         public var accessibilityLabel: String {
             [title, amount.map { Money.format($0) }, secondary].compactMap { $0 }.joined(separator: ", ")
         }

@@ -159,8 +159,7 @@ private struct KotiContent: View {
         case .money:
             moneyCards(d)
         case .positions:
-            positions(Koti.positionRows(d),
-                      title: Koti.positionsTitle(hasBalanceCard: Koti.showsBalanceCard(d.bank), atCurrentMonth: model.atCurrentMonth))
+            positions(Koti.positionRows(d), hasBalanceCard: Koti.showsBalanceCard(d.bank))
         case .cashflow:
             CashflowCard(months: d.cashflow, selected: d.month) { month in Task { await model.show(month: month) } }
         case .handled:
@@ -389,14 +388,14 @@ private struct KotiContent: View {
     }
 
     /// Pankkitilit (when there is no balance card), Avoimet myyntilaskut and ostolaskut.
-    private func positions(_ rows: [Koti.PositionRow], title: String) -> some View {
+    private func positions(_ rows: [Koti.PositionRow], hasBalanceCard: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(title: title)
+            SectionHeader(title: Koti.positionsTitle(hasBalanceCard: hasBalanceCard, atCurrentMonth: model.atCurrentMonth))
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                     if index > 0 { Divider().padding(.leading, 60) }
                     NavigationLink(value: route(row)) {
-                        PositionRowView(row: row).contentShape(Rectangle())
+                        PositionRowView(row: row, short: hasBalanceCard).contentShape(Rectangle())
                     }
                     .buttonStyle(.pressable)
                 }
@@ -972,12 +971,14 @@ private struct BalanceCard: View {
 /// One row under Rahatilanne: what it is, how much, and what is late (in the danger colour).
 private struct PositionRowView: View {
     let row: Koti.PositionRow
+    /// Under the "Avoimet laskut" heading: the title without its "Avoimet".
+    let short: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             RowIcon(symbol: symbol, tint: row.tone == .danger ? Theme.danger : row.tone == .warning ? Theme.warning : Theme.accent)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.title).font(.body).foregroundStyle(Theme.ink)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(short ? row.shortTitle : row.title).font(.body).foregroundStyle(Theme.ink)
                 Text(row.secondary)
                     .font(.caption)
                     .foregroundStyle(row.tone == .danger ? Theme.danger : row.tone == .warning ? Theme.warning : Theme.ink2)
@@ -990,7 +991,8 @@ private struct PositionRowView: View {
             Chevron()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        // The owner found the two rows crowded (2026-10-21): more air above and below, not a new layout.
+        .padding(.vertical, 14)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityAddTraits(.isButton)

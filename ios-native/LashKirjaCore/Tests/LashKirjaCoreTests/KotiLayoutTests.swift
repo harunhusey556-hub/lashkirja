@@ -120,6 +120,8 @@ private let trend = BalanceTrend(points: [
     #expect(Koti.openRow(try totals(500, overdue: 80, count: 1), kind: .receivables)!.secondary == "1 lasku myöhässä · 80,00\(nbsp)€")
     #expect(Koti.openRow(try totals(500, overdue: 80, count: 0), kind: .receivables)!.secondary == "80,00\(nbsp)€ myöhässä")
     #expect(late.accessibilityLabel == "Avoimet ostolaskut, 500,00\(nbsp)€, 2 laskua myöhässä · 120,00\(nbsp)€")
+    // Under "Avoimet laskut" the rows show the short title; VoiceOver keeps the whole one.
+    #expect(calm.shortTitle == "Myyntilaskut" && late.shortTitle == "Ostolaskut")
 }
 
 @Test func positionRowsLeaveOutFiguresThatDidNotLoad() throws {
