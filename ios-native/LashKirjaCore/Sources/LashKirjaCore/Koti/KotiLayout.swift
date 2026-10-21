@@ -1,8 +1,8 @@
 import Foundation
 
-/// The order of Koti's parts. Money first: the balance is what an owner checks, so it sits
-/// right under the month's status; what needs doing follows, then the month's figures and the
-/// open invoices, and the history last.
+/// The order of Koti's parts. What needs the owner comes first (Q3, as on the web): on a day with
+/// few tasks, the overdue invoices and Kuvaa kuitti without a scroll. The balance follows, then the
+/// month's figures and the open invoices, and the history last.
 public enum KotiSection: Hashable, Sendable {
     /// "Viimeistele yritysprofiili": the onboarding was skipped and is still open.
     case onboarding
@@ -108,8 +108,8 @@ public enum KotiLayout {
         if setup && input.brandNew { sections.append(.setup) }
         sections.append(.status)
         if input.partialFailure { sections.append(.partialFailure) }
-        if input.balanceCard { sections.append(.balance) }
         if input.hasTasks { sections.append(.tasks) }
+        if input.balanceCard { sections.append(.balance) }
         if input.failedJobs { sections.append(.failedJobs) }
         sections.append(.money)
         if input.hasPositions { sections.append(.positions) }

@@ -87,6 +87,43 @@ import Foundation
     #expect(ReceiptMatchText.percent(0.904) == "90 %")
 }
 
+// X039: the receipt's candidates in the words of "Valitse pankkitapahtuma".
+@Test func candidateLineUsesTheServersFinnishReasons() throws {
+    let json = #"{"receipt":{"id":"r","createdAt":"a","updatedAt":"b","match":{"status":"unlinked","matchCandidates":[{"id":"t1","date":"2026-10-01T00:00:00.000Z","counterparty":"Prisma 10","amount":-9.43,"score":0.3,"reasons":["amount","date"],"explanation":["summa sama","veloitettu 1 päivä oston jälkeen"]},{"id":"t2","date":"2026-10-01T00:00:00.000Z","counterparty":"K-Market","amount":-12.5,"score":0.9,"reasons":["amount","vendor"]}]}}}"#
+    let candidates = try #require(try JSONDecoder().decode(ReceiptResponse.self, from: Data(json.utf8)).receipt.match?.matchCandidates)
+    #expect(candidates[0].explanation == ["summa sama", "veloitettu 1 päivä oston jälkeen"])
+    #expect(ReceiptMatchText.detail(candidates[0]) == "Miksi: summa sama · veloitettu 1 päivä oston jälkeen")
+    // A server without the Finnish reasons: the code words and the score, as before.
+    #expect(candidates[1].explanation == nil)
+    #expect(ReceiptMatchText.detail(candidates[1]) == "summa, myyjä · 90 %")
+}
+
+// X001 X038 X068 X080: money out reads −, money back plain, on every screen.
+@Test func amountsCarryTheirCashDirection() throws {
+    #expect(MoneyDirection.receiptAmount(Decimal(string: "9.43")!, isIncome: false) == Decimal(string: "-9.43")!)
+    #expect(MoneyDirection.receiptAmount(-50, isIncome: false) == 50)
+    #expect(MoneyDirection.receiptAmount(20, isIncome: true) == 20)
+    #expect(MoneyDirection.rowAmount(Decimal(string: "9.43")!, moneyIn: false) == Decimal(string: "-9.43")!)
+    #expect(MoneyDirection.rowAmount(-50, moneyIn: true) == 50)
+
+    func receipt(_ fields: String) throws -> Receipt {
+        try JSONDecoder().decode(Receipt.self, from: Data((#"{"id":"r","createdAt":"a","updatedAt":"b","# + fields + "}").utf8))
+    }
+    let expense = try receipt(#""type":"meno","totalAmount":9.5"#)
+    #expect(expense.shownAmount == Decimal(string: "-9.5")!)
+    #expect(!expense.bankMoneyIn)
+    // A credit note's refund comes back: its rows are incoming, as the server's picker lists them.
+    let credit = try receipt(#""type":"meno","totalAmount":-50"#)
+    #expect(credit.shownAmount == 50)
+    #expect(credit.bankMoneyIn)
+    let sale = try receipt(#""type":"tulo","totalAmount":20"#)
+    #expect(sale.shownAmount == 20)
+    #expect(sale.bankMoneyIn)
+    let blank = try receipt(#""type":"meno""#)
+    #expect(blank.shownAmount == nil)
+    #expect(!blank.bankMoneyIn)
+}
+
 @Test func linkedAmountGapMatchesTheWebTolerance() {
     #expect(ReceiptMatchText.amountGap(bank: -124, receiptTotal: 124) == nil)
     #expect(ReceiptMatchText.amountGap(bank: -126, receiptTotal: 124) == nil)

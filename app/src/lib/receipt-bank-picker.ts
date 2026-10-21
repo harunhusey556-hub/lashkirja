@@ -9,15 +9,13 @@
 import { prisma } from "./db";
 import { NotFoundError } from "./api-errors";
 import { centsToEuros } from "./money";
-import { receiptDirection, scorePair, type MatchReceipt } from "./matching";
+import { byReceiptFit, RECEIPT_ROW_ORDER, receiptDirection, scorePair, type MatchReceipt } from "./matching";
 import {
   matchesPurchaseSearch,
   pageOf,
   type CandidatePage,
   type PurchaseBankCandidateList,
 } from "./purchase-bank-match";
-
-const DAY_MS = 86_400_000;
 
 function isoDay(date: Date | null): string | null {
   return date ? date.toISOString().slice(0, 10) : null;
@@ -85,6 +83,7 @@ export async function listBankRowsForReceipt(
       type: true,
       statement: { select: { periodMonth: true } },
     },
+    orderBy: RECEIPT_ROW_ORDER,
   });
 
   const q = options.q?.trim() ?? "";
@@ -99,9 +98,8 @@ export async function listBankRowsForReceipt(
     if (key) months.set(key, (months.get(key) ?? 0) + 1);
   }
 
-  const receiptDay = receipt.date?.getTime() ?? null;
-  const gap = (date: Date | null) =>
-    date === null || receiptDay === null ? Number.MAX_SAFE_INTEGER : Math.abs(date.getTime() - receiptDay) / DAY_MS;
+  // The order the receipt itself lists its candidates in (X039).
+  const fit = byReceiptFit(receipt.date);
   const ranked = searched
     .filter((row) => !options.month || monthOf(row) === options.month)
     .map((row) => {
@@ -120,13 +118,7 @@ export async function listBankRowsForReceipt(
       );
       return { row, score: scored?.score ?? 0, reasons: scored?.explanation ?? [], codes: scored?.reasons ?? [] };
     })
-    // Best score first, then the bank date nearest the receipt's, then the newest row.
-    .sort(
-      (a, b) =>
-        b.score - a.score ||
-        gap(a.row.date) - gap(b.row.date) ||
-        (b.row.date?.getTime() ?? 0) - (a.row.date?.getTime() ?? 0)
-    );
+    .sort((a, b) => fit({ score: a.score, date: a.row.date }, { score: b.score, date: b.row.date }));
 
   const page = pageOf(ranked, options);
   return {

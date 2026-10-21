@@ -24,6 +24,9 @@ public struct Dashboard: Decodable, Sendable {
     public let receivables: OpenTotals?
     public let payables: OpenTotals?
     public let items: [DashboardItem]
+    /// How many of each kind exist ("missing_receipt": 30), shown or not: the server sends three
+    /// of a kind, and the rest are behind "Näytä kaikki (N)". Nil from a server without it.
+    public let itemTotals: [String: Int]?
     public let blockingTotal: Int?
     public let previousMonth: PreviousMonth?
     public let setup: Setup?
@@ -114,7 +117,7 @@ public struct Dashboard: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case firstName, month, income, expenses, source, txCount, receiptCount, invoiceCount, pendingReceiptsCount
         case matching, events, handled, estimatedVat, isRefund, vat, hasImap, bank, bankTrend, cashflow
-        case receivables, payables, items, blockingTotal, previousMonth, setup, accountCreatedMonth, sectionErrors
+        case receivables, payables, items, itemTotals, blockingTotal, previousMonth, setup, accountCreatedMonth, sectionErrors
     }
 
     public init(from decoder: Decoder) throws {
@@ -141,6 +144,7 @@ public struct Dashboard: Decodable, Sendable {
         receivables = try c.decodeIfPresent(OpenTotals.self, forKey: .receivables)
         payables = try c.decodeIfPresent(OpenTotals.self, forKey: .payables)
         items = try c.decodeIfPresent([DashboardItem].self, forKey: .items) ?? []
+        itemTotals = try c.decodeIfPresent([String: Int].self, forKey: .itemTotals)
         blockingTotal = try c.decodeIfPresent(Int.self, forKey: .blockingTotal)
         previousMonth = try c.decodeIfPresent(PreviousMonth.self, forKey: .previousMonth)
         setup = try c.decodeIfPresent(Setup.self, forKey: .setup)
