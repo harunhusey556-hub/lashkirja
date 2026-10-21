@@ -302,9 +302,14 @@ struct AppLockSettingsView: View {
                     Button("Poista lukitus", role: .destructive) { lock.disable(); enabled = false }
                 }
             } else {
+                // Named in their rows: two rows of dots read alike once typed into (X146).
                 Section {
-                    SecureField("Uusi PIN (4–8 numeroa)", text: $newPin).keyboardType(.numberPad)
-                    SecureField("PIN uudelleen", text: $confirmPin).keyboardType(.numberPad)
+                    LabeledContent("Uusi PIN") {
+                        SecureField("4–8 numeroa", text: $newPin).keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("PIN uudelleen") {
+                        SecureField("", text: $confirmPin).keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                    }
                     Button {
                         enable()
                     } label: {

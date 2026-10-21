@@ -48,6 +48,9 @@ enum Route: Hashable {
     case privacy
     case help
     case passkeys
+    /// Asetukset: Laitteet and Sähköpostimallit, built at the push with what Asetukset warmed.
+    case devices
+    case emailTemplates
     case changeEmail
     case emailImport
     /// Kuitit opened on a month and tab (`/kuitit?month=…&type=…`).
@@ -234,7 +237,9 @@ struct RouteScreen: View {
         case .workQueue: WorkQueueView()
         case .privacy: PrivacyView()
         case .help: HelpView()
-        case .passkeys: PasskeysView()
+        case .passkeys: PasskeysView(preview: app.lastPainted(PasskeyScreen.listPath))
+        case .devices: DevicesView(preview: app.lastPainted(DevicesView.path))
+        case .emailTemplates: EmailTemplatesView(preview: app.lastPainted(EmailTemplatesView.path, query: EmailTemplatesView.query))
         case .changeEmail: ChangeEmailView()
         case .emailImport:
             // A connected or removed mailbox changes the profile other screens read from AppModel.

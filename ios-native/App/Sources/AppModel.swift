@@ -570,6 +570,38 @@ final class AppModel {
         }
     }
 
+    /// Asetukset is open: Laitteet, Sähköpostimallit and Pääsyavaimet (`NextPrefetch.asetukset`) are
+    /// asked now and kept in `lastPainted`, so each push lands on its content (M053 M054 M057).
+    /// Asked even when cached: a write under /api/auth leaves `dataVersion` alone, so the cache could
+    /// hold a list that a sign-out or a rename there has changed since. A failed request leaves
+    /// what was painted last.
+    func warmAsetukset() async {
+        guard case .signedIn = phase else { return }
+        let answered = await withTaskGroup(of: String?.self, returning: Set<String>.self) { group in
+            for request in NextPrefetch.asetukset() {
+                group.addTask {
+                    let answer: Ignored? = try? await self.cachedGet(request.path, query: request.query, force: true, persist: request.persist)
+                    return answer == nil ? nil : request.path
+                }
+            }
+            var paths: Set<String> = []
+            for await path in group { if let path { paths.insert(path) } }
+            return paths
+        }
+        if answered.contains(DevicesView.path), let list: DeviceSessions = await cachedValue(DevicesView.path) {
+            rememberPainted(DeviceSession.currentFirst(list.sessions), DevicesView.path)
+        }
+        if answered.contains(EmailTemplatesView.path),
+           let list: EmailTemplateList = await cachedValue(EmailTemplatesView.path, query: EmailTemplatesView.query) {
+            rememberPainted(list, EmailTemplatesView.path, query: EmailTemplatesView.query)
+        }
+        if answered.contains(PasskeyScreen.listPath), answered.contains(PasskeyScreen.statusPath),
+           let list: PasskeyList = await cachedValue(PasskeyScreen.listPath),
+           let status: PasskeyStatus = await cachedValue(PasskeyScreen.statusPath) {
+            rememberPainted(PasskeyScreen(passkeys: list.passkeys, canCreate: status.native), PasskeyScreen.listPath)
+        }
+    }
+
     private func warmAll(_ requests: [PrefetchRequest]) async {
         await withTaskGroup(of: Void.self) { group in
             for request in requests {

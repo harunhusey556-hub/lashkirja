@@ -50,7 +50,9 @@ struct ReviewQueueSection: View {
                 .opacity(dimmed ? 0.4 : 1)
             }
             Section {
-                Text(current.description).font(.caption).foregroundStyle(Theme.ink2)
+                if let caption = current.caption(chipsShown: groups.count > 1) {
+                    Text(caption).font(.caption).foregroundStyle(Theme.ink2)
+                }
                 if current == .rejected {
                     rejectedRows
                 } else {
@@ -125,14 +127,13 @@ struct ReviewQueueSection: View {
             }
             .foregroundStyle(Theme.ink)
         }
+        // No "N kuittia vaatii täydennyksen." under it: each such row says what it lacks beside its
+        // Täydennä, and "Hyväksy valmiit" counts only the ready ones (M010).
         if let title = ReviewQueue.approveTitle(rows) {
             Button { Task { await approve(ReviewQueue.ready(rows).map(\.id)) } } label: {
                 Label(title, systemImage: "checkmark.circle")
             }
             .disabled(busy)
-        }
-        if let note = ReviewQueue.incompleteNote(rows) {
-            Text(note).font(.caption).foregroundStyle(Theme.warning)
         }
         // The server sends the queue 200 at a time; the next page only by this button.
         if pendingHasMore && (showAll || rows.count <= Self.preview) {

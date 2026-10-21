@@ -728,7 +728,7 @@ final class MotionAuditTests: WalkTestCase {
         step("pankki-back", from: "Pankki", to: "Kirjanpito", reached: { books.waitForExistence(timeout: 8) && bank.waitForNonExistence(timeout: 3) },
              recover: { self.goBack(until: books) }) { press(backButton()) }
         for (id, label) in [("email", "Sähköposti"), ("purchases", "Ostolaskut"), ("match", "Kohdista ostolaskujen maksut"),
-                            ("periods", "Kuukauden sulku"), ("alv", "ALV-ilmoitus"), ("ledger", "Kirjanpito, Tuloslaskelma")] {
+                            ("periods", "Kuukauden sulku"), ("alv", "ALV-ilmoitus"), ("ledger", "Tulos ja tase, Tuloslaskelma")] {
             guard let row = find("label BEGINSWITH %@", label) else { note("SKIP pankki/\(id): no \(label)"); continue }
             // Pushed or not by the back button: the ledger's title is the root's own 'Kirjanpito'.
             let opened = step("kirjanpito-\(id)-open", from: "Kirjanpito", to: label, seconds: 5,

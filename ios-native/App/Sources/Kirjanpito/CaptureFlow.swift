@@ -773,9 +773,11 @@ struct ReceiptEditor: View {
             Section {
                 // Labels beside the fields, not placeholders: once filled, the rows read only
                 // "Testikauppa Oy" and "12,40", with nothing to say which was the amount (U095).
+                // A name is not a word to correct (U009).
                 LabeledContent("Myyjä") {
                     TextField("", text: $form.vendor)
                         .textContentType(.organizationName)
+                        .autocorrectionDisabled()
                         .multilineTextAlignment(.trailing)
                         .focused($focus, equals: .vendor)
                 }
