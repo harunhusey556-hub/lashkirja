@@ -40,6 +40,17 @@ private func fixture(_ name: String) throws -> Data {
     #expect(Money.format(d.income) == "427,68\u{00A0}€")
 }
 
+// X005: how many of each kind exist, for "Näytä kaikki (N)".
+@Test func decodesItemTotals() throws {
+    let d = try JSONDecoder().decode(Dashboard.self, from: fixture("dashboard-items.json"))
+    #expect(d.itemTotals?["missing_receipt"] == 4)
+    #expect(d.itemTotals?["pending_receipt"] == 1)
+    #expect(d.itemTotals?["overdue_invoice"] == 0)
+    let base = #"{"month":"2026-10","income":0,"expenses":0,"matching":{"matchable":0,"matched":0,"suggested":0}"#
+    #expect(try JSONDecoder().decode(Dashboard.self, from: Data((base + "}").utf8)).itemTotals == nil)
+    #expect(try JSONDecoder().decode(Dashboard.self, from: Data((base + #","itemTotals":null}"#).utf8)).itemTotals == nil)
+}
+
 @Test func monthKeys() {
     #expect(MonthKey.shift("2026-10", by: -1) == "2026-09")
     #expect(MonthKey.shift("2026-01", by: -1) == "2025-12")

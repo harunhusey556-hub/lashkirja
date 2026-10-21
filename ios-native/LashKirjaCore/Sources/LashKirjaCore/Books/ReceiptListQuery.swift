@@ -214,6 +214,16 @@ public enum ReceiptMatchText {
     /// "90 %"
     public static func percent(_ score: Double?) -> String { "\(Int(((score ?? 0) * 100).rounded())) %" }
 
+    /// A bank row's second line on the receipt: the server's Finnish reasons in the words of
+    /// "Valitse pankkitapahtuma" ("Miksi: summa sama · veloitettu 1 päivä oston jälkeen", X039);
+    /// from a server without them, the codes and the score ("summa, myyjä · 90 %").
+    public static func detail(_ tx: Receipt.LinkedTransaction) -> String {
+        if let why = BankMatchText.why(tx.explanation ?? []) { return why }
+        let words = Self.reasons(tx.bestReasons)
+        let score = Self.percent(tx.bestScore)
+        return words.isEmpty ? score : "\(words) · \(score)"
+    }
+
     /// Bank amount minus receipt total when they disagree by more than a fee
     /// (2 € or 0,5 %, as `linkAmountGapCents` in lib/fee-tolerance.ts); nil otherwise.
     public static func amountGap(bank: Decimal, receiptTotal: Decimal?) -> Decimal? {
@@ -341,5 +351,32 @@ public struct ReceiptRowText: Sendable, Equatable {
         linked = receipt.isBankMatched
         // A figure's list (`drill`) shows the bills among the kuitit, so a bill says what it is (X079).
         kindTag = receipt.kind == .invoice ? ReceiptDocumentKind.invoice.title : nil
+    }
+}
+
+/// One sign for one figure on every screen (X001 X038 X068 X080): money out reads −9,43 €, money
+/// back reads 50,00 €. A receipt's booked total is turned the way the Kuitit row turns it: a meno
+/// total is negated, so a credit note's negative meno total reads as the refund it is.
+public enum MoneyDirection {
+    public static func receiptAmount(_ total: Decimal, isIncome: Bool) -> Decimal {
+        isIncome ? total : -total
+    }
+
+    /// A bank row the API sends without its sign (the bank row pickers). The caller knows the
+    /// direction: the picker is shared with purchase invoices, whose payments are money out.
+    public static func rowAmount(_ amount: Decimal, moneyIn: Bool) -> Decimal {
+        moneyIn ? abs(amount) : -abs(amount)
+    }
+}
+
+extension Receipt {
+    /// The total with its cash sign (`MoneyDirection`); nil without a total.
+    public var shownAmount: Decimal? { totalAmount.map { MoneyDirection.receiptAmount($0, isIncome: isIncome) } }
+
+    /// Its bank row brings money in: a tulo, or a meno credit note's refund (the server's
+    /// `receiptDirection`, which picks the rows the bank row picker lists).
+    public var bankMoneyIn: Bool {
+        guard let shown = shownAmount, shown != 0 else { return isIncome }
+        return shown > 0
     }
 }

@@ -274,6 +274,24 @@ export function candidatesFor(
     });
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * One order for a receipt's bank rows, on the receipt and in "Valitse muu pankkitapahtuma"
+ * (X039): the best score first, then the bank date nearest the receipt's, then the newest row.
+ * Rows equal on all three keep the order of the query, which both lists ask by date and id.
+ */
+export function byReceiptFit(receiptDate: Date | null) {
+  const day = receiptDate?.getTime() ?? null;
+  const gap = (date: Date | null) =>
+    date === null || day === null ? Number.MAX_SAFE_INTEGER : Math.abs(date.getTime() - day) / DAY_MS;
+  return (a: { score: number; date: Date | null }, b: { score: number; date: Date | null }) =>
+    b.score - a.score || gap(a.date) - gap(b.date) || (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0);
+}
+
+/** The query order of a receipt's bank rows (see `byReceiptFit`). */
+export const RECEIPT_ROW_ORDER: Prisma.TransactionOrderByWithRelationInput[] = [{ date: "desc" }, { id: "asc" }];
+
 /**
  * Bank rows for one receipt ("which bank row fits this kuitti?"). `suggest` (the chat's one
  * proposal) lists only gate-eligible rows. `search` (the receipt screen, the owner choosing by
@@ -366,7 +384,8 @@ export interface ReceiptMatchView {
   suggestedTransaction:
     | (BankTxMatchSummary & { score: number; reasons: string[] })
     | null;
-  matchCandidates: Array<BankTxMatchSummary & { score: number; reasons: string[] }>;
+  /** `explanation`: the Finnish reasons the bank row picker gives for the same row (X039). */
+  matchCandidates: Array<BankTxMatchSummary & { score: number; reasons: string[]; explanation: string[] }>;
 }
 
 function parseMatchReasons(raw: string | null | undefined): string[] | null {
@@ -481,6 +500,7 @@ export async function buildReceiptMatchViews(
             matchReasons: true,
             statement: { select: { periodMonth: true, fileName: true } },
           },
+          orderBy: RECEIPT_ROW_ORDER,
         })
       : Promise.resolve([]),
     includeCandidates
@@ -567,14 +587,18 @@ export async function buildReceiptMatchViews(
           ...toBankTxSummary(tx),
           score: c.score,
           reasons: c.reasons,
+          // The pair's own words (scorePair), as the picker gives them (X039). The tie suffix depends
+          // on which rows a list holds, and the picker holds rejected rows this list leaves out.
+          explanation: (c.explanation ?? []).filter((reason) => reason !== AMBIGUOUS_REASON),
         };
       })
       .filter(
         (
           c
-        ): c is BankTxMatchSummary & { score: number; reasons: string[] } =>
+        ): c is BankTxMatchSummary & { score: number; reasons: string[]; explanation: string[] } =>
           c !== null
-      );
+      )
+      .sort(byReceiptFit(receipt.date));
 
     result.set(receipt.id, {
       status: "unlinked",

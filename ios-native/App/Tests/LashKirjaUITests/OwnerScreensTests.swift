@@ -656,9 +656,13 @@ final class OwnerScreensTests: WalkTestCase {
     /// The shown screen's Back, then the bar of the screen under it. A sheet's stack has its own Back
     /// over the one of the screen beneath it, which is not hittable.
     func back(to title: String) {
-        let shown = app.navigationBars.buttons.matching(identifier: "BackButton").allElementsBoundByIndex.first { $0.isHittable }
-        if let shown { shown.tap() } else { edgeSwipeBack() }
-        _ = app.navigationBars[title].waitForExistence(timeout: 10)
+        // A menu still open takes the first tap and closes (UI suite 39487668420 stayed on Lasku 2
+        // under its Toiminnot), so the back is tried once more when the screen did not come.
+        for _ in 0..<2 {
+            let shown = app.navigationBars.buttons.matching(identifier: "BackButton").allElementsBoundByIndex.first { $0.isHittable }
+            if let shown { shown.tap() } else { edgeSwipeBack() }
+            if app.navigationBars[title].waitForExistence(timeout: 10) { return }
+        }
     }
 
     /// Closes an open menu without choosing, by a tap beside it, and waits until `item` has gone with it.
@@ -1053,6 +1057,84 @@ final class OwnerScreensTests: WalkTestCase {
         keep("h-saved", saved.map { "\(($0["supplierName"] as? String) ?? "") · \(($0["category"] as? String) ?? "nil")" } ?? "not found")
         guard let found = saved else { XCTFail("the demo API lists no ostolasku for Testitukku \(token)"); return }
         XCTAssertEqual(found["category"] as? String, "tarvikkeet", "the picked category was not stored as its code")
+    }
+
+    // X007 X109 X114 X125 X155: Koti's first task row cut the seed's long vendor name to 'Audit
+    // Hyvitys Odottaa…' while the amount column left room. The name reads whole, on at most two
+    // lines, and its amount and Hyväksy stay whole. Measured, not audited: the .textClipped audit
+    // flags text that wraps whole too (B2, run 39207976615).
+    func testI_KotiTaskNameNotClipped() {
+        guard selectTab("Koti") else { capture("i0-no-tab"); XCTFail("Koti did not open"); return }
+        let name = "Audit Hyvitys Odottaa Oy"
+        let party = app.staticTexts[name].firstMatch
+        guard party.waitForExistence(timeout: 20) else {
+            capture("i0-no-row"); tree("i0-no-row"); XCTFail("Koti lists no task for \(name)"); return
+        }
+        waitStill(party)
+        capture("i1-koti-tasks")
+        // The row's body text, at the size the simulator is set to (the runner shares it).
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        let whole = ceil((name as NSString).size(withAttributes: [.font: font]).width)
+        let lines = Int((party.frame.height / font.lineHeight).rounded())
+        keep("i-party", "\(party.frame), whole name \(whole) pt, one line \(font.lineHeight) pt")
+        // As wide as the whole name on one line, or wrapped onto a second: either way nothing is cut.
+        XCTAssertTrue(party.frame.width >= whole - 2 || lines == 2,
+                      "the name is cut: \(party.frame.width) of \(whole) pt on \(lines) line(s)")
+        XCTAssertLessThanOrEqual(lines, 2, "the name takes \(lines) lines")
+
+        // Not at the cost of the amount and the pill beside it: given the row first, the name and its
+        // long subtitle once left them about 32 pt, which cut both to an ellipsis.
+        let figure = "18,90\u{00A0}€"
+        let amounts = app.staticTexts.matching(NSPredicate(format: "label == %@", figure)).allElementsBoundByIndex
+        let pill = app.buttons["Hyväksy: \(name)"].firstMatch
+        guard let amount = amounts.first(where: { abs($0.frame.midY - party.frame.midY) < 40 }), pill.exists else {
+            tree("i1-no-trailing"); XCTFail("the row shows no \(figure) or no Hyväksy"); return
+        }
+        // MoneyText's digits are monospaced; the pill's text has TaskRow.pillLabel's 12 pt on each side.
+        let amountFont = UIFont.monospacedDigitSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize,
+                                                          weight: .semibold)
+        let pillFont = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .bold)
+        let amountWhole = ceil((figure as NSString).size(withAttributes: [.font: amountFont]).width)
+        let pillWhole = ceil(("Hyväksy" as NSString).size(withAttributes: [.font: pillFont]).width) + 24
+        keep("i-trailing", "amount \(amount.frame), whole \(amountWhole) pt; pill \(pill.frame), whole \(pillWhole) pt")
+        XCTAssertGreaterThanOrEqual(amount.frame.width, amountWhole - 2, "the amount is cut: \(amount.frame.width) of \(amountWhole) pt")
+        XCTAssertGreaterThanOrEqual(pill.frame.width, pillWhole - 2, "the Hyväksy pill is cut: \(pill.frame.width) of \(pillWhole) pt")
+    }
+
+    // X072: a credit note was asked 'Onko tämä lasku, joka maksetaan myöhemmin?' with 'Merkitse
+    // ostolaskuksi'. The seed's approved credit note 'Audit Hyvitys Oy' (−50,00 €) is offered as an
+    // ostolasku's credit instead.
+    func testJ_CreditNoteIsNotABillPaidLater() {
+        guard openKuitit() else { capture("j0-no-kuitit"); XCTFail("Kuitit did not open"); return }
+        // Kuitit shows ten rows before "Näytä enemmän". The credit note shares its day with the seed's
+        // Lidl 3, and the server orders one day's rows by id, a random uuid: with nine rows newer than
+        // that day it is the tenth row or the eleventh, behind the fold (run 39382398509). The owner
+        // opens the fold, and so does the walk.
+        var found = tapLabel("label CONTAINS %@", "Audit Hyvitys Oy,")
+        for _ in 0..<2 where !found {
+            guard tapLabel("label BEGINSWITH %@", "Näytä enemmän") else { break }
+            found = tapLabel("label CONTAINS %@", "Audit Hyvitys Oy,")
+        }
+        guard found else { capture("j0-no-row"); XCTFail("Kuitit lists no Audit Hyvitys Oy"); return }
+        // The offer is Toiminnot's item since N3 (U098): the page's body asks nothing of an unfiled
+        // receipt. The notice comes with its own request after the receipt, so Toiminnot is opened
+        // until it carries the item, and closed by its own button in between.
+        let menu = app.navigationBars["Kuitti"].buttons["Toiminnot"].firstMatch
+        guard menu.waitForExistence(timeout: 20) else { capture("j1-no-page"); XCTFail("the credit note's page did not open"); return }
+        let credit = app.buttons["Merkitse ostolaskun hyvitykseksi"].firstMatch
+        let deadline = Date().addingTimeInterval(20)
+        repeat {
+            menu.tap()
+            if credit.waitForExistence(timeout: 3) { break }
+            menu.tap()
+            usleep(500_000)
+        } while Date() < deadline
+        capture("j1-credit-note")
+        if !credit.exists { tree("j1-credit-note") }
+        let bill = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "maksetaan myöhemmin")).firstMatch
+        XCTAssertFalse(bill.exists, "the credit note is asked whether it is a bill paid later")
+        XCTAssertTrue(credit.exists, "the credit note is not offered as an ostolasku's credit: no 'Merkitse ostolaskun hyvitykseksi'")
+        XCTAssertFalse(app.buttons["Merkitse ostolaskuksi"].exists, "the credit note is offered as a bill to pay")
     }
 
     // X165 X164 X133 X134 X162 X168, on the seed's overdue Ripsitukku Oy bill: its list row says

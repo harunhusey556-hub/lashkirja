@@ -36,11 +36,13 @@ public struct ReceiptDocumentKindResult: Decodable, Sendable, Equatable {
     ]
 
     /// The line to show after the change: the reason when nothing was filed, else what was done.
-    public func message(for kind: ReceiptDocumentKind) -> String {
+    /// `credit`: the receipt is a credit note, which the server files as an ostolasku's credit.
+    public func message(for kind: ReceiptDocumentKind, credit: Bool = false) -> String {
         if purchaseInvoiceAction == "none", let reason = purchaseInvoiceSkipped, let text = Self.skipText[reason] {
             return text
         }
-        return kind == .invoice ? "Tallennettu ostolaskuksi" : "Merkitty kuitiksi, ostolasku peruttiin"
+        guard kind == .invoice else { return "Merkitty kuitiksi, ostolasku peruttiin" }
+        return credit ? "Tallennettu ostolaskun hyvitykseksi" : "Tallennettu ostolaskuksi"
     }
 }
 
@@ -137,15 +139,22 @@ public enum ReceiptOstolaskuNotice: Sendable, Equatable {
     /// Filed as an ostolasku: the line to read, where to go, and whether "Ei ole lasku" is offered.
     case filed(invoiceId: String, headline: String, canMarkAsReceipt: Bool)
     /// Not filed (or the ostolasku was cancelled): the question and the "Merkitse ostolaskuksi" offer.
-    case offer(text: String)
+    case offer(text: String, action: String = "Merkitse ostolaskuksi")
+
+    /// A credit note is filed as an ostolasku's credit (X072): it is never asked whether it is a
+    /// bill to be paid later.
+    public static let creditAction = "Merkitse ostolaskun hyvitykseksi"
 
     /// nil until the view is known, and for a sale (`tulo`) that is no ostolasku: nothing to say.
-    public static func make(view: ReceiptPurchaseInvoiceView?, receiptType: String) -> ReceiptOstolaskuNotice? {
+    /// `total`: the receipt's booked total; a negative one is a credit note.
+    public static func make(view: ReceiptPurchaseInvoiceView?, receiptType: String, total: Decimal? = nil) -> ReceiptOstolaskuNotice? {
         guard let view else { return nil }
         let invoice = view.purchaseInvoice
         if receiptType == "tulo" && invoice == nil { return nil }
         guard let invoice, invoice.status != .cancelled else {
-            return .offer(text: invoice != nil ? "Ostolasku on peruttu, tämä on kuitti." : "Onko tämä lasku, joka maksetaan myöhemmin?")
+            let text = invoice != nil ? "Ostolasku on peruttu, tämä on kuitti." : "Onko tämä lasku, joka maksetaan myöhemmin?"
+            guard (total ?? 0) < 0 else { return .offer(text: text) }
+            return .offer(text: invoice != nil ? text : "Onko tämä ostolaskun hyvitys?", action: creditAction)
         }
         var headline = "Tämä on ostolasku · Eräpäivä \(APIDate.displayDay(invoice.dueDate))"
         if invoice.dueDateAssumed { headline += " (oletus)" }
