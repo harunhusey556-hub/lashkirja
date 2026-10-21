@@ -497,6 +497,94 @@ final class StabilityTests: WalkTestCase {
         XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Peruuta did not close the import sheet")
     }
 
+    /// F008: a customer opens on what its Asiakkaat row already says. It opened on a blank 'Asiakas'
+    /// page with a spinner, and about 0.9 s later the page came at once and the title changed to the
+    /// name (motion gates 39380209526, 39489886880, 39525842170). Opened offline, the first look is
+    /// what the push had before any answer: the name in the bar, Toiminnot, the contact rows, no
+    /// spinner or failure page. Online again, the invoices come under rows that stay put.
+    func test33_CustomerOpensOnItsRow() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        let customers = app.navigationBars["Asiakkaat"]
+        guard tapLabel("label == %@", "Asiakkaat"), customers.waitForExistence(timeout: 10) else {
+            dump(app, "stability-33-no-customers"); XCTFail("Myynti > Asiakkaat did not open"); return
+        }
+        // The seed's Kauneus Oy (demo-seed.ts): laskut@kauneus.example, two invoices.
+        let name = "Kauneus Oy"
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+        guard row.waitForExistence(timeout: 15) else {
+            dump(app, "stability-33-no-row"); XCTFail("Asiakkaat lists no \(name)"); return
+        }
+        goOffline()
+        guard tapLabel("label BEGINSWITH %@", name) else { XCTFail("\(name) could not be tapped"); return }
+        let pushed = app.navigationBars.matching(NSPredicate(format: "identifier IN %@", [name, "Asiakas"])).firstMatch
+        guard pushed.waitForExistence(timeout: 10) else {
+            dump(app, "stability-33-not-opened"); XCTFail("\(name) did not open from Asiakkaat"); return
+        }
+        let asked = Date()
+        let picture = requestShot("stability-33-first-look")
+        let title = pushed.identifier
+        let actions = pushed.buttons["Toiminnot"].exists
+        let spinner = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Ladataan")).firstMatch.exists
+        let failurePage = app.buttons["load-failure-retry"].firstMatch.exists
+        let email = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "laskut@kauneus.example")).firstMatch
+        let contact = email.exists
+        // Above the invoices and under them: where they stand once they have come.
+        let terms = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Maksuaika")).firstMatch
+        let byStatus = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Näytä tilan mukaan")).firstMatch
+        let banner = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                                                           "Ei verkkoyhteyttä", "Palvelimeen ei saada yhteyttä", "Palvelin ei vastannut ajoissa")).firstMatch
+        // The offline answer can already be in (its banner then stands above every row): the places
+        // are compared only from a first look without it.
+        let bannerAtFirst = banner.exists
+        let termsAt: CGFloat? = terms.exists ? terms.frame.minY : nil
+        let byStatusAt: CGFloat? = byStatus.exists ? byStatus.frame.minY : nil
+        awaitShot(picture, since: asked)
+        let termsText = termsAt.map { "\($0)" } ?? "none"
+        let byStatusText = byStatusAt.map { "\($0)" } ?? "none"
+        note("INFO stability 33 first look: title '\(title)', Toiminnot \(actions), spinner \(spinner), failure page \(failurePage), e-mail \(contact), banner \(bannerAtFirst), Maksuaika at \(termsText), Näytä tilan mukaan at \(byStatusText)")
+        XCTAssertEqual(title, name, "the push opened on '\(title)': the title changes to the name when the customer loads")
+        XCTAssertTrue(actions, "the bar has no Toiminnot at first: it comes with the customer and the bar changes")
+        XCTAssertFalse(spinner, "the push landed on a spinner page")
+        XCTAssertFalse(failurePage, "offline, the push landed on a failure page, not on the customer's row")
+        XCTAssertTrue(contact, "the first look has no contact row (laskut@kauneus.example)")
+
+        // Offline the invoices cannot come: the row stays under the refresh banner.
+        if !banner.waitForExistence(timeout: 20) { note("INFO stability 33: no refresh banner within 20 s (Asiakkaat had warmed the customer)") }
+        XCTAssertTrue(app.navigationBars[name].exists, "offline, the title left the name")
+        XCTAssertTrue(email.exists, "offline, the failed load took the contact rows away")
+        XCTAssertFalse(app.buttons["load-failure-retry"].firstMatch.exists, "offline, the failed load replaced the customer with a failure page")
+
+        goOnline()
+        // Back online the page reloads by itself (RetryWhenBackOnline, as Myynti in P3 A); the
+        // banner's retry only if it has not after 30 s.
+        let invoice = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Lasku ")).firstMatch
+        if !invoice.waitForExistence(timeout: 30) {
+            let retry = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Yritä uudelleen")).firstMatch
+            note("INFO stability 33: no invoices 30 s after going online (Yritä uudelleen offered: \(retry.exists))")
+            if retry.exists { retry.tap(); taps += 1 }
+        }
+        guard invoice.waitForExistence(timeout: 20) else {
+            dump(app, "stability-33-no-invoices"); XCTFail("\(name)'s invoices never came"); return
+        }
+        XCTAssertTrue(banner.waitForNonExistence(timeout: 10), "the refresh banner stayed once the invoices came")
+        waitStill(terms)
+        shot("stability-33-loaded")
+        XCTAssertTrue(app.navigationBars[name].exists, "the title changed when the customer loaded")
+        guard !bannerAtFirst else { note("INFO stability 33: the banner was up at the first look; places not compared"); return }
+        if let termsAt {
+            note("INFO stability 33: Maksuaika at \(termsAt) on opening, \(terms.frame.minY) once loaded")
+            XCTAssertEqual(terms.frame.minY, termsAt, accuracy: 1, "Maksuaika moved from \(termsAt) to \(terms.frame.minY) when the invoices came")
+        } else {
+            XCTFail("the first look had no Maksuaika row")
+        }
+        // Below the fold with a longer seed: nothing on the screen to hold still.
+        if let byStatusAt, byStatus.exists {
+            note("INFO stability 33: Näytä tilan mukaan at \(byStatusAt) on opening, \(byStatus.frame.minY) once loaded")
+            XCTAssertEqual(byStatus.frame.minY, byStatusAt, accuracy: 1,
+                           "Näytä tilan mukaan moved from \(byStatusAt) to \(byStatus.frame.minY): the greyed invoices did not hold their place")
+        }
+    }
+
     /// The seed's overdue invoice from the demo API: its number, its customer, and its due and
     /// invoice days as the app prints them. Test values from app/scripts/demo-seed.ts; only ever
     /// against the throwaway local server (the runner shares the Mac's loopback).

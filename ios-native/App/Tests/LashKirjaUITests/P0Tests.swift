@@ -456,6 +456,34 @@ final class P0Tests: WalkTestCase {
         XCTAssertTrue(cleared, "editing the password left the refusal up")
     }
 
+    // F009: Kuitit's swipe Poista asks first, and the receipt stays listed while the question is up
+    // and after Peruuta. Swiped on the cell, not on its text (U001).
+    func testM_KuititSwipeQuestionKeepsRow() {
+        guard openKuitit() else { shot("m0-no-kuitit"); XCTFail("Kuitit did not open"); return }
+        let row = app.cells.containing(NSPredicate(format: "label CONTAINS %@", "ABC Prisma Kotka")).firstMatch
+        guard row.waitForExistence(timeout: 20), reveal(row) else {
+            shot("m0-no-row"); dump(app, "m0-no-row"); XCTFail("Kuitit lists no ABC Prisma Kotka row"); return
+        }
+        assertSwipeQuestionKeepsRow(row, action: "Poista", asks: "Poistetaanko kuitti", step: "m-kuitit")
+    }
+
+    // F009: the same on Ostolaskut, with the seed's Ripsitukku Oy bill, which has no payments and so
+    // offers Poista.
+    func testN_OstolaskutSwipeQuestionKeepsRow() {
+        guard selectTab("Kirjanpito") else { shot("n0-no-tab"); XCTFail("Kirjanpito is not selected"); return }
+        let list = app.navigationBars["Ostolaskut"]
+        for _ in 0..<2 where !list.exists {
+            tapLabel("label BEGINSWITH %@", "Ostolaskut")
+            _ = list.waitForExistence(timeout: 10)
+        }
+        guard list.exists else { shot("n0-no-ostolaskut"); dump(app, "n0-no-ostolaskut"); XCTFail("Ostolaskut did not open"); return }
+        let row = app.cells.containing(NSPredicate(format: "label BEGINSWITH %@", "Ripsitukku Oy")).firstMatch
+        guard row.waitForExistence(timeout: 20), reveal(row) else {
+            shot("n0-no-row"); dump(app, "n0-no-row"); XCTFail("Ostolaskut lists no Ripsitukku Oy row"); return
+        }
+        assertSwipeQuestionKeepsRow(row, action: "Poista", asks: "Poistetaanko ostolasku?", step: "n-ostolaskut")
+    }
+
     /// M058: the small inline title of the screens pushed through Route (appDestinations): a bar of
     /// one row, the title on the back button's line. The large title made it about 100 pt tall,
     /// with the 34 pt title on its own row under the back button.
@@ -541,6 +569,40 @@ final class P0Tests: WalkTestCase {
         let delete = app.buttons["Poista"].firstMatch
         // A long swipe deletes at once (the first action's full swipe).
         if delete.waitForExistence(timeout: 5) { delete.tap(); taps += 1 } else if row.exists { XCTFail("swiping \(name) shows no Poista") }
+    }
+
+    /// F009: swipes `row`, taps its `action` and answers Peruuta. The question title starts with
+    /// `asks`, and the row is listed while it is up and after it. A destructive swipe role took the
+    /// row off the list at the tap, before any answer, and Peruuta did not bring it back until a
+    /// reload (Laitteet in testB, run 39538176287).
+    private func assertSwipeQuestionKeepsRow(_ row: XCUIElement, action label: String, asks: String, step: String,
+                                             file: StaticString = #filePath, line: UInt = #line) {
+        let title = app.staticTexts["confirm-sheet-title"].firstMatch
+        let cancel = app.buttons["confirm-sheet-cancel"].firstMatch
+        row.swipeLeft()
+        // The row's own action; the question's confirm button carries the same word.
+        let action = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", label, "confirm-sheet-confirm")).firstMatch
+        let revealed = action.waitForExistence(timeout: 5)
+        // A long swipe can run the row's first action at once: the question is then up already.
+        if revealed && !title.exists {
+            waitStill(action)
+            shot("\(step)-swipe"); dump(app, "\(step)-swipe")
+            // The fill the owner saw on the destructive swipe was the app's accent, #9A5650 (testB's
+            // b3, run 39538176287), not a system red: the plain button keeps it.
+            let fill = darkestColour(app, in: action.frame)
+            note("INFO P0 \(step) \(label) \(action.frame): fill \(fill?.description ?? "off screen")")
+            XCTAssertTrue(fill?.near(RGB(r: 154, g: 86, b: 80), within: 15) == true,
+                          "\(step): the swipe's \(label) is filled \(fill?.description ?? "off screen"), not the accent (154,86,80)", file: file, line: line)
+            action.tap(); taps += 1
+        }
+        let asked = title.waitForExistence(timeout: 5) ? title.label : "no question"
+        shot("\(step)-question")
+        check("F009 \(step) swipe \(label) asks first (\(asked))", asked.hasPrefix(asks), file: file, line: line)
+        XCTAssertTrue(row.exists, "\(step): the swipe's \(label) took the row off the list before the question was answered", file: file, line: line)
+        if cancel.exists { cancel.tap(); taps += 1 }
+        XCTAssertTrue(title.waitForNonExistence(timeout: 10), "\(step): Peruuta did not close the question", file: file, line: line)
+        shot("\(step)-peruuta")
+        XCTAssertTrue(row.exists, "\(step): after Peruuta the row is off the list, though nothing was deleted", file: file, line: line)
     }
 
     /// M053 M054: as the push lands, the content is there, with no spinner and no failure page; offline,

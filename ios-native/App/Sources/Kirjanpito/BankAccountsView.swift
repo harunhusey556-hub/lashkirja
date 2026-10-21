@@ -57,8 +57,10 @@ struct BankAccountsView: View {
                     ForEach(connections.connections) { connection in
                         let canSync = BankConsent.canSync(connection)
                         connectionHeader(connection)
+                        // Not a destructive role: the list takes such a row off at the tap, before
+                        // the question is answered (F009). The fill is the one it had.
                         .swipeActions {
-                            Button("Katkaise", role: .destructive) { disconnecting = connection }
+                            Button("Katkaise") { disconnecting = connection }.tint(Theme.accentFill)
                             if canSync { Button("Päivitä") { Task { await sync(connection) } }.tint(Theme.accentFill) }
                         }
                         .contextMenu {

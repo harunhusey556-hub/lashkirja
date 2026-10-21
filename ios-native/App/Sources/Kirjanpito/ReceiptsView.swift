@@ -360,11 +360,14 @@ struct ReceiptsView: View {
             .accessibilityAddTraits(selected.contains(receipt.id) ? .isSelected : [])
         } else {
             NavigationLink(value: Route.receipt(receipt.id)) { ReceiptRow(receipt: receipt, thumbnail: true).equatable() }
+                // Not a destructive role: the list takes such a row off at the tap, before the
+                // question is answered (F009). The fill is the one it had.
                 .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
+                    Button {
                         deleteIds = [receipt.id]
                         confirmDelete = true
                     } label: { Label("Poista", systemImage: "trash") }
+                    .tint(Theme.accentFill)
                 }
         }
     }
