@@ -107,7 +107,13 @@ class WalkTestCase: XCTestCase {
     func probe(_ body: () -> Void) {
         let options = XCTExpectedFailure.Options()
         options.isStrict = false
-        options.issueMatcher = { $0.compactDescription.contains("Failed to get matching snapshots") }
+        // A prompt that left between `exists` and its tap is gone, which is what the probe wanted:
+        // the Save Password offer slid away under selectTab's dismiss and XCTest failed the tap with
+        // "no matches found" (P1 test01, run 39580605929).
+        options.issueMatcher = {
+            $0.compactDescription.contains("Failed to get matching snapshots")
+                || $0.compactDescription.contains("no matches found for first query match sequence")
+        }
         XCTExpectFailure("a system prompt probe timed out evaluating its UI query", options: options, failingBlock: body)
     }
 
