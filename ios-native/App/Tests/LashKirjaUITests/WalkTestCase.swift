@@ -195,6 +195,10 @@ class WalkTestCase: XCTestCase {
         for _ in 0...maxScrolls {
             let e = q.firstMatch
             if e.exists && e.frame.minY > 30 && e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 {
+                // A list still gliding after a swipe takes the tap as a stop, not a choice: the row was
+                // tapped mid-glide and nothing opened (OwnerScreens testJ and testM, run 39528413225).
+                waitStill(e)
+                guard e.frame.minY > 30, e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 else { continue }
                 e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); taps += 1; return true
             }
             app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1
@@ -231,11 +235,13 @@ class WalkTestCase: XCTestCase {
     }
     /// Scrolls the screen (each swipe counted) until `element` sits inside the window, as tapLabel
     /// does before it taps, and taps nothing: a task can end on the button that does it.
-    func reveal(_ element: XCUIElement, scrolls maxScrolls: Int = 6) -> Bool {
+    /// `bottomBar` is what covers the window's foot: the tab bar on a tab, only the home
+    /// indicator in a sheet, where a list's last row stops 54 pt above the edge.
+    func reveal(_ element: XCUIElement, scrolls maxScrolls: Int = 6, bottomBar: CGFloat = 60) -> Bool {
         let window = app.windows.firstMatch
         for attempt in 0...maxScrolls {
             if element.waitForExistence(timeout: attempt == 0 ? 3 : 1), element.isHittable,
-               element.frame.minY > 30, element.frame.maxY < window.frame.maxY - 60 { return true }
+               element.frame.minY > 30, element.frame.maxY < window.frame.maxY - bottomBar { return true }
             if attempt < maxScrolls { window.swipeUp(velocity: .slow); scrolls += 1 }
         }
         return false

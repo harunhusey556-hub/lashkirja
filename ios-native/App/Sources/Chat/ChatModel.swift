@@ -320,8 +320,11 @@ final class ChatModel {
                 }
                 flush()
                 switch event {
-                case .started(let id):
+                case .started(let id, let storedTitle):
                     conversationId = id
+                    // A first question names a new conversation on the server: the bar shows the
+                    // name now, not only after a reopen reads it back (U055).
+                    if let storedTitle, !storedTitle.isEmpty { title = storedTitle }
                 case .delta:
                     break
                 case .finished(let message):

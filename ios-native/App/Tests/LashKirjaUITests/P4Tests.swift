@@ -139,6 +139,35 @@ final class P4Tests: WalkTestCase {
         }
     }
 
+    /// U055: a new conversation takes the name the server gives it with its first question while
+    /// the sheet stays open. The bar kept 'Uusi keskustelu' until a reopen read the name back.
+    func testE_ConversationTitleFromServer() {
+        app.buttons["Avustaja"].firstMatch.tap(); taps += 1
+        guard composer.waitForExistence(timeout: 10) else { XCTFail("the assistant has no composer"); return }
+        let list = app.navigationBars.buttons["Keskustelut"].firstMatch
+        guard list.waitForExistence(timeout: 5) else { XCTFail("the assistant's bar has no Keskustelut"); return }
+        list.tap(); taps += 1
+        let fresh = app.buttons["Uusi keskustelu"].firstMatch
+        guard fresh.waitForExistence(timeout: 10) else { dump(app, "p4-e-list"); XCTFail("Keskustelut has no Uusi keskustelu"); return }
+        fresh.tap(); taps += 1
+        guard app.navigationBars["Uusi keskustelu"].waitForExistence(timeout: 10) else {
+            dump(app, "p4-e-new"); XCTFail("Uusi keskustelu did not open an empty conversation"); return
+        }
+        // testB's question: this conversation is then the latest, and testC's first look on a reused
+        // demo DB still finds that question. Its bubble count leaves the bar's copy out.
+        let question = "Paljonko myyntiä tässä kuussa?"
+        type(composer, question)
+        app.buttons["Lähetä"].firstMatch.tap(); taps += 1
+        let named = app.navigationBars[question].waitForExistence(timeout: 30)
+        shot("p4-e-title"); dump(app, "p4-e-title")
+        XCTAssertTrue(named, "the open conversation is still called '\(app.navigationBars.firstMatch.identifier)', not '\(question)'")
+        // The answer's end keeps the name.
+        let streaming = app.buttons["Pysäytä"].firstMatch
+        let done = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: streaming)], timeout: 60)
+        XCTAssertEqual(done, .completed, "the answer did not finish")
+        XCTAssertTrue(app.navigationBars[question].exists, "the finished answer took the name '\(question)' away")
+    }
+
     /// The question's bubbles in the message list; the conversation's title repeats it in the
     /// navigation bar, which is not a bubble.
     func questionBubbles() -> Int {

@@ -152,6 +152,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Keskustelu on arkistoitu." }, { status: 409 });
     }
 
+    // A retry of a stored question keeps the name the conversation already has.
+    let title = conversation.title;
     if (!userRow) {
       userRow = await prisma.chatMessage.create({
         data: {
@@ -163,7 +165,7 @@ export async function POST(req: NextRequest) {
           status: "complete",
         },
       });
-      await rememberConversationTitle(conversation.id, session.userId, message);
+      title = await rememberConversationTitle(conversation.id, session.userId, message);
     }
 
     const prior = await priorContextTurns(session.userId, conversation.id, {
@@ -207,7 +209,7 @@ export async function POST(req: NextRequest) {
       if (!stream) return NextResponse.json(payload);
       const bodyStream = new ReadableStream({
         start(controller) {
-          controller.enqueue(sse({ conversationId: conversation.id, userMessageId: userRow.id }));
+          controller.enqueue(sse({ conversationId: conversation.id, userMessageId: userRow.id, title }));
           controller.enqueue(sse({ delta: reply }));
           controller.enqueue(
             sse({
@@ -239,7 +241,7 @@ export async function POST(req: NextRequest) {
         // A3: a sentence with a figure, a percentage, a claimed action, a link or
         // code is held until the final guard has read the whole reply.
         const gate = new GuardedReplyStream();
-        controller.enqueue(sse({ conversationId: conversation.id, userMessageId: userRow.id }));
+        controller.enqueue(sse({ conversationId: conversation.id, userMessageId: userRow.id, title }));
         try {
           const result = await runAssistantTurn({
             userId: session.userId,

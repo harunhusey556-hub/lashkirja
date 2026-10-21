@@ -46,9 +46,11 @@ final class DocumentCache {
             try Task.checkCancellation()
             guard self.generation.isCurrent(started) else { throw CancellationError() }
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            // The server may send a JPEG preview of a HEIC or PNG original: the name follows what
-            // arrived, or QuickLook would read it by the wrong extension.
-            let target = dir.appendingPathComponent(Self.name(fileName, contentType: response.headers["content-type"]))
+            // The server's name for the file is the one shared on (X084). It may send a JPEG
+            // preview of a HEIC or PNG original: the name follows what arrived, or QuickLook would
+            // read it by the wrong extension.
+            let named = ContentDisposition.fileName(response.headers["content-disposition"], fallback: fileName)
+            let target = dir.appendingPathComponent(Self.name(named, contentType: response.headers["content-type"]))
             try response.body.write(to: target, options: [.atomic, .completeFileProtection])
             return target
         }
@@ -93,36 +95,50 @@ final class DocumentCache {
 }
 
 /// Downloads an authorised file (invoice PDF, receipt image) and shows it in QuickLook,
-/// which brings zoom, share and print for free.
+/// which brings zoom, share and print for free. A zip gets its own summary instead.
 struct DocumentPreviewSheet: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
     let path: String
     var query: [String: String] = [:]
     let fileName: String
+    /// The bar's title when the file's name is not one ('Tuloslaskelma 2026', X084).
+    var title: String? = nil
     /// Changes when the document does; see DocumentCache.
     var cacheKey: String? = nil
+    /// A zip's one primary, which hands the file on ('Jaa kirjanpitäjälle' for the package).
+    var shareTitle = "Jaa"
     @State private var url: URL?
     @State private var failure: String?
 
     var body: some View {
         NavigationStack {
             Group {
-                if let url {
-                    QuickLookView(url: url).ignoresSafeArea(edges: .bottom)
-                } else if let failure {
+                if let failure {
                     ContentUnavailableView("Tiedostoa ei voitu avata", systemImage: "doc.questionmark", description: Text(failure))
+                } else if archive {
+                    // From the first frame, filled in where it stands once the file is here.
+                    ArchiveSummary(name: fileName, url: url, shareTitle: shareTitle)
+                } else if let url {
+                    QuickLookView(url: url).ignoresSafeArea(edges: .bottom)
                 } else {
                     ProgressView("Avataan…")
                 }
             }
-            .navigationTitle(fileName)
+            .navigationTitle(title ?? fileName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if let url { ToolbarItem(placement: .topBarTrailing) { ShareLink(item: url) } }
+                // Every document sheet closes from its bar; a zip's had nothing but a share icon (M047).
+                ToolbarItem(placement: .topBarLeading) { Button("Valmis") { dismiss() } }
+                if let url, !archive { ToolbarItem(placement: .topBarTrailing) { ShareLink(item: url) } }
             }
         }
         .task { await load() }
     }
+
+    /// QuickLook draws a zip as a blank page for seconds before the archive's glyph (M047), and
+    /// the accountant package is sent on, not read on the phone.
+    private var archive: Bool { (fileName as NSString).pathExtension.lowercased() == "zip" }
 
     private func load() async {
         do {
@@ -131,6 +147,55 @@ struct DocumentPreviewSheet: View {
         } catch {
             failure = error.userMessage
         }
+    }
+}
+
+/// A zip's name, its size and its one primary. The size and the share wait for the download in
+/// place, so nothing moves when the file arrives.
+private struct ArchiveSummary: View {
+    let name: String
+    let url: URL?
+    let shareTitle: String
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "doc.zipper")
+                .font(.system(size: 48))
+                .foregroundStyle(Theme.accent)
+                .accessibilityHidden(true)
+            VStack(spacing: 4) {
+                Text(name)
+                    .font(.headline)
+                    .foregroundStyle(Theme.ink)
+                    .multilineTextAlignment(.center)
+                Text(size ?? "Ladataan…")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.ink2)
+                    .monospacedDigit()
+                    .motion(.easeOut(duration: 0.2), value: size)
+                    .accessibilityIdentifier("document-zip-size")
+            }
+            Group {
+                if let url {
+                    ShareLink(item: url) { shareLabel }
+                } else {
+                    Button {} label: { shareLabel }.disabled(true)
+                }
+            }
+            .buttonStyle(.primary)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.canvas)
+    }
+
+    private var shareLabel: some View {
+        Label(shareTitle, systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
+    }
+
+    private var size: String? {
+        guard let url, let bytes = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else { return nil }
+        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 }
 

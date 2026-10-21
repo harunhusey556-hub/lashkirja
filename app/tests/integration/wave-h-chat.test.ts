@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
 import { claimAssistantReply, listConversationMessages, priorContextTurns, runAssistantTurn } from "@/lib/chat-store";
 import { decideChatProposal } from "@/lib/chat-decision";
-import { copilotRequestMessages } from "@/lib/chat-turn";
+import { copilotRequestMessages, titleFromMessage } from "@/lib/chat-turn";
 import { prepareChat } from "@/lib/ai-assistant";
 import { limitedModeNotice } from "@/lib/chat-policy";
 import { computeAlvReport } from "@/lib/alv";
@@ -135,6 +135,32 @@ describe("conversations", () => {
       await listConversations(buildRequest("GET", "/api/ai/conversations", undefined, { cookie }))
     );
     expect(restored.conversations.map((row) => row.id)).toContain(created.id);
+  });
+
+  it("names the conversation in the stream's first frame, as stored (U055)", async () => {
+    // Over 60 characters: the stored title is the shortened question, not the question.
+    const question = "Paljonko myyntiä tässä kuussa oli yhteensä ja paljonko siitä on maksettu?";
+    async function firstFrame(message: string, extra: Record<string, unknown> = {}) {
+      const response = await postChat(
+        buildRequest("POST", "/api/ai/chat", { message, clientId: crypto.randomUUID(), stream: true, ...extra }, { cookie })
+      );
+      const frames = (await response.text())
+        .split("\n\n")
+        .filter((chunk) => chunk.startsWith("data: "))
+        .map((chunk) => JSON.parse(chunk.slice(6)) as { conversationId?: string; userMessageId?: string; title?: string });
+      return frames[0];
+    }
+
+    const first = await firstFrame(question);
+    expect(first.userMessageId).toBeTruthy();
+    expect(first.title).toBe(titleFromMessage(question));
+    const stored = await prisma.conversation.findUnique({ where: { id: first.conversationId } });
+    expect(stored?.title).toBe(first.title);
+
+    // A later question keeps the name the first one gave.
+    const later = await firstFrame("Entä viime kuussa?", { conversationId: first.conversationId });
+    expect(later.conversationId).toBe(first.conversationId);
+    expect(later.title).toBe(titleFromMessage(question));
   });
 });
 
