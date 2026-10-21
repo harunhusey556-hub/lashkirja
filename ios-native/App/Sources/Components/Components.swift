@@ -253,11 +253,18 @@ struct ToastView: View {
     }
 }
 
-/// Money text in the app's Finnish format.
+/// Money text in the app's Finnish format, on one line: wrapped, a figure broke after its comma
+/// ('146,8/4 €', U068) or left its '€' alone on the next line (U066). It shrinks instead: to 0.6,
+/// or to the caller's own factor (`moneyHero`), which a fixed one set here would override.
 struct MoneyText: View {
     let amount: Decimal
     var signed = false
-    var body: some View { Text(Money.format(amount, signed: signed)).monospacedDigit() }
+    @Environment(\.minimumScaleFactor) private var callerScale
+    var body: some View {
+        Text(Money.format(amount, signed: signed)).monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(callerScale < 1 ? callerScale : 0.6)
+    }
 }
 
 /// One series of a bar chart named beside a dot of its colour (Koti's cash-flow card, Raportit's
