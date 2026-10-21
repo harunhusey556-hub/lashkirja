@@ -40,10 +40,13 @@ final class P5Tests: WalkTestCase {
             XCTAssertLessThanOrEqual(total.frame.height, lineHeight(.title2) * 1.3, "the receivables total wraps: \(total.frame)")
             // A legend part is a button holding its words, then its amount. The bar above it has
             // buttons with the same words and sum in their labels but no text inside, and the status
-            // chips hold no '€': only the legend holds an amount text.
+            // chips hold no '€': only the legend holds an amount text. `containing` also matches the
+            // button itself, so the amount must be a text: on the label alone it took the bar's
+            // 10 pt segments for the legend.
+            let amountText = NSPredicate(format: "elementType == %@ AND label CONTAINS %@",
+                                         argumentArray: [XCUIElement.ElementType.staticText.rawValue, "€"])
             let legend = ["Maksettu", "Odottaa maksua", "Myöhässä"]
-                .map { app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", $0))
-                    .containing(NSPredicate(format: "label CONTAINS %@", "€")).firstMatch }
+                .map { app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", $0)).containing(amountText).firstMatch }
                 .filter { $0.exists }
             XCTAssertGreaterThanOrEqual(legend.count, 2, "the receivables legend shows \(legend.count) parts")
             for (upper, lower) in zip(legend, legend.dropFirst()) {
