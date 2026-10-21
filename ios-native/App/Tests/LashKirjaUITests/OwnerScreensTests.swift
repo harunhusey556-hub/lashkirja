@@ -1219,6 +1219,212 @@ final class OwnerScreensTests: WalkTestCase {
         }
     }
 
+    /// The first of `query` that is on screen clear of the bars, scrolling down for it a few times,
+    /// and still: the colours and frames read from it are where it rests.
+    func onScreen(_ query: XCUIElementQuery, scrolls maxScrolls: Int = 4) -> XCUIElement? {
+        let window = app.windows.firstMatch
+        let tabs = app.tabBars.firstMatch
+        _ = query.firstMatch.waitForExistence(timeout: 15)
+        for attempt in 0...maxScrolls {
+            let bottom = tabs.exists ? tabs.frame.minY : window.frame.maxY - 34
+            if let found = query.allElementsBoundByIndex.first(where: { $0.exists && $0.isHittable && $0.frame.minY > 180 && $0.frame.maxY < bottom - 8 }) {
+                waitStill(found)
+                return found
+            }
+            if attempt < maxScrolls { window.swipeUp(velocity: .slow); scrolls += 1 }
+        }
+        return nil
+    }
+
+    /// A soft pill: accentSoft (243,230,227) inside the capsule at both ends, beside its words.
+    func assertSoft(_ pill: XCUIElement, _ name: String, file: StaticString = #filePath, line: UInt = #line) {
+        let soft = RGB(r: 243, g: 230, b: 227)
+        let frame = pill.frame
+        let read = screenColours(app, at: [CGPoint(x: frame.minX + 5, y: frame.midY), CGPoint(x: frame.maxX - 5, y: frame.midY)])
+        let shown = read.map { $0?.description ?? "off screen" }.joined(separator: " ")
+        keep("g-pill", "\(name) \(frame): \(shown)")
+        XCTAssertTrue(read.allSatisfy { $0?.near(soft, within: 20) == true }, "\(name): the pill reads \(shown), not accentSoft \(soft)",
+                      file: file, line: line)
+    }
+
+    // M008 M017 M049 M088 M076 (P3): a row's own action is a soft pill, accentSoft under accentDark
+    // words, as on the web. Koti's 'Kuvaa kuitti', Kuukauden sulku's row actions and the row
+    // 'Hyväksy' of Kohdista ostolaskujen maksut were filled capsules, one more primary on every row.
+    func testG_RowPillsAreSoft() {
+        guard selectTab("Koti") else { capture("g0-no-tab"); XCTFail("Koti did not open"); return }
+        let camera = app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Kuvaa kuitti", "Kuvaa kuitti: "))
+        guard let koti = onScreen(camera) else {
+            capture("g0-no-pill"); tree("g0-no-pill"); XCTFail("Koti shows no Kuvaa kuitti on a task row: has the seed bank rows without a receipt?"); return
+        }
+        capture("g1-koti")
+        assertSoft(koti, "Koti \(koti.label)")
+
+        guard selectTab("Kirjanpito") else { capture("g2-no-tab"); XCTFail("Kirjanpito did not open"); return }
+        let periods = app.navigationBars["Kuukauden sulku"]
+        if tapLabel("label BEGINSWITH %@", "Kuukauden sulku"), periods.waitForExistence(timeout: 10) {
+            let actions = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Kuvaa kuitti: ", "Täydennä: "))
+            if let pill = onScreen(actions) {
+                capture("g2-periods")
+                assertSoft(pill, "Kuukauden sulku \(pill.label)")
+            } else {
+                note("INFO owner g: Kuukauden sulku's month has no row action to look at")
+            }
+            back(to: "Kirjanpito")
+        } else {
+            capture("g2-no-periods"); XCTFail("Kuukauden sulku did not open")
+        }
+
+        let matching = app.navigationBars["Kohdista ostolaskujen maksut"]
+        guard tapLabel("label BEGINSWITH %@", "Kohdista ostolaskujen maksut"), matching.waitForExistence(timeout: 10) else {
+            capture("g3-no-matching"); tree("g3-no-matching"); XCTFail("Kohdista ostolaskujen maksut did not open"); return
+        }
+        let accept = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Hyväksy maksu ostolaskulle"))
+        if let pill = onScreen(accept, scrolls: 2) {
+            capture("g3-matching")
+            assertSoft(pill, "Kohdista ostolaskujen maksut \(pill.label)")
+        } else {
+            note("INFO owner g: Kohdista ostolaskujen maksut proposes no payment to look at")
+        }
+    }
+
+    // X006 (P3): Koti's row pills take a 44 pt tall tap and their rows do not grow for it. The
+    // capsule is caption bold with 5 pt above and below, about 24 pt, and a tap just above it opened
+    // the row's own screen instead.
+    func testL_KotiPillHitArea() {
+        guard selectTab("Koti") else { capture("l0-no-tab"); XCTFail("Koti did not open"); return }
+        let camera = app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Kuvaa kuitti", "Kuvaa kuitti: "))
+        guard let pill = onScreen(camera) else {
+            capture("l0-no-pill"); tree("l0-no-pill"); XCTFail("Koti shows no Kuvaa kuitti on a task row"); return
+        }
+        capture("l1-koti")
+        let tabs = app.tabBars.firstMatch
+        let pills = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "(Hyväksy|Täydennä|Kohdista|Kuvaa kuitti|Muistuta)(: .*)?"))
+            .allElementsBoundByIndex.filter { $0.exists && $0.frame.minY > 130 && (!tabs.exists || $0.frame.maxY < tabs.frame.minY) }
+        keep("l-pills", pills.map { "\($0.label) \($0.frame)" }.joined(separator: "; "))
+        for each in pills {
+            XCTAssertGreaterThanOrEqual(each.frame.height, 44, "\(each.label): a \(each.frame.height) pt tall target")
+        }
+
+        // The row holds its height: 10 pt above and below its tallest column (TaskRow), the trailing
+        // one being the amount, 6 pt, and the capsule.
+        let capsule = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .bold).lineHeight + 10
+        let centre = CGPoint(x: pill.frame.midX, y: pill.frame.midY)
+        let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Kuitti puuttuu")).allElementsBoundByIndex
+        if let row = rows.first(where: { $0.frame.width > 200 && $0.frame.contains(centre) }) {
+            let texts = row.staticTexts.allElementsBoundByIndex.map(\.frame)
+            let left = texts.filter { $0.midX < row.frame.midX }
+            let right = texts.filter { $0.midX >= row.frame.midX }
+            let named = left.isEmpty ? 0 : left.map(\.maxY).max()! - left.map(\.minY).min()!
+            let trailing = (right.map(\.height).max().map { $0 + 6 } ?? 0) + capsule
+            let expected = 20 + max(36, named, trailing)
+            keep("l-row", "\(row.label) \(row.frame); texts \(texts); capsule \(capsule) pt; expected \(expected) pt")
+            XCTAssertEqual(row.frame.height, expected, accuracy: 1, "the row is \(row.frame.height) pt tall for \(expected) pt of content")
+        } else {
+            tree("l1-no-row"); XCTFail("no task row holds the Kuvaa kuitti at \(centre)")
+        }
+
+        // A tap 8 pt above the visible capsule is the pill's, not the row's.
+        let window = app.windows.firstMatch
+        let above = CGPoint(x: pill.frame.midX, y: pill.frame.midY - capsule / 2 - 8)
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            .withOffset(CGVector(dx: above.x - window.frame.minX, dy: above.y - window.frame.minY)).tap()
+        taps += 1
+        let flow = app.navigationBars["Uusi kuitti"]
+        let opened = flow.waitForExistence(timeout: 10)
+        capture("l2-above-the-pill")
+        XCTAssertTrue(opened, "a tap 8 pt above the capsule did not open Kuvaa kuitti")
+        if opened {
+            flow.buttons["Peruuta"].firstMatch.tap()
+            XCTAssertTrue(waitGone(flow, timeout: 10), "Peruuta did not close the receipt page")
+        }
+        let pushed = app.navigationBars.buttons.matching(identifier: "BackButton").firstMatch
+        XCTAssertFalse(pushed.exists, "the tap opened the row's own screen: \(app.navigationBars.firstMatch.identifier)")
+    }
+
+    // M099 X004 M034 (P3): figures in the colour of their role. Koti's '−100 % vs. syyskuu' was success
+    // green; the invoice's Yhteensä was the palest number on its card; Toistuvat laskut's button
+    // floated under its message, outside the card.
+    func testM_FiguresInTheirColours() {
+        guard selectTab("Koti") else { capture("m0-no-tab"); XCTFail("Koti did not open"); return }
+        // Green only for more sales than the month before (the CI seed: 0,00 € against 245,00 €).
+        let card = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Myynti ", " % vs. ")).firstMatch
+        if card.waitForExistence(timeout: 15), reveal(card) {
+            let percent = card.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", " % vs. ")).firstMatch
+            waitStill(card)
+            let grows = percent.label.hasPrefix("+")
+            let expected = grows ? RGB(r: 71, g: 116, b: 85) : RGB(r: 106, g: 100, b: 95)
+            let read = darkestColour(app, in: percent.frame)
+            capture("m1-koti-card")
+            keep("m-percent", "'\(percent.label)' \(percent.frame): \(read?.description ?? "off screen")")
+            XCTAssertTrue(read?.near(expected, within: 15) == true,
+                          "'\(percent.label)' reads \(read?.description ?? "off screen"), not \(grows ? "success" : "ink2") \(expected)")
+        } else {
+            note("INFO owner m: Koti's sales card shows no percent (no sales the month before)")
+        }
+
+        guard selectTab("Myynti") else { capture("m2-no-tab"); XCTFail("Myynti did not open"); return }
+        let invoice = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
+        guard tapLabel("label CONTAINS 'Odottaa maksua' AND label CONTAINS %@", "· eräpäivä"), invoice.waitForExistence(timeout: 20) else {
+            capture("m2-no-invoice"); tree("m2-no-invoice"); XCTFail("no sent invoice opened from Myynti"); return
+        }
+        let lines = app.buttons["Rivit"].firstMatch
+        if lines.waitForExistence(timeout: 10) { lines.tap() }
+        // A LabeledContent row reads as one text: "Yhteensä, 146,84 €".
+        let total = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Yhteensä, ")).firstMatch
+        guard reveal(total) else { capture("m2-no-total"); tree("m2-no-total"); XCTFail("\(invoice.identifier)'s Rivit shows no Yhteensä"); return }
+        waitStill(total)
+        // The figure's half of the row; the label's half is ink in any case.
+        let row = total.frame
+        let figure = CGRect(x: row.midX, y: row.minY, width: row.maxX - row.midX, height: row.height)
+        let read = darkestColour(app, in: figure)
+        capture("m2-invoice-total")
+        keep("m-total", "\(total.label) \(row): \(read?.description ?? "off screen")")
+        XCTAssertLessThanOrEqual(read?.luma ?? 255, 70, "\(invoice.identifier): Yhteensä's figure is no darker than \(read?.description ?? "off screen")")
+
+        back(to: "Myynti")
+        let recurring = app.navigationBars["Toistuvat laskut"]
+        guard tap("Toistuvat laskut"), recurring.waitForExistence(timeout: 15) else {
+            capture("m3-no-recurring"); tree("m3-no-recurring"); XCTFail("Toistuvat laskut did not open"); return
+        }
+        let waiting = NSPredicate(format: "label ENDSWITH %@", "odottaa luontia.")
+        let message = app.staticTexts.matching(waiting).firstMatch
+        let create = app.buttons["Luo odottavat laskut"].firstMatch
+        guard message.waitForExistence(timeout: 15), create.waitForExistence(timeout: 5) else {
+            capture("m3-no-card"); tree("m3-no-card"); XCTFail("Toistuvat laskut has no 'odottaa luontia' card: has the seed an overdue schedule?"); return
+        }
+        capture("m3-recurring")
+        let cell = app.cells.containing(waiting).firstMatch
+        XCTAssertTrue(cell.exists, "the message is in no list cell")
+        if cell.exists {
+            XCTAssertTrue(cell.frame.contains(create.frame), "Luo odottavat laskut \(create.frame) is outside its message's card \(cell.frame)")
+        }
+    }
+
+    // X116 (P3): Sähköpostimallit has an icon of its own and no dot. 'envelope.badge' always drew one,
+    // which read as something unread, beside Sähköpostien tuonti's plain envelope.
+    func testN_TemplatesIconHasNoDot() {
+        openSettings()
+        let templates = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Sähköpostimallit")).firstMatch
+        let mailImport = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Sähköpostien tuonti")).firstMatch
+        guard templates.waitForExistence(timeout: 15), mailImport.waitForExistence(timeout: 10) else {
+            capture("n0-settings"); tree("n0-settings"); XCTFail("Asetukset lists no Sähköpostimallit or no Sähköpostien tuonti"); return
+        }
+        capture("n1-settings")
+        // The icon is hidden from VoiceOver, so XCTest sees no image: SettingRow names the row
+        // "setting-<symbol>". It can land on the row's button or on its title, so either counts.
+        func symbol(_ title: String) -> String? {
+            let row = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@", "setting-", title)).firstMatch
+            return row.exists ? row.identifier : nil
+        }
+        let own = symbol("Sähköpostimallit"), other = symbol("Sähköpostien tuonti")
+        keep("n-icons", "Sähköpostimallit \(own ?? "none"); Sähköpostien tuonti \(other ?? "none")")
+        XCTAssertNotNil(own, "Sähköpostimallit shows no icon")
+        XCTAssertNotNil(other, "Sähköpostien tuonti shows no icon")
+        XCTAssertNotEqual(own, "setting-envelope.badge", "Sähköpostimallit still shows envelope.badge, whose dot reads as unread")
+        XCTAssertNotEqual(own, other, "Sähköpostimallit and Sähköpostien tuonti share one icon")
+    }
+
     /// One answer from the demo API the app uses (the runner shares the Mac's loopback), as testH
     /// reads back its save. Test values from app/scripts/demo-seed.ts; only ever the throwaway demo API.
     private func demoAPI(_ path: String, bearer: String? = nil, body: [String: String]? = nil) -> [String: Any]? {

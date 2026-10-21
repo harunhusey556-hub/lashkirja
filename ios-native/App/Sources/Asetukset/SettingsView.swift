@@ -32,7 +32,8 @@ struct SettingsView: View {
                     // the warm-up below has painted by then. A link's destination was built with this
                     // list, before the warm-up had answered.
                     NavigationLink(value: Route.emailTemplates) {
-                        SettingRow(title: "Sähköpostimallit", subtitle: "Laskun saateviesti ja aihe", symbol: "envelope.badge")
+                        // A message's text, not a mail icon with a dot: the dot read as something unread (X116).
+                        SettingRow(title: "Sähköpostimallit", subtitle: "Laskun saateviesti ja aihe", symbol: "text.bubble")
                     }
                     NavigationLink { PaymentsSettingsView() } label: {
                         SettingRow(title: "Maksut", subtitle: "Korttimaksut Stripellä ja Tap to Pay", symbol: "creditcard")
@@ -179,6 +180,8 @@ struct SettingRow: View {
                 if let subtitle { Text(subtitle).font(.caption).foregroundStyle(Theme.ink2) }
             }
         }
+        // The icon is hidden from VoiceOver, so a UI test reads which symbol the row draws from here.
+        .accessibilityIdentifier("setting-\(symbol)")
     }
 }
 

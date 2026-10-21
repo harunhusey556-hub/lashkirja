@@ -458,7 +458,7 @@ private struct MoneyCard: View {
             if let percent = trend.percent {
                 Text("\(percent > 0 ? "+" : "")\(percent) % vs. \(MonthKey.name(trend.previousMonth).lowercased())")
                     .font(.caption)
-                    .foregroundStyle(income ? Theme.success : Theme.ink2)
+                    .foregroundStyle(MoneyTrend.tone(income ? .income : .expenses, percent: percent) == .success ? Theme.success : Theme.ink2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -543,12 +543,9 @@ private struct TaskRow: View {
         case .remind:
             pill(action, run: remind)
         case .capture:
-            Button(action: capture) {
-                Text(action.label ?? "").font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 5)
-            }
-            .buttonStyle(.pressable)
-            .background(Theme.ink, in: Capsule())
-            .foregroundStyle(Theme.onInk)
+            // Soft as the other row actions: a dark capsule on every such row was one more primary
+            // each (M008 M017 M049 M088).
+            pill(action, run: capture)
         case .open(let label):
             // Not a button: the tap goes through to the row's link, which opens the item.
             pillLabel(label).allowsHitTesting(false)
@@ -557,16 +554,25 @@ private struct TaskRow: View {
         }
     }
 
+    /// How far a pill's target reaches above and below its capsule (X006).
+    private static let pillSlop: CGFloat = 11
+
     private func pill(_ action: Koti.TaskAction, run: @escaping () -> Void) -> some View {
         Button(action: run) {
             ZStack {
                 pillLabel(action.label ?? "").opacity(busy ? 0 : 1)
                 if busy { ProgressView().controlSize(.mini) }
             }
+            // A 44 pt tall target around the 24 pt capsule: a near miss opened the row's link
+            // instead (X006). The negative padding below gives the height back, so the row keeps
+            // its height and the capsule its look.
+            .padding(.vertical, Self.pillSlop)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
         .disabled(busy)
         .accessibilityLabel("\(action.label ?? ""): \(item.party)")
+        .padding(.vertical, -Self.pillSlop)
     }
 
     private func pillLabel(_ title: String) -> some View {

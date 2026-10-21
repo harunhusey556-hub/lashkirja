@@ -36,20 +36,24 @@ struct RecurringInvoicesView: View {
                     Section { Text(notice).font(.subheadline) }
                 }
                 if list.dueNow > 0 {
+                    // The message and its button in one card. As two rows, the button's on the bare
+                    // canvas, the card had flat bottom corners and the button floated under it (M034).
                     Section {
-                        Text(list.dueNow == 1 ? "1 toistuva lasku odottaa luontia." : "\(list.dueNow) toistuvaa laskua odottaa luontia.")
-                        Button {
-                            Task { await runner.preview(app: app, scope: nil) }
-                        } label: {
-                            HStack {
-                                Spacer()
-                                if runner.checking { ProgressView() } else { Text("Luo odottavat laskut") }
-                                Spacer()
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(list.dueNow == 1 ? "1 toistuva lasku odottaa luontia." : "\(list.dueNow) toistuvaa laskua odottaa luontia.")
+                            Button {
+                                Task { await runner.preview(app: app, scope: nil) }
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    if runner.checking { ProgressView() } else { Text("Luo odottavat laskut") }
+                                    Spacer()
+                                }
                             }
+                            .buttonStyle(.primary)
+                            .disabled(runner.checking || runner.running)
                         }
-                        .buttonStyle(.primary)
-                        .disabled(runner.checking || runner.running)
-                        .listRowBackground(Color.clear)
+                        .padding(.vertical, 4)
                     }
                 }
                 Section {
