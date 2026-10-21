@@ -148,6 +148,7 @@ final class P2Tests: WalkTestCase {
         openURL("lashkirja://invoice/\(id)")
         let ok = app.staticTexts["Lasku \(number)"].waitForExistence(timeout: 20)
         shot("p2-spotlight-invoice"); check("P2 Spotlight invoice link opens Lasku \(number)", ok)
+        assertNoSystemAlert("p2-spotlight-invoice")
     }
     func testB_SpotlightCustomerRoute() {
         let customers = demoJSON("/api/customers")["customers"] as? [[String: Any]] ?? []
@@ -155,7 +156,9 @@ final class P2Tests: WalkTestCase {
         else { check("P2 demo API lists Anna Asiakas", false); return }
         openURL("lashkirja://customer/\(id)")
         let ok = app.staticTexts["Anna Asiakas"].waitForExistence(timeout: 20)
+        // U027: the name was found under the notification question, which hid the card in the shot.
         shot("p2-spotlight-customer"); check("P2 Spotlight customer link opens Anna Asiakas", ok)
+        assertNoSystemAlert("p2-spotlight-customer")
     }
     /// U038: only a loaded receipt picture counts. `app.images` also counted the chevrons and the tab
     /// bar's icons, so the check passed on a list without a single picture. The thumbnails speak to

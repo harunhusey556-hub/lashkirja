@@ -10,7 +10,7 @@ final class StabilityTests: WalkTestCase {
         XCTAssertEqual(app.state, .runningForeground, "\(step): app is not running", file: file, line: line)
         let tabs = app.tabBars.firstMatch
         XCTAssertTrue(tabs.waitForExistence(timeout: 10), "\(step): tab bar gone (frozen or crashed)", file: file, line: line)
-        check(step, app.state == .runningForeground)
+        check(step, app.state == .runningForeground, file: file, line: line)
     }
 
     /// The list's "Näytä enemmän (N)" / "Näytä vähemmän" row, scrolled into view. A tap moves it below
@@ -95,8 +95,14 @@ final class StabilityTests: WalkTestCase {
         tab("Kirjanpito"); sleep(2)
         tapLabel("label BEGINSWITH %@", "Tulos ja tase, Tuloslaskelma"); sleep(3)
         for part in ["Tase", "Saldot", "Päiväkirja", "Tulos"] {
-            if app.buttons[part].waitForExistence(timeout: 10) { app.buttons[part].tap(); taps += 1 }
-            sleep(1)
+            // U086: the view the tap picked is the one shown; a running app alone passed whichever
+            // view stayed, and a segment that never came was skipped without a word.
+            let segment = app.segmentedControls.buttons[part].firstMatch
+            let shown = segment.waitForExistence(timeout: 10)
+            if shown { segment.tap(); taps += 1 }
+            let selected = shown && XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: segment)],
+                                                     timeout: 5) == .completed
+            check("kirjanpito: \(part) selected after its tap", selected)
             assertResponsive("kirjanpito: \(part)")
         }
         XCTAssertFalse(app.staticTexts["Tase ei täsmää. Ilmoita tästä tukeen."].exists, "balance sheet does not balance")
@@ -107,11 +113,21 @@ final class StabilityTests: WalkTestCase {
         shot("stability-kirjanpito")
     }
 
+    /// U086 X181: ALV opens and is read like the other pushed screens, and the probe says whether it
+    /// held the main thread. Its PASS was the app running, true whether ALV opened or not.
     func test04_VatAndBankHubOpen() {
-        tab("Kirjanpito"); tap("ALV-ilmoitus"); sleep(5)
-        // No element query on ALV: reading its accessibility tree outlasts XCTest's snapshot
-        // timeout in a Debug build, while the app itself stays idle (sampled 2026-10-08,
-        // test07). The swipe waits for the app to be idle, so a real freeze still fails here.
+        let log = relaunchWithProbe("test04")
+        XCTAssertTrue(selectTab("Kirjanpito"), "Kirjanpito is not selected")
+        let since = Date().timeIntervalSince1970
+        XCTAssertTrue(tap("ALV-ilmoitus"), "Kirjanpito has no ALV-ilmoitus")
+        let alv = app.navigationBars["ALV-ilmoitus"]
+        let opened = alv.waitForExistence(timeout: 15)
+        let figure = app.staticTexts.matching(NSPredicate(format: "label IN %@", ["Maksettava ALV", "Palautettava ALV"])).firstMatch
+        let read = opened && figure.waitForExistence(timeout: 20)
+        shot("stability-alv")
+        XCTAssertTrue(opened, "ALV-ilmoitus did not open")
+        XCTAssertTrue(read, "ALV shows no Maksettava ALV or Palautettava ALV")
+        assertAlvNotStalled(log, from: since, to: Date().timeIntervalSince1970, "alv")
         XCTAssertEqual(app.state, .runningForeground, "alv: app is not running")
         edgeSwipeBack()
         check("alv", app.state == .runningForeground)
@@ -119,7 +135,7 @@ final class StabilityTests: WalkTestCase {
         // 38895961757, 38993875695), "Pankki" was then looked for on ALV and the step passed
         // without Pankki ever opening. Its row shows once the pop has finished.
         let hubRow = app.staticTexts["Pankki"].firstMatch
-        let popped = hubRow.waitForExistence(timeout: 10)
+        let popped = alv.waitForNonExistence(timeout: 10) && hubRow.waitForExistence(timeout: 10)
         if !popped {
             shot("stability-alv-swipe-back-stayed")
             if let back = app.navigationBars["ALV-ilmoitus"].buttons.allElementsBoundByIndex.first(where: { $0.isHittable }) { back.tap() }
@@ -232,14 +248,36 @@ final class StabilityTests: WalkTestCase {
         XCTAssertTrue(tapLabel("label BEGINSWITH %@", "ABC Prisma Kotka"), "seeded receipt missing")
         sleep(3)
         let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "KSO ABC Sahkonlataus")).firstMatch
-        for _ in 0..<4 where !row.isHittable { app.swipeUp(velocity: .slow) }
+        // U087: whole above the floating tab bar, so the shots show it and then the unlink button.
+        // A row half under the bar counted as hittable: the loop never scrolled.
+        let offered = revealAboveTabs(row)
         shot("stability-same-amount-candidate")
         XCTAssertTrue(row.exists, "the same-amount bank row is not offered")
+        XCTAssertTrue(offered, "the same-amount bank row is not whole above the tab bar")
         row.tap(); taps += 1
         let unlink = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Poista kohdistus")).firstMatch
         XCTAssertTrue(unlink.waitForExistence(timeout: 10), "tapping the row did not link it")
+        XCTAssertTrue(revealAboveTabs(unlink), "Poista kohdistus is not whole above the tab bar")
         shot("stability-same-amount-linked")
         assertResponsive("receipt linked")
+    }
+
+    /// Scrolls (each swipe counted) until `element` lies whole between the window's top and the
+    /// floating tab bar: XCTest counts a row half under the bar as hittable (U087).
+    func revealAboveTabs(_ element: XCUIElement, scrolls maxScrolls: Int = 6) -> Bool {
+        let window = app.windows.firstMatch
+        let tabs = app.tabBars.firstMatch
+        func placed() -> Bool {
+            guard element.exists, element.isHittable else { return false }
+            let bottom = tabs.exists ? min(tabs.frame.minY, window.frame.maxY) : window.frame.maxY - 60
+            return element.frame.minY > window.frame.minY + 30 && element.frame.maxY <= bottom
+        }
+        _ = element.waitForExistence(timeout: 5)
+        for attempt in 0...maxScrolls {
+            if placed() { return true }
+            if attempt < maxScrolls { window.swipeUp(velocity: .slow); scrolls += 1 }
+        }
+        return false
     }
 
     /// A stored token the server no longer accepts, as the motion gate's pr-run1 restored from the
@@ -880,14 +918,55 @@ final class StabilityTests: WalkTestCase {
         return (parts.year ?? 2026, parts.month ?? 1)
     }
 
-    /// Opens ALV and then reads nothing for 25 s: the app's own hang watchdog (event log) tells
-    /// whether ALV blocks the main thread, without the test's accessibility queries in the way.
+    /// Opens ALV and then reads nothing for 25 s: the probe's STALL lines tell whether ALV blocks
+    /// the main thread, without the test's accessibility queries in the way (U086). The event log's
+    /// hang watchdog was never read by the test, so a hang still passed.
     func test07_AlvLeftAlone() {
-        tab("Kirjanpito"); tap("ALV-ilmoitus")
+        let log = relaunchWithProbe("test07")
+        XCTAssertTrue(selectTab("Kirjanpito"), "Kirjanpito is not selected")
+        let since = Date().timeIntervalSince1970
+        XCTAssertTrue(tap("ALV-ilmoitus"), "Kirjanpito has no ALV-ilmoitus")
+        let opened = app.navigationBars["ALV-ilmoitus"].waitForExistence(timeout: 15)
+        XCTAssertTrue(opened, "ALV-ilmoitus did not open")
         note("MARK alv-open \(Date().formatted(.iso8601))")
         sleep(25)
         note("MARK alv-end \(Date().formatted(.iso8601))")
+        assertAlvNotStalled(log, from: since, to: Date().timeIntervalSince1970, "alv left alone")
         XCTAssertEqual(app.state, .runningForeground)
+        let figure = app.staticTexts.matching(NSPredicate(format: "label IN %@", ["Maksettava ALV", "Palautettava ALV"])).firstMatch
+        XCTAssertTrue(opened && figure.exists, "ALV shows no Maksettava ALV or Palautettava ALV after 25 s")
+        shot("stability-alv-left-alone")
+    }
+
+    /// The app again with MotionProbe on (`-LKMotionAudit`, Debug builds), writing to a log of this
+    /// test's own, which starts empty. Its STALL lines are the main thread's own gaps.
+    func relaunchWithProbe(_ name: String) -> String {
+        let log = "\(shotDir)/probe-\(name).log"
+        try? FileManager.default.removeItem(atPath: log)
+        app.terminate()
+        app.launchArguments.append("-LKMotionAudit")
+        app.launchEnvironment["LK_MOTION_LOG"] = log
+        launchSignedIn()
+        dismissSystemPrompts()
+        return log
+    }
+
+    /// X181: ALV appeared (the probe's SCREEN line) and never held the main thread 3 s or more
+    /// between `from` and `to` (epoch seconds): its STALL lines, the push and the reads included.
+    func assertAlvNotStalled(_ log: String, from: Double, to: Double, _ step: String,
+                             file: StaticString = #filePath, line: UInt = #line) {
+        let lines = ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").split(separator: "\n").map { $0.split(separator: " ") }
+        // 'SCREEN <t> alv("")', 'STALL <t> alv("") ms=<ms>': the route's name as Route describes it.
+        let screens = lines.filter { $0.count >= 3 && $0[0] == "SCREEN" && $0[2].hasPrefix("alv") }
+        XCTAssertFalse(screens.isEmpty, "\(step): the probe saw no ALV screen (a Debug build with -LKMotionAudit writes \(log))",
+                       file: file, line: line)
+        let stalls = lines.compactMap { parts -> Int? in
+            guard parts.count >= 4, parts[0] == "STALL", parts[2].hasPrefix("alv"), let t = Double(parts[1]), t >= from, t <= to,
+                  parts[3].hasPrefix("ms=") else { return nil }
+            return Int(parts[3].dropFirst(3))
+        }
+        note("INFO \(step): ALV stalls \(stalls) ms")
+        XCTAssertLessThan(stalls.max() ?? 0, 3000, "\(step): ALV held the main thread \(stalls.max() ?? 0) ms", file: file, line: line)
     }
 
     /// X040 (B12): picking rows moves nothing. On Kuitit the review card left as the mode began and

@@ -5,12 +5,33 @@ final class P4Tests: WalkTestCase {
     func openAssistant() { app.buttons["Avustaja"].firstMatch.tap(); taps += 1; sleep(3) }
     var composer: XCUIElement { app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch }
 
+    /// U058: what the name promises, not only a composer: the unavailable note, each shortcut whole
+    /// and hittable in the window, no spinner and no failure page in the sheet.
     func testA_UnavailableStateIsCalm() {
         openAssistant(); shot("p4-assistant"); dump(app, "p4-assistant")
         assertNoticeReadsAsOne("P4 assistant")
         check("P4 assistant opens with a composer", composer.waitForExistence(timeout: 10))
+        // The conversation (assertNoticeReadsAsOne found it) and the composer's attach button, where
+        // the sheet's own spinners would be: Koti stays in the tree under the sheet.
+        let conversation = app.scrollViews.containing(NSPredicate(format: "label == %@", "Miten voin auttaa?")).firstMatch
+        let attach = app.buttons["Lähetä kuitti"].firstMatch
+        let spinners = (conversation.exists ? conversation.activityIndicators.count : 0)
+            + (attach.exists ? attach.activityIndicators.count : 0)
+        check("P4 assistant shows no spinner (\(spinners))", spinners == 0)
+        check("P4 assistant shows no Lataus epäonnistui", !app.staticTexts["Lataus epäonnistui"].exists)
         // U016 U053 (B11): the shortcuts were cut mid-word at the conversation's margin ('Tämän kuur').
         assertChipRowEdge("assistant-shortcuts", "P4 assistant shortcuts")
+        let chips = app.scrollViews.matching(identifier: "assistant-shortcuts").firstMatch.buttons
+        let count = chips.count
+        XCTAssertGreaterThan(count, 0, "the assistant offers no shortcut")
+        for index in 0..<count {
+            let chip = chips.element(boundBy: index)
+            let label = chip.label
+            // Judged by its frame first: isHittable on a chip wholly past the edge fails the test.
+            let shown = revealChip(chip, inRow: "assistant-shortcuts")
+            check("P4 shortcut '\(label)' is hittable inside the window", shown && chip.isHittable)
+        }
+        shot("p4-assistant-shortcuts")
     }
 
     /// U059: the question reaches the server and only its answer is lost, so the retry is a real

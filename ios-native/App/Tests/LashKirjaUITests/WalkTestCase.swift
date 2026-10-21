@@ -1,7 +1,7 @@
 import XCTest
 
 /// Base for simulator walks: fresh launch + demo sign-in per test, tap/scroll counting, and
-/// checks recorded to notes.txt (not asserted, so one miss does not hide the rest).
+/// checks recorded to notes.txt and asserted (continueAfterFailure, so one miss does not hide the rest).
 class WalkTestCase: XCTestCase {
     var taps = 0
     var scrolls = 0
@@ -10,10 +10,22 @@ class WalkTestCase: XCTestCase {
     let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
     /// The system password manager offers to save the demo login; not part of the app. On iOS 26 its
     /// "Save Password?" sheet sits in the app's own element tree, not SpringBoard's (CI dump, 2026-10-15).
+    /// The notification question is answered too, should a launch still raise it over a link's
+    /// screen (U027 U104): the flag in setUp stands for it, the shot must not show it.
     func dismissSystemPrompts() {
-        for label in ["Not Now", "Ei nyt"] {
-            probe { for root in [springboard, app!] where root.buttons[label].exists { root.buttons[label].tap() } }
+        let labels = ["Not Now", "Ei nyt", "Don’t Allow", "Don't Allow", "Älä salli"]
+        for root in [springboard, app!] {
+            probe {
+                let prompt = root.buttons.matching(NSPredicate(format: "label IN %@", labels)).firstMatch
+                if prompt.exists { prompt.tap() }
+            }
         }
+    }
+    /// A link's screen is what the shot shows: no system alert over it (U027 U104).
+    func assertNoSystemAlert(_ step: String, file: StaticString = #filePath, line: UInt = #line) {
+        var alerts = 0
+        probe { alerts = springboard.alerts.count }
+        XCTAssertEqual(alerts, 0, "\(step): a system alert is over the app", file: file, line: line)
     }
     var savePasswordPrompt: XCUIElement {
         app.buttons.matching(NSPredicate(format: "label IN %@", ["Not Now", "Ei nyt"])).firstMatch
@@ -105,7 +117,12 @@ class WalkTestCase: XCTestCase {
         if let h = FileHandle(forWritingAtPath: p) { h.seekToEndOfFile(); h.write((s + "\n").data(using: .utf8)!); h.closeFile() }
         else { FileManager.default.createFile(atPath: p, contents: (s + "\n").data(using: .utf8)) }
     }
-    func check(_ name: String, _ ok: Bool) { note("\(ok ? "PASS" : "FAIL") \(name)") }
+    /// A PASS or FAIL line in notes.txt, and asserted: only noted, a FAIL still read as a passed walk
+    /// (U042 U058 U086, and the check() half of U021 U023).
+    func check(_ name: String, _ ok: Bool, file: StaticString = #filePath, line: UInt = #line) {
+        note("\(ok ? "PASS" : "FAIL") \(name)")
+        XCTAssertTrue(ok, name, file: file, line: line)
+    }
 
     func openSettings() {
         app.buttons["Asetukset"].firstMatch.tap(); taps += 1
