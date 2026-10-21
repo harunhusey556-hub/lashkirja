@@ -264,7 +264,7 @@ struct RaportitView: View {
                 // Measured only while it shows: a swap counts its row with the rows it takes away.
                 if categoryLimit.buttonTitle(total: rows.count) != nil {
                     ShowMoreButton(limit: $categoryLimit, total: rows.count)
-                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { categoryFrames.button = $0 }
+                        .onGeometryChange(for: ListEndHold.Frame.self) { Self.measured($0) } action: { categoryFrames.button = $0 }
                         .onDisappear { categoryFrames.button = nil }
                 }
             } header: {
@@ -287,7 +287,7 @@ struct RaportitView: View {
                 }
             }
             // Off screen a row keeps no place: its last one goes stale as the page scrolls on.
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { categoryFrames.rows[row.id] = $0 }
+            .onGeometryChange(for: ListEndHold.Frame.self) { Self.measured($0) } action: { categoryFrames.rows[row.id] = $0 }
             .onDisappear { categoryFrames.rows[row.id] = nil }
         }
     }
@@ -299,11 +299,11 @@ struct RaportitView: View {
     private func swapCategories(to next: ReportCategoryKind, from shown: ReportCategoryKind, in total: ProfitLoss.Period) {
         let rows = shown.rows(total)
         let visible = rows.prefix(categoryLimit.visible(rows.count))
-        let frames = visible.map { categoryFrames.rows[$0.id].map(Self.measured) }
+        let frames = visible.map { categoryFrames.rows[$0.id] }
         // No two rows on screen: the block starts below it, and the page has all of it as room.
         if next != shown, let rowHeight = ListEndHold.rowHeight(frames) {
             let button = categoryLimit.buttonTitle(total: rows.count) != nil
-            let buttonHeight = ListEndHold.buttonHeight(button ? categoryFrames.button.map(Self.measured) : nil,
+            let buttonHeight = ListEndHold.buttonHeight(button ? categoryFrames.button : nil,
                                                         under: frames.last ?? nil, rowHeight: rowHeight)
             let fresh = ShowMore(step: categoryLimit.step)
             let count = next.rows(total).count
@@ -324,14 +324,17 @@ struct RaportitView: View {
         categoryHold = 0
     }
 
-    private static func measured(_ frame: CGRect) -> ListEndHold.Frame {
-        ListEndHold.Frame(top: Double(frame.minY), height: Double(frame.height))
+    /// Only what a swap reads: not the x, so a push or a swipe-back sliding the page sideways
+    /// changes nothing and calls no action.
+    private nonisolated static func measured(_ proxy: GeometryProxy) -> ListEndHold.Frame {
+        let frame = proxy.frame(in: .global)
+        return ListEndHold.Frame(top: Double(frame.minY), height: Double(frame.height))
     }
 
     /// Written on every layout and scroll, so a class: kept in @State, a write re-renders nothing.
     private final class CategoryFrames {
-        var rows: [String: CGRect] = [:]
-        var button: CGRect?
+        var rows: [String: ListEndHold.Frame] = [:]
+        var button: ListEndHold.Frame?
         /// How far the page still scrolls down; infinite at its top, where nothing can clamp.
         var room: CGFloat = .infinity
         /// Kirjanpitopaketti's header, which carries `categoryHold`, is on screen: taken as so until it

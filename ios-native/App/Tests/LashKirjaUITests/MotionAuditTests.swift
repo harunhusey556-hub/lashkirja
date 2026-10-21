@@ -75,9 +75,12 @@ final class MotionAuditTests: WalkTestCase {
         let name = "\(shotDir)/m-\(id)"
         for leftover in ["recording", "stop"] { try? FileManager.default.removeItem(atPath: "\(name).\(leftover)") }
         FileManager.default.createFile(atPath: "\(name).rec", contents: "\(Int(Self.recordCap))".data(using: .utf8))
-        // The host writes .recording once simctl says "Recording started".
+        // The host writes .recording once simctl says "Recording started", or after its 150 looks
+        // for that line. On a loaded runner it came 20 and 38 s after the request (the first step
+        // of both PR walks in gate 39659357338), past a 20 s wait here: the step went on without
+        // counting the video the host still recorded, and read NO-MOTION.
         var started = false
-        for _ in 0..<80 { if FileManager.default.fileExists(atPath: "\(name).recording") { started = true; break }; usleep(250_000) }
+        for _ in 0..<240 { if FileManager.default.fileExists(atPath: "\(name).recording") { started = true; break }; usleep(250_000) }
         // The first frames are the settled "from" screen.
         usleep(600_000)
         let probe = ProbeTail()

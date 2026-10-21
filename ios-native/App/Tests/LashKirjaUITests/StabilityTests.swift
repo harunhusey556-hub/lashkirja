@@ -1013,21 +1013,33 @@ final class StabilityTests: WalkTestCase {
     /// down under the finger while Lataa zip, at the page's foot, stayed (motion gates 39580643433
     /// and 39636460950: SCROLLJUMP dy=-66). Back to Menot, Lataa zip fell a row. Away from the end
     /// nothing is held: Kirjanpitopaketti follows the shorter list up, with no blank room under it.
+    /// The end is reached as the motion walk reaches it (raportit-scroll): flung there, not scrolled
+    /// until Lataa zip shows.
     func test33_RaportitCategorySwapHoldsThePage() {
         XCTAssertTrue(selectTab("Raportit"), "Raportit is not selected")
         let zip = app.buttons["Lataa zip"].firstMatch
-        guard app.staticTexts["Kuukausittain"].firstMatch.waitForExistence(timeout: 15), reveal(zip, scrolls: 8) else {
-            dump(app, "stability-33-no-zip"); XCTFail("Lataa zip is not hittable on Raportit"); return
+        guard app.staticTexts["Kuukausittain"].firstMatch.waitForExistence(timeout: 15) else {
+            dump(app, "stability-33-no-report"); XCTFail("Raportit shows no report"); return
+        }
+        let window = app.windows.firstMatch
+        for _ in 0..<4 where !(zip.exists && zip.isHittable) {
+            window.swipeUp(velocity: .fast); scrolls += 1
+            _ = zip.waitForExistence(timeout: 3)
+        }
+        guard zip.exists, zip.isHittable else {
+            dump(app, "stability-33-no-zip"); XCTFail("Lataa zip is not hittable on Raportit after 4 flings"); return
         }
         // To the end, where the motion walk's fling left the page: only there has the offset nowhere
         // to go, so one more swipe must move nothing.
-        let window = app.windows.firstMatch
         window.swipeUp(velocity: .fast); scrolls += 1
         waitStill(zip)
         let endY = zip.frame.minY
         window.swipeUp(velocity: .slow); scrolls += 1
         waitStill(zip)
         XCTAssertEqual(zip.frame.minY, endY, accuracy: 1, "Raportit was not at its end: the swaps below would prove nothing")
+        // The swap comes after a fling, as in the walk.
+        window.swipeUp(velocity: .fast); scrolls += 1
+        waitStill(zip)
         let picker = app.segmentedControls.firstMatch
         guard picker.exists, picker.isHittable else {
             dump(app, "stability-33-no-picker"); XCTFail("Luokittain has no picker on screen at the end of Raportit (the seed books Tulot and Menot)"); return

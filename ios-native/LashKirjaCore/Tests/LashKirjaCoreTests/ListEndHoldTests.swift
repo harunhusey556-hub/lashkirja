@@ -19,6 +19,12 @@ private func button(_ top: Double) -> ListEndHold.Frame { ListEndHold.Frame(top:
     #expect(ListEndHold.held(before: 198, after: 132, held: 0, room: 40) == 26)
 }
 
+@Test func aLongListHoldsWithMoreThanAScreenOfRoom() {
+    // Menot shown to 25 rows and its button, to Tulot's 2: the page still scrolls more than a
+    // screen (874 pt) down, and the shorter list leaves 436 pt of it short.
+    #expect(ListEndHold.held(before: 25 * 66 + 44, after: 132, held: 0, room: 1126) == 436)
+}
+
 @Test func aLongerBlockTakesBackWhatWasHeld() {
     // Back to Menot at the end: the page keeps its height and holds nothing.
     #expect(ListEndHold.held(before: 132, after: 198, held: 66, room: 0) == 0)
