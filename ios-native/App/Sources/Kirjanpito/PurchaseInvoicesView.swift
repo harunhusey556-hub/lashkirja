@@ -348,9 +348,12 @@ struct PurchaseInvoicesView: View {
         NavigationLink(value: Route.purchaseInvoice(invoice.id)) {
             PurchaseInvoiceRow(invoice: invoice, recurring: recurringIds[invoice.id] != nil)
         }
+        // Not a destructive role: the list takes such a row off at the tap, before the question is
+        // answered (F009). The fill is the one it had.
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if invoice.canDelete {
-                Button(role: .destructive) { deleteTarget = invoice } label: { Label("Poista", systemImage: "trash") }
+                Button { deleteTarget = invoice } label: { Label("Poista", systemImage: "trash") }
+                    .tint(Theme.accentFill)
             }
         }
         .swipeActions(edge: .leading) {
@@ -930,12 +933,15 @@ struct PurchaseInvoiceDetailView: View {
                             .accessibilityLabel("Irrota pankkitapahtuma \(Money.format(payment.amount))")
                     }
                 }
+                // Not a destructive role: the list takes such a row off at the tap, before the question
+                // is answered (F009). The fill is the one it had.
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
+                    Button {
                         confirm = payment.isLinkedToBank ? .unlinkPayment(payment) : .removePayment(payment)
                     } label: {
                         Label(payment.isLinkedToBank ? "Irrota" : "Poista maksu", systemImage: payment.isLinkedToBank ? "link" : "trash")
                     }
+                    .tint(Theme.accentFill)
                 }
             }
         } header: {
