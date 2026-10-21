@@ -389,6 +389,25 @@ final class P2Tests: WalkTestCase {
         XCTAssertFalse(overlaps(pill, price.frame), "the unit pill \(pill) lies over the price field \(price.frame)")
     }
 
+    /// U049: Myynti's two shortcut tiles side by side, tops and heights equal. On a 402 pt screen
+    /// 'Toistuvat laskut' wraps onto two lines, and its tile stood about 70 pt tall beside the 60 pt
+    /// of 'Asiakkaat', each centred, so neither the tops nor the bottoms lined up.
+    func testG_ShortcutTilesEqualHeight() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        let customers = app.buttons["Asiakkaat"].firstMatch
+        let recurring = app.buttons["Toistuvat laskut"].firstMatch
+        guard reveal(customers), recurring.exists else {
+            dump(app, "p2g-no-tiles"); XCTFail("Myynti shows no Asiakkaat and Toistuvat laskut tiles"); return
+        }
+        waitStill(recurring)
+        shot("p2g-shortcut-tiles")
+        note("INFO p2g-geometry: Asiakkaat \(customers.frame), Toistuvat laskut \(recurring.frame)")
+        XCTAssertEqual(customers.frame.minY, recurring.frame.minY, accuracy: 0.5,
+                       "the tiles' tops differ: Asiakkaat \(customers.frame), Toistuvat laskut \(recurring.frame)")
+        XCTAssertEqual(customers.frame.height, recurring.frame.height, accuracy: 0.5,
+                       "the tiles' heights differ: Asiakkaat \(customers.frame), Toistuvat laskut \(recurring.frame)")
+    }
+
     /// X026: on Lasku 4 > Muokkaa the Asiakas card shows Kauneus Oy's Y-tunnus and e-mail whole. On one
     /// line beside "Vaihda" the e-mail was cut to 'laskut@kaune…'. Text the audit finds cut on the
     /// invoice under the form is that screen's, not the card's. Wrapped whole on two lines the detail

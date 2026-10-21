@@ -27,6 +27,8 @@ struct MyyntiView: View {
     /// A just-created invoice, opened when the form's sheet has closed.
     @State private var createdId: String?
     @State private var limit = ShowMore()
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var tileIconWidth: CGFloat = 24
 
     /// A link opens exactly the list it names: its status chip, or Kaikki when it names none.
     /// `preview` (the app's `salesPreview` for the same scope and chip) is on screen in the first
@@ -193,11 +195,16 @@ struct MyyntiView: View {
     }
 
     /// Two tiles as wide as the cards around them, so they read as places to go, not filters.
+    /// Stacked at accessibility sizes: side by side the titles were cut to 'Asi a…' (U067).
     private var shortcuts: some View {
-        HStack(spacing: 10) {
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
             shortcutTile("Asiakkaat", symbol: "person.2", route: .customers)
             shortcutTile("Toistuvat laskut", symbol: "repeat", route: .recurringInvoices)
         }
+        // Side by side, both as tall as the taller: 'Toistuvat laskut' wraps on a 402 pt screen,
+        // and its tile stood taller than the other, the tops apart (U049).
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// A button that pushes its route, not a NavigationLink: two links in one List row make the
@@ -209,7 +216,8 @@ struct MyyntiView: View {
                 Image(systemName: symbol)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.accent)
-                    .frame(width: 24)
+                    // Grows with the glyph: at a fixed 24 pt the large symbol ran into the title (U067).
+                    .frame(width: tileIconWidth)
                     .accessibilityHidden(true)
                 Text(title)
                     .font(.subheadline.weight(.semibold))
@@ -222,7 +230,7 @@ struct MyyntiView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 16)
-            .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 60, maxHeight: .infinity, alignment: .leading)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
@@ -373,17 +381,24 @@ private struct ReceivablesCard: View {
     let onSegment: (SalesFilter) -> Void
     let onBucket: (AgingBucket) -> Void
     @State private var open = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         let segments = aging.segments
         let buckets = aging.lateBuckets
+        // Erittely under the total at accessibility sizes: beside it the total left its '€' on a
+        // line of its own and the button broke to 'Erit-/tely' (U066).
+        let header = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .top))
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
+            header {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Saatavat, avoinna").font(.caption).foregroundStyle(Theme.ink2)
                     MoneyText(amount: aging.totalOpen).font(.title2.weight(.semibold))
+                        .accessibilityIdentifier("receivables-total")
                 }
-                Spacer()
+                if !typeSize.isAccessibilitySize { Spacer() }
                 if !buckets.isEmpty {
                     Button { withMotion(.snappy) { open.toggle() } } label: {
                         HStack(spacing: 4) {
@@ -403,7 +418,8 @@ private struct ReceivablesCard: View {
             legend(segments)
             if open && !buckets.isEmpty {
                 Divider()
-                HStack(spacing: 0) {
+                let figures = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 0))
+                figures {
                     ForEach(buckets) { bucket in bucketButton(bucket) }
                 }
             }
@@ -450,8 +466,13 @@ private struct ReceivablesCard: View {
         }
     }
 
+    /// One part under another at accessibility sizes: in three columns the labels were cut to
+    /// 'Maks…' and the amounts broke after the comma (U065).
     private func legend(_ segments: [ReceivablesSegment]) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+        return layout {
             ForEach(segments) { segment in
                 Button { onSegment(segment.filter) } label: {
                     VStack(alignment: .leading, spacing: 2) {
@@ -590,15 +611,21 @@ struct BankMatchSheet: View {
 
 struct InvoiceRow: View {
     let invoice: Invoice
+    @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        // At accessibility sizes the amount and the badge go under the name: beside it the name,
+        // the amount and the badge each broke inside a word (U068).
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
+        layout {
             VStack(alignment: .leading, spacing: 3) {
                 Text(invoice.customer.name).font(.body).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
                 // The badge beside it says "Myöhässä"; the line no longer says it too (M100).
                 Text(invoice.rowSecondary).font(.caption).foregroundStyle(Theme.ink2)
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 3) {
+            if !typeSize.isAccessibilitySize { Spacer() }
+            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 3) {
                 MoneyText(amount: invoice.gross).font(.subheadline.weight(.semibold))
                 StatusBadge(status: invoice.displayStatus, partlyCredited: invoice.isPartlyCredited)
             }
@@ -613,12 +640,20 @@ struct StatusBadge: View {
     var partlyCredited = false
     /// Words of its own in the status's colours: the invoice's "Myöhässä 15 päivää".
     var text: String? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
         Text(text ?? (partlyCredited ? InvoiceCreditDisplay.partlyCreditedLabel : status.label))
             .font(.caption2.weight(.semibold))
+            // One line, never broken inside a word ('Luon-/nos', 'Myöhäs/sä', U068 U069). At the
+            // largest sizes "Myöhässä 15 päivää" is wider than the card: it shrinks on its line
+            // rather than run past the edge.
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(color.opacity(0.12), in: Capsule())
             .foregroundStyle(color)
+            // Its whole width beside other text; at accessibility sizes it has a line of its own.
+            .fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: true)
     }
     private var color: Color {
         if partlyCredited { return Theme.warning }

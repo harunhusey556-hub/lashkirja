@@ -6,6 +6,7 @@ struct InvoiceDetailView: View {
     @Environment(\.dismiss) private var dismiss
     /// The customer, a copy and a credit note open on the stack's path (G005, as M024).
     @Environment(\.openRoute) private var openRoute
+    @Environment(\.dynamicTypeSize) private var typeSize
     let invoiceId: String
     @State private var state = ScreenLoad<Invoice>()
     @State private var sheet: SheetKind?
@@ -166,18 +167,24 @@ struct InvoiceDetailView: View {
 
     /// Amount, customer, where the invoice stands and the three dates, in one card.
     private func summaryCard(_ invoice: Invoice) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
+        // At accessibility sizes these rows stack: side by side the badge and its line broke to
+        // 'Myöhäs/sä' (U069), and the facts in thirds broke their labels and cut the reference to
+        // '0…' (U070). The reference then has a line of its own, as wide as the card.
+        let large = typeSize.isAccessibilitySize
+        let statusRow = large ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
+        let factsRow = large ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        return VStack(alignment: .leading, spacing: 12) {
+            statusRow {
                 let due = InvoiceDetailLayout.dueLine(status: invoice.displayStatus, dueDate: invoice.dueDate,
                                                       paidAt: invoice.paidAt, today: APIDate.dayString(Date()))
                 // Late is said once, with its days, in the danger tag (U047): the badge beside the
                 // line said "Myöhässä" again. A part credit keeps its badge, which says something else.
                 if invoice.displayStatus == .overdue && !invoice.isPartlyCredited {
                     StatusBadge(status: .overdue, text: due)
-                    Spacer(minLength: 8)
+                    if !large { Spacer(minLength: 8) }
                 } else {
                     StatusBadge(status: invoice.displayStatus, partlyCredited: invoice.isPartlyCredited)
-                    Spacer(minLength: 8)
+                    if !large { Spacer(minLength: 8) }
                     Text(due)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(invoice.displayStatus == .overdue ? Theme.danger : Theme.ink2)
@@ -210,7 +217,7 @@ struct InvoiceDetailView: View {
                 sendLine(line)
             }
             Divider()
-            HStack(alignment: .top, spacing: 12) {
+            factsRow {
                 fact("Laskun päivä", APIDate.displayDay(invoice.issueDate))
                 fact("Eräpäivä", APIDate.displayDay(invoice.dueDate))
                 VStack(alignment: .leading, spacing: 2) {
@@ -221,10 +228,13 @@ struct InvoiceDetailView: View {
                         showToast("Viitenumero kopioitu.", action: nil, run: nil)
                     } label: {
                         HStack(spacing: 4) {
-                            Text(invoice.reference).font(.subheadline.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.8)
+                            Text(invoice.reference).font(.subheadline.monospacedDigit()).lineLimitUnlessLarge().minimumScaleFactor(0.8)
                             Image(systemName: "doc.on.doc").font(.caption2)
                         }
                         .foregroundStyle(Theme.ink)
+                        // The whole line copies, not only the digits.
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
                     .accessibilityLabel("Kopioi viitenumero \(invoice.reference)")

@@ -185,19 +185,26 @@ private struct KotiContent: View {
         return Card {
             NavigationLink(value: Route.monthClose(d.month)) {
                 HStack(alignment: .center, spacing: 14) {
-                    // Nothing counted is not 100 %: an empty ring with no figure instead.
-                    if let progress = status.progress {
-                        ProgressRing(progress: progress)
-                            .frame(width: 44, height: 44)
-                    } else {
-                        Circle().stroke(Theme.line, lineWidth: 5)
-                            .frame(width: 44, height: 44)
-                            .accessibilityHidden(true)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(status.headline).font(.headline).foregroundStyle(Theme.ink)
-                        if let detail = status.detail {
-                            Text(detail).font(.caption).foregroundStyle(Theme.ink2)
+                    // At accessibility sizes the ring stands over the words, which then have the
+                    // card's width: beside it they wrapped in a narrow column, 'tapahtu-/maa' (U064).
+                    let ringAndWords = typeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                        : AnyLayout(HStackLayout(spacing: 14))
+                    ringAndWords {
+                        // Nothing counted is not 100 %: an empty ring with no figure instead.
+                        if let progress = status.progress {
+                            ProgressRing(progress: progress)
+                                .frame(width: 44, height: 44)
+                        } else {
+                            Circle().stroke(Theme.line, lineWidth: 5)
+                                .frame(width: 44, height: 44)
+                                .accessibilityHidden(true)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(status.headline).font(.headline).foregroundStyle(Theme.ink)
+                            if let detail = status.detail {
+                                Text(detail).font(.caption).foregroundStyle(Theme.ink2)
+                            }
                         }
                     }
                     Spacer(minLength: 8)
@@ -210,7 +217,10 @@ private struct KotiContent: View {
                 Divider()
                 NavigationLink(value: Route.monthClose(previous.month)) {
                     HStack(spacing: 8) {
-                        Image(systemName: "calendar.badge.checkmark").foregroundStyle(Theme.ink2).accessibilityHidden(true)
+                        // The rows' icons only decorate: at accessibility sizes their width goes to the words.
+                        if !typeSize.isAccessibilitySize {
+                            Image(systemName: "calendar.badge.checkmark").foregroundStyle(Theme.ink2).accessibilityHidden(true)
+                        }
                         VStack(alignment: .leading, spacing: 2) {
                             Text(Koti.previousMonthLine(previous)).font(.subheadline).foregroundStyle(Theme.ink)
                             Text("Kuukauden sulkeminen").font(.caption).foregroundStyle(Theme.ink2)
@@ -233,20 +243,29 @@ private struct KotiContent: View {
     /// Opens the ALV screen on that period.
     private func vatDueRow(_ due: KotiVatDue, figures: VatDueFigures?) -> some View {
         let secondary = Koti.vatDueSecondary(due, figures)
+        // At accessibility sizes the figure goes under the words, and the icon goes: beside both
+        // the words had a narrow column left.
+        let large = typeSize.isAccessibilitySize
+        let wordsAndFigure = large ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2)) : AnyLayout(HStackLayout(spacing: 8))
         return NavigationLink(value: Route.alv(due.lastMonth)) {
             HStack(spacing: 8) {
-                Image(systemName: "percent").foregroundStyle(Theme.ink2).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(Koti.vatDueTitle).font(.subheadline).foregroundStyle(Theme.ink)
-                    Text(secondary).font(.caption).foregroundStyle(Theme.ink2)
-                    ForEach(Koti.vatDueNotes(figures), id: \.self) { note in
-                        Text(note).font(.caption).foregroundStyle(Theme.warning)
+                if !large {
+                    Image(systemName: "percent").foregroundStyle(Theme.ink2).accessibilityHidden(true)
+                }
+                wordsAndFigure {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Koti.vatDueTitle).font(.subheadline).foregroundStyle(Theme.ink)
+                        Text(secondary).font(.caption).foregroundStyle(Theme.ink2)
+                        ForEach(Koti.vatDueNotes(figures), id: \.self) { note in
+                            Text(note).font(.caption).foregroundStyle(Theme.warning)
+                        }
+                    }
+                    if !large { Spacer(minLength: 8) }
+                    if let figures {
+                        MoneyText(amount: figures.amount).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                     }
                 }
-                Spacer(minLength: 8)
-                if let figures {
-                    MoneyText(amount: figures.amount).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
-                }
+                if large { Spacer(minLength: 8) }
                 Chevron()
             }
             .contentShape(Rectangle())
@@ -460,6 +479,8 @@ struct ProgressRing: View {
             Circle().trim(from: 0, to: progress).stroke(Theme.success, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(-90))
             Text("\(Int((progress * 100).rounded())) %").font(.caption2.weight(.semibold)).monospacedDigit()
                 .minimumScaleFactor(0.6).lineLimit(1)
+                // The ring stays 44 pt: past xxLarge its figure did not fit even shrunk, and read '2…' (U064).
+                .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         }
         .animation(reduceMotion ? nil : .snappy, value: progress)
     }
