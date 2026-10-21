@@ -29,7 +29,7 @@ extension WalkTestCase {
         XCTAssertEqual(chip.minX, window.minX + 16, accuracy: 0.5, "\(screen): the first chip starts at x \(chip.minX), not 16 pt in",
                        file: file, line: line)
         let held = frame.minX <= window.minX && abs(frame.maxX - window.maxX) <= 0.5 && abs(chip.minX - (window.minX + 16)) <= 0.5
-        check("\(screen): the chip row reaches the screen's edges, its first chip 16 pt in", held)
+        check("\(screen): the chip row reaches the screen's edges, its first chip 16 pt in", held, file: file, line: line)
         return held
     }
 

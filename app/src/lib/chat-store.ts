@@ -467,6 +467,7 @@ export async function runAssistantTurn(input: {
   };
 }
 
+/** The conversation's title after this message: the stream's first frame names it (U055). */
 export async function rememberConversationTitle(conversationId: string, userId: string, message: string) {
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, userId },
@@ -476,8 +477,10 @@ export async function rememberConversationTitle(conversationId: string, userId: 
     !conversation || conversation.title === DEFAULT_CONVERSATION_TITLE
       ? titleFromMessage(message)
       : undefined;
-  await prisma.conversation.update({
+  const updated = await prisma.conversation.update({
     where: { id: conversationId },
     data: { updatedAt: new Date(), ...(title ? { title } : {}) },
+    select: { title: true },
   });
+  return updated.title;
 }

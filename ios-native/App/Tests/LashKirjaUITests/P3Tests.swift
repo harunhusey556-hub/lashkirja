@@ -20,14 +20,77 @@ final class P3Tests: WalkTestCase {
         }
     }
 
+    /// The demo API itself, past the proxy (the runner shares the Mac's loopback). Test values from
+    /// app/scripts/demo-seed.ts; only ever against the throwaway demo API. A body makes it a POST.
+    func call(_ path: String, _ body: [String: String]?, _ bearer: String?, method: String? = nil) -> [String: Any]? {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:3999\(path)")!)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        if let body {
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "content-type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
+        if let method { request.httpMethod = method }
+        if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "authorization") }
+        var result: [String: Any]?
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            result = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 30)
+        return result
+    }
+    func demoToken() -> String? {
+        call("/api/auth/token", ["email": "demo@lashkirja.fi", "password": "demo123"], nil)?["token"] as? String
+    }
+    func serverDrafts(_ bearer: String) -> Int? {
+        (call("/api/invoices/counts", nil, bearer)?["counts"] as? [String: Any])?["draft"] as? Int
+    }
+    /// The number in a chip's label ("Luonnokset, 2"); nil while the chip is not there.
+    static func count(_ chip: XCUIElement) -> Int? {
+        guard chip.exists else { return nil }
+        return Int(chip.label.filter(\.isNumber))
+    }
+
+    /// Pull to refresh from the first list cell, where a thumb starts it (as MotionAuditTests): two
+    /// fast swipes from mid-screen started no refresh at all (U042), and from 25 % of the window the
+    /// drag began on Myynti's search field and pulled nothing (M030).
+    func pullToRefresh() {
+        let w = app.windows.firstMatch
+        let window = w.frame
+        let cell = app.cells.firstMatch
+        var top = CGPoint(x: window.midX, y: window.height * 0.25)
+        if cell.exists, cell.isHittable, cell.frame.midY > 0, cell.frame.midY < window.height * 0.5 {
+            top = CGPoint(x: cell.frame.midX, y: cell.frame.midY)
+        }
+        let origin = w.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: top.x, dy: top.y))
+            .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: top.x, dy: top.y + window.height * 0.5)))
+    }
+
+    /// U042: the screen that failed while offline reloads on its own once the server answers. The
+    /// 'Luonnokset' chip it waited for was on screen before the API went away, and the offline
+    /// screen showed no failure at all: two fast swipes from mid-screen started no refresh, and a
+    /// tab switch does not load a list still fresh for its version. Now Myynti's own refresh fails
+    /// (its stale note shows), and a draft the demo API makes while the app is cut off is what only
+    /// a reload can bring.
     func testA_OfflineBannerAndRecovery() {
+        guard let bearer = demoToken() else { XCTFail("the demo API gave no token"); return }
+        defer { _ = call("/api/auth/logout", [:], bearer) }
         tab("Myynti")
+        let drafts = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Luonnokset'")).firstMatch
+        let before = drafts.waitForExistence(timeout: 15) ? drafts.label : "?"
         goOffline()
-        // Two failed loads make the server count as unreachable. A pull-to-refresh swipe does not
-        // always start a load (seen 2026-10-08: no request at all); a tab switch always does.
-        for _ in 0..<2 { app.windows.firstMatch.swipeDown(velocity: .fast); sleep(3) }
-        tab("Kirjanpito"); sleep(3); tab("Myynti"); sleep(3)
+        // Two failed loads make the server count as unreachable: one refresh asks for the list and
+        // its counts.
+        let stale = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Näytetään viimeksi haetut tiedot")).firstMatch
+        for _ in 0..<3 where !stale.exists {
+            pullToRefresh()
+            _ = stale.waitForExistence(timeout: 10)
+        }
         shot("p3a-offline")
+        check("P3 Myynti's failed refresh says its rows may be old", stale.exists)
         check("P3 offline banner appears when the API is unreachable", banner.waitForExistence(timeout: 20))
         let myynti = app.navigationBars["Myynti"]
         assertBannerClear("Myynti", of: [("Asetukset", myynti.buttons["Asetukset"].firstMatch),
@@ -53,53 +116,53 @@ final class P3Tests: WalkTestCase {
             XCTAssertTrue(composer.waitForNonExistence(timeout: 10), "the assistant did not close")
         }
         tab("Myynti")
+        // Made on the server while the app cannot ask: the chip shows it only after a reload.
+        let source = (call("/api/invoices", nil, bearer)?["invoices"] as? [[String: Any]])?.first?["id"] as? String
+        let made = source.flatMap { call("/api/invoices/\($0)/duplicate", [:], bearer)?["invoice"] as? [String: Any] }?["id"] as? String
+        guard let made, let expected = serverDrafts(bearer) else { XCTFail("the demo API made no draft"); return }
+        defer { _ = call("/api/invoices/\(made)", nil, bearer, method: "DELETE") }
+        XCTAssertNotEqual(Self.count(drafts), expected, "the chip shows the server's draft while offline (\(drafts.label))")
+        // scripts/sim/run-ui.sh writes the proxy's log into the shot folder, the CI workflow beside it.
+        let proxyLog = ["\(shotDir)/api-proxy.log", "\((shotDir as NSString).deletingLastPathComponent)/api-proxy.log"]
+            .first { FileManager.default.fileExists(atPath: $0) } ?? "\(shotDir)/api-proxy.log"
+        let logged = ((try? FileManager.default.attributesOfItem(atPath: proxyLog))?[.size] as? NSNumber)?.uint64Value ?? 0
         goOnline()
+        let back = Date()
         let gone = NSPredicate(format: "exists == false")
         let recovered = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: banner)], timeout: 30) == .completed
         shot("p3a-online")
         check("P3 banner clears after the API is back", recovered)
         // The screen that failed while offline reloads on its own: no "Yritä uudelleen" needed.
-        let reloaded = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Luonnokset'")).firstMatch.waitForExistence(timeout: 20)
+        while Self.count(drafts) != expected && Date() < back.addingTimeInterval(30) { usleep(500_000) }
+        let reloaded = Self.count(drafts) == expected
         shot("p3a-reloaded")
-        check("P3 failed screen reloads by itself when back online", reloaded)
+        note("INFO P3 drafts before: \(before), server after the offline draft: \(expected), shown \(Int(Date().timeIntervalSince(back))) s after going online: \(drafts.exists ? drafts.label : "no chip")")
+        // Which request came first once online: the version poll (every 30 s) reloads the list
+        // too, so a reload that only followed its answer may not be the recovery's own.
+        if let handle = FileHandle(forReadingAtPath: proxyLog) {
+            try? handle.seek(toOffset: logged)
+            let lines = String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self).split(separator: "\n")
+            try? handle.close()
+            let first = lines.first { $0.contains(" GET /api/sync/version 200") || $0.contains(" GET /api/invoices/counts 200") }
+            note("INFO P3 first answer online of the version poll or the counts: \(first.map { String($0) } ?? "none")")
+        }
+        check("P3 failed screen reloads by itself when back online (Luonnokset \(expected))", reloaded)
+        check("P3 the stale note leaves with the reload", !stale.exists)
     }
 
     /// U043: the copy reaches the server and only its answer is lost, the one case where a retry
     /// could make a second draft. The server's own count says one copy after the lost answer and
     /// still one after the retry, which goes out with the same Idempotency-Key.
     func testB_CopyWhileOffline() {
-        // The demo API itself, past the proxy (the runner shares the Mac's loopback). Test values
-        // from app/scripts/demo-seed.ts; only ever against the throwaway demo API.
-        func call(_ path: String, _ body: [String: String]?, _ bearer: String?) -> [String: Any]? {
-            var request = URLRequest(url: URL(string: "http://127.0.0.1:3999\(path)")!)
-            request.cachePolicy = .reloadIgnoringLocalCacheData
-            if let body {
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "content-type")
-                request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-            }
-            if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "authorization") }
-            var result: [String: Any]?
-            let done = DispatchSemaphore(value: 0)
-            URLSession.shared.dataTask(with: request) { data, _, _ in
-                result = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-                done.signal()
-            }.resume()
-            _ = done.wait(timeout: .now() + 30)
-            return result
-        }
-        guard let bearer = call("/api/auth/token", ["email": "demo@lashkirja.fi", "password": "demo123"], nil)?["token"] as? String else {
-            XCTFail("the demo API gave no token"); return
-        }
+        guard let bearer = demoToken() else { XCTFail("the demo API gave no token"); return }
         defer { _ = call("/api/auth/logout", [:], bearer) }
-        func serverDrafts() -> Int? { (call("/api/invoices/counts", nil, bearer)?["counts"] as? [String: Any])?["draft"] as? Int }
 
         tab("Myynti")
         let drafts = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Luonnokset'")).firstMatch
         let before = drafts.waitForExistence(timeout: 10) ? drafts.label : "?"
         // Myynti's overdue row: its badge says "Myöhässä", its line the due date (N6, M100).
         guard tapLabel("label CONTAINS 'Myöhässä' AND label CONTAINS %@", "· eräpäivä")
-                || { tab("Koti"); return tapLabel("label CONTAINS %@", "· myöhässä") }() else { return }
+                || { tab("Koti"); return tapLabel("label CONTAINS %@", "· myöhässä") }() else { XCTFail("no overdue invoice opened"); return }
         _ = app.navigationBars.buttons["Toiminnot"].firstMatch.waitForExistence(timeout: 30)
         // U045: the failure is said without moving the screen. Its card was inserted above the tabs
         // and pushed them 94 pt down once the screen had settled.
@@ -109,17 +172,18 @@ final class P3Tests: WalkTestCase {
         let tabsBefore = tabs.frame.minY
         goOffline(); sleep(1)
         // Kopioi luonnokseksi is in Toiminnot (N6): the Kopioi tile is gone.
-        guard invoiceAction("Kopioi luonnokseksi") else { return }
-        sleep(4); shot("p3b-copy-offline"); dump(app, "p3b-copy-offline")
-        let message = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Kopio' OR label CONTAINS 'yhteys' OR label CONTAINS 'Yhteys'")).firstMatch
-        check("P3 failed copy explains what happened (\(message.exists ? message.label : "no message"))", message.exists)
-        let failure = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Yhteys katkesi' OR label BEGINSWITH 'Ei verkkoyhteyttä'")).firstMatch
-        if failure.waitForExistence(timeout: 20) {
+        guard invoiceAction("Kopioi luonnokseksi") else { XCTFail("the overdue invoice offers no Kopioi luonnokseksi"); return }
+        // U044: only the copy's own failure, whichever way the request was cut. 'Kopio' or 'yhteys'
+        // also matched the Kopioi tile's own text, and the pill's 'Ei verkkoyhteyttä' is listed under
+        // its element too (run 39488072765).
+        let failure = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "Kopio on voinut", "Kopiota ei luotu")).firstMatch
+        let said = failure.waitForExistence(timeout: 20)
+        shot("p3b-copy-offline"); dump(app, "p3b-copy-offline")
+        check("P3 failed copy explains what happened (\(said ? failure.label : "no message"))", said)
+        if said {
             let moved = tabs.frame.minY - tabsBefore
             note("INFO P3 tabs at \(tabsBefore), after the failure \(tabs.frame.minY)")
             XCTAssertLessThanOrEqual(abs(moved), 1, "the failure moved the tabs \(moved) pt: \(failure.label)")
-        } else {
-            XCTFail("the offline copy said no Yhteys katkesi or Ei verkkoyhteyttä")
         }
         // U041 (B4): on the pushed invoice the pill is clear of its title and Toiminnot, and floats
         // above the failure's toast instead of over its words. A failed refresh is one more miss
@@ -145,23 +209,23 @@ final class P3Tests: WalkTestCase {
         // H4 (U101): a copy whose answer is lost. The request went out, so the app cannot say the copy
         // was not made (WriteFailureCopy); the server holds one draft, and the next try keeps the key
         // (InvoiceDetailView.runKeyed), so it gets that draft back and opens it.
-        guard let stored = serverDrafts() else { XCTFail("the demo API gave no draft count"); return }
+        guard let stored = serverDrafts(bearer) else { XCTFail("the demo API gave no draft count"); return }
         loseAnswers()
-        guard invoiceAction("Kopioi luonnokseksi") else { return }
+        guard invoiceAction("Kopioi luonnokseksi") else { XCTFail("Kopioi luonnokseksi is gone after the offline try"); return }
         let lost = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Kopio on voinut'")).firstMatch
         let explained = lost.waitForExistence(timeout: 30)
         shot("p3b-copy-lost"); dump(app, "p3b-copy-lost")
         check("P3 lost copy says it may have been saved (\(explained ? lost.label : "no message"))", explained)
-        var copies = serverDrafts()
-        for _ in 0..<10 where copies != stored + 1 { sleep(1); copies = serverDrafts() }
+        var copies = serverDrafts(bearer)
+        for _ in 0..<10 where copies != stored + 1 { sleep(1); copies = serverDrafts(bearer) }
         XCTAssertEqual(copies, stored + 1, "the copy whose answer was lost is not one draft on the server (before: \(stored))")
         keepAnswers()
         // The copy is a draft: its one primary is Lähetä lasku (N6), the overdue invoice's is not.
-        guard invoiceAction("Kopioi luonnokseksi") else { return }
+        guard invoiceAction("Kopioi luonnokseksi") else { XCTFail("Kopioi luonnokseksi is gone after the lost answer"); return }
         let opened = app.buttons["Lähetä lasku"].firstMatch.waitForExistence(timeout: 30)
         shot("p3b-copy-retried")
         XCTAssertTrue(opened, "the retry did not open the copy")
-        XCTAssertEqual(serverDrafts(), stored + 1, "the retry made a second draft (before: \(stored))")
+        XCTAssertEqual(serverDrafts(bearer), stored + 1, "the retry made a second draft (before: \(stored))")
         app.terminate()
         // The launch every other test takes: it waits for the phase the app settles on. A bare
         // relaunch tapped Myynti 2.7 s after Koti painted; the tap was lost (no Myynti paint in the

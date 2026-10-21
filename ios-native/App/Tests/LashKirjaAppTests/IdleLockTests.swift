@@ -78,6 +78,15 @@ final class IdleLockTests: XCTestCase {
         XCTAssertFalse(relaunchWouldLock())
     }
 
+    /// X153: the Asetukset row reads the idle lock as well as the PIN. With no PIN it said
+    /// 'Ei käytössä' while the app would lock after 12 hours unused.
+    func testTheSettingsRowReadsTheIdleLock() {
+        XCTAssertFalse(AppLock.shared.isEnabled, "a PIN lock is on in this run: the idle lock is not read alone")
+        XCTAssertEqual(SettingsView.lockRowSubtitle(AppLock.shared), "Käytössä", "the idle lock alone is on")
+        UserDefaults.standard.set(false, forKey: "lock.idle")
+        XCTAssertEqual(SettingsView.lockRowSubtitle(AppLock.shared), "Ei käytössä", "neither lock is on")
+    }
+
     func testAnUnlockedAppMovesTheClockOnAsBefore() async {
         let recent = Date().addingTimeInterval(-3_600)
         let app = await launch(lastActive: recent)

@@ -2,15 +2,48 @@ import XCTest
 
 /// P4: assistant without an AI provider (the demo server has none), and retry after a lost answer.
 final class P4Tests: WalkTestCase {
-    func openAssistant() { app.buttons["Avustaja"].firstMatch.tap(); taps += 1; sleep(3) }
+    /// Taps Avustaja until its sheet is up, then lets the sheet settle. The first tap after sign-in
+    /// can land while the password manager's 'Save Password?' is still leaving, and is lost: in run
+    /// 39538176287 it came 0.7 s after 'Not Now', the screen never changed again, and testA looked
+    /// for the notice on Koti.
+    func openAssistant() {
+        let sheet = app.navigationBars.buttons["Keskustelut"].firstMatch
+        for _ in 0..<3 where !sheet.exists {
+            dismissSystemPrompts()
+            app.buttons["Avustaja"].firstMatch.tap(); taps += 1
+            _ = sheet.waitForExistence(timeout: 10)
+        }
+        if sheet.exists { waitStill(sheet) }
+    }
     var composer: XCUIElement { app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch }
 
+    /// U058: what the name promises, not only a composer: the unavailable note, each shortcut whole
+    /// and hittable in the window, no spinner and no failure page in the sheet.
     func testA_UnavailableStateIsCalm() {
         openAssistant(); shot("p4-assistant"); dump(app, "p4-assistant")
         assertNoticeReadsAsOne("P4 assistant")
         check("P4 assistant opens with a composer", composer.waitForExistence(timeout: 10))
+        // The conversation (assertNoticeReadsAsOne found it) and the composer's attach button, where
+        // the sheet's own spinners would be: Koti stays in the tree under the sheet.
+        let conversation = app.scrollViews.containing(NSPredicate(format: "label == %@", "Miten voin auttaa?")).firstMatch
+        let attach = app.buttons["Lähetä kuitti"].firstMatch
+        let spinners = (conversation.exists ? conversation.activityIndicators.count : 0)
+            + (attach.exists ? attach.activityIndicators.count : 0)
+        check("P4 assistant shows no spinner (\(spinners))", spinners == 0)
+        check("P4 assistant shows no Lataus epäonnistui", !app.staticTexts["Lataus epäonnistui"].exists)
         // U016 U053 (B11): the shortcuts were cut mid-word at the conversation's margin ('Tämän kuur').
         assertChipRowEdge("assistant-shortcuts", "P4 assistant shortcuts")
+        let chips = app.scrollViews.matching(identifier: "assistant-shortcuts").firstMatch.buttons
+        let count = chips.count
+        XCTAssertGreaterThan(count, 0, "the assistant offers no shortcut")
+        for index in 0..<count {
+            let chip = chips.element(boundBy: index)
+            let label = chip.label
+            // Judged by its frame first: isHittable on a chip wholly past the edge fails the test.
+            let shown = revealChip(chip, inRow: "assistant-shortcuts")
+            check("P4 shortcut '\(label)' is hittable inside the window", shown && chip.isHittable)
+        }
+        shot("p4-assistant-shortcuts")
     }
 
     /// U059: the question reaches the server and only its answer is lost, so the retry is a real
@@ -137,6 +170,35 @@ final class P4Tests: WalkTestCase {
             XCTAssertFalse(app.keyboards.firstMatch.exists, "\(close): the keyboard outlived the sheet")
             XCTAssertTrue(app.tabBars.firstMatch.isHittable, "\(close): the tab bar is not back after the sheet")
         }
+    }
+
+    /// U055: a new conversation takes the name the server gives it with its first question while
+    /// the sheet stays open. The bar kept 'Uusi keskustelu' until a reopen read the name back.
+    func testE_ConversationTitleFromServer() {
+        app.buttons["Avustaja"].firstMatch.tap(); taps += 1
+        guard composer.waitForExistence(timeout: 10) else { XCTFail("the assistant has no composer"); return }
+        let list = app.navigationBars.buttons["Keskustelut"].firstMatch
+        guard list.waitForExistence(timeout: 5) else { XCTFail("the assistant's bar has no Keskustelut"); return }
+        list.tap(); taps += 1
+        let fresh = app.buttons["Uusi keskustelu"].firstMatch
+        guard fresh.waitForExistence(timeout: 10) else { dump(app, "p4-e-list"); XCTFail("Keskustelut has no Uusi keskustelu"); return }
+        fresh.tap(); taps += 1
+        guard app.navigationBars["Uusi keskustelu"].waitForExistence(timeout: 10) else {
+            dump(app, "p4-e-new"); XCTFail("Uusi keskustelu did not open an empty conversation"); return
+        }
+        // testB's question: this conversation is then the latest, and testC's first look on a reused
+        // demo DB still finds that question. Its bubble count leaves the bar's copy out.
+        let question = "Paljonko myyntiä tässä kuussa?"
+        type(composer, question)
+        app.buttons["Lähetä"].firstMatch.tap(); taps += 1
+        let named = app.navigationBars[question].waitForExistence(timeout: 30)
+        shot("p4-e-title"); dump(app, "p4-e-title")
+        XCTAssertTrue(named, "the open conversation is still called '\(app.navigationBars.firstMatch.identifier)', not '\(question)'")
+        // The answer's end keeps the name.
+        let streaming = app.buttons["Pysäytä"].firstMatch
+        let done = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: streaming)], timeout: 60)
+        XCTAssertEqual(done, .completed, "the answer did not finish")
+        XCTAssertTrue(app.navigationBars[question].exists, "the finished answer took the name '\(question)' away")
     }
 
     /// The question's bubbles in the message list; the conversation's title repeats it in the

@@ -7,7 +7,10 @@ final class P1Tests: WalkTestCase {
     }
 
     func test01_CreateInvoiceFromMyynti() {
-        tab("Myynti"); let opened = tap("Uusi lasku")
+        // Selected, not only tapped: the class's first tap comes right after sign-in and was lost
+        // twice, Koti stayed up and the walk scrolled it for Uusi lasku (runs 39538176287, 39557094935).
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        let opened = tap("Uusi lasku")
         measure("create invoice (Myynti)", reached: opened && app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15))
     }
     func test02_CreateInvoiceFromAdd() {
@@ -229,6 +232,8 @@ final class P1Tests: WalkTestCase {
     func test14_KotiOpenInvoicesFiltered() {
         let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Avoimet myyntilaskut")).firstMatch
         let shown = row.waitForExistence(timeout: 20) && reveal(row, scrolls: 8)
+        // The card as the owner sees it, before the tap: its spacing and short titles are reviewed by eye.
+        if shown { shot("p1-14-koti-avoimet") }
         if shown { row.tap(); taps += 1 }
         let late = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND selected == true", "Myöhässä")).firstMatch
         let filtered = shown && late.waitForExistence(timeout: 15)

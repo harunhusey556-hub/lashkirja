@@ -4,6 +4,8 @@ import UIKit
 /// Where screenshots and notes.txt go. scripts/sim/run-ui.sh passes LK_SHOT_DIR through
 /// TEST_RUNNER_LK_SHOT_DIR; the default keeps a bare xcodebuild run working.
 let shotDir = ProcessInfo.processInfo.environment["LK_SHOT_DIR"] ?? NSTemporaryDirectory() + "lk-shots"
+/// Set by the first PNG the host writes; one test process is one simulator session.
+private var hostAnsweredShot = false
 
 extension XCTestCase {
     /// Screenshot via the host: writes a request file, a host-side watcher runs `simctl io screenshot`.
@@ -26,16 +28,22 @@ extension XCTestCase {
         }
         return png
     }
-    /// `shot`'s second half: waits up to 10 s for the host's PNG. Returns the milliseconds from
-    /// `asked` to the PNG's writing, nil when none came.
+    /// `shot`'s second half: waits for the host's PNG, up to 30 s until the host has answered once,
+    /// then up to 15 s. Returns the milliseconds from `asked` to the PNG's writing, nil when none came.
     @discardableResult
     func awaitShot(_ png: String?, since asked: Date) -> Int? {
         guard let png else { return nil }
-        for _ in 0..<100 where !FileManager.default.fileExists(atPath: png) { usleep(100_000) }
+        // A fresh simulator's first `simctl io screenshot` took 5–10.3 s (OwnerScreens' first shot,
+        // runs 39487668420–39521465092), and the 10 s wait gave up on a picture that came: each
+        // class's first shot was a MISS (p4-assistant, stability-kuitit, a1-settings). A later one
+        // took up to 6.7 s, and once over 10 s (stability-raportit-csv, run 39521465092).
+        let tenths = hostAnsweredShot ? 150 : 300
+        for _ in 0..<tenths where !FileManager.default.fileExists(atPath: png) { usleep(100_000) }
         guard FileManager.default.fileExists(atPath: png) else {
             (self as? WalkTestCase)?.note("MISS shot \(((png as NSString).lastPathComponent as NSString).deletingPathExtension)")
             return nil
         }
+        hostAnsweredShot = true
         let written = (try? FileManager.default.attributesOfItem(atPath: png)[.modificationDate] as? Date) ?? Date()
         return Int(written.timeIntervalSince(asked) * 1000)
     }

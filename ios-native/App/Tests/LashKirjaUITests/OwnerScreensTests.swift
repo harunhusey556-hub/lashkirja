@@ -20,6 +20,10 @@ final class OwnerScreensTests: WalkTestCase {
             return false
         }
         app = XCUIApplication()
+        // As WalkTestCase.setUp (U027 U104): the flag stands for the one-time notification question,
+        // which the monitor above answers only once a later query runs into it. First, so no
+        // value-less flag before it can be read as taking the key for its value.
+        app.launchArguments += ["-notifications.asked.v1", "YES"]
         app.launchArguments.append("-LKUITest")
         // Not a fixed look for the password field: the first launch on a fresh simulator showed it
         // after 8 s, so the sign-in was skipped and testA met an untouched form (run 38856286498).
@@ -1109,8 +1113,11 @@ final class OwnerScreensTests: WalkTestCase {
         // Kuitit shows ten rows before "Näytä enemmän". The credit note shares its day with the seed's
         // Lidl 3, and the server orders one day's rows by id, a random uuid: with nine rows newer than
         // that day it is the tenth row or the eleventh, behind the fold (run 39382398509). The owner
-        // opens the fold, and so does the walk.
-        var found = tapLabel("label CONTAINS %@", "Audit Hyvitys Oy,")
+        // opens the fold, and so does the walk. The first look notes nothing: a row behind the fold
+        // is the expected case, not a MISS (run 39521465092 noted one before finding it).
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Audit Hyvitys Oy,")).firstMatch
+        var found = reveal(row)
+        if found { row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); taps += 1 }
         for _ in 0..<2 where !found {
             guard tapLabel("label BEGINSWITH %@", "Näytä enemmän") else { break }
             found = tapLabel("label CONTAINS %@", "Audit Hyvitys Oy,")
