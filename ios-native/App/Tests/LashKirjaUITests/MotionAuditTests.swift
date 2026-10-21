@@ -458,7 +458,7 @@ final class MotionAuditTests: WalkTestCase {
         }
         sleep(2)
         pushAndBack("myynti-customers", from: "Myynti", to: "Asiakkaat", target: find("label == %@", "Asiakkaat"), home: myyntiHome) {
-            // The customer's screen covers the list; its title is the name once it has loaded.
+            // The customer's screen covers the list; its title is the name from the first frame (F008).
             let list = self.app.navigationBars["Asiakkaat"]
             guard let customer = self.find("label CONTAINS %@", "Oy", scrolls: 0) else { self.note("SKIP myynti/myynti-customer-open: no customer"); return }
             let opened = self.step("myynti-customer-open", from: "Asiakkaat", to: "Asiakas", seconds: 5, reached: self.gone(list),

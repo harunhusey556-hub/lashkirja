@@ -221,7 +221,7 @@ struct RouteScreen: View {
         case .placeholder(let title): PlaceholderScreen(title: title)
         case .invoice(let id): InvoiceDetailView(invoiceId: id, preview: app.invoicePreview(id))
         case .customers: CustomersView()
-        case .customer(let id): CustomerDetailView(customerId: id)
+        case .customer(let id): CustomerDetailView(customerId: id, detail: app.lastPainted(CustomerDetailView.path(id)), row: app.customerPreview(id))
         case .receipts: ReceiptsView()
         case .receipt(let id): ReceiptDetailView(receiptId: id)
         case .bankFeed, .bankHub: BankFeedView()
