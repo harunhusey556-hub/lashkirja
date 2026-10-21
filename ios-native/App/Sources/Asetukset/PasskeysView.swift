@@ -55,8 +55,10 @@ struct PasskeysView: View {
                                 Text(key.detail).font(.caption).foregroundStyle(Theme.ink2)
                             }
                         }
+                        // Not a destructive role: the list takes such a row off at the tap, before
+                        // the question is answered (F009). The fill is the one it had.
                         .swipeActions {
-                            Button("Poista", role: .destructive) { deleting = key }
+                            Button("Poista") { deleting = key }.tint(Theme.accentFill)
                             Button("Nimeä") { newName = key.deviceName; renaming = key }.tint(Theme.neutralFill)
                         }
                         .contextMenu {

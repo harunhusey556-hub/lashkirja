@@ -109,8 +109,11 @@ struct RecurringPurchasesView: View {
                 ForEach(rows.prefix(limit.visible(rows.count))) { entry in
                     Button { selected = entry } label: { row(entry) }
                         .foregroundStyle(Theme.ink)
+                        // Not a destructive role: the list takes such a row off at the tap, before
+                        // the question is answered (F009). The fill is the one it had.
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) { deleteTarget = entry } label: { Label("Poista", systemImage: "trash") }
+                            Button { deleteTarget = entry } label: { Label("Poista", systemImage: "trash") }
+                                .tint(Theme.accentFill)
                             Button { Task { await toggle(entry) } } label: {
                                 Label(entry.active ? "Pysäytä" : "Jatka", systemImage: entry.active ? "pause.circle" : "play.circle")
                             }

@@ -224,8 +224,11 @@ struct StatementDetailView: View {
             ForEach(shown.prefix(limit.visible(shown.count))) { row in
                 Button { selected = row } label: { BankRow(row: row) }
                     .buttonStyle(.pressable)
+                    // Not a destructive role: the list takes such a row off at the tap, before
+                    // the question is answered (F009). The fill is the one it had.
                     .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) { deletingRow = row } label: { Label("Poista", systemImage: "trash") }
+                        Button { deletingRow = row } label: { Label("Poista", systemImage: "trash") }
+                            .tint(Theme.accentFill)
                         Button { editing = row } label: { Label("Muokkaa", systemImage: "pencil") }
                             .tint(Theme.neutralFill)
                     }

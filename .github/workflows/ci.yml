@@ -92,6 +92,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A List swipe Button with a destructive role takes its row off at the tap: one that only
+      # asks first left the row gone after Peruuta, though nothing was deleted (F009).
+      - name: Swipe questions keep their row
+        working-directory: .
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_swipe_roles.py'
+          python3 scripts/swipe-roles.py ios-native/App/Sources
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
