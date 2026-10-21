@@ -16,6 +16,16 @@ struct PurchaseInvoiceFormView: View {
     @State private var prepared = false
     @State private var baseline: PurchaseInvoiceForm?
     @State private var confirmDiscard = false
+    @State private var customCategory: Bool
+
+    init(existing: PurchaseInvoice?, onSaved: @escaping (PurchaseInvoice) -> Void = { _ in }) {
+        self.existing = existing
+        self.onSaved = onSaved
+        // A label typed before the picker (X166) stays as typed: the form opens on "Muu kategoria…"
+        // with that text, set here so the row is there from the first frame rather than easing in.
+        let category = existing?.category ?? ""
+        _customCategory = State(initialValue: !category.isEmpty && !ReceiptCategory.isKnown(category))
+    }
 
     private var dirty: Bool { baseline.map { $0 != form } ?? false }
 
@@ -23,9 +33,11 @@ struct PurchaseInvoiceFormView: View {
         NavigationStack {
             Form {
                 Section {
+                    // A name is not a word to correct (U009).
                     TextField("Toimittaja", text: $form.supplierName, prompt: Text("Tukku Oy"))
                         .textContentType(.organizationName)
                         .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
                     fieldError(.supplierName)
                 } header: {
                     Text("Toimittaja")
@@ -70,10 +82,9 @@ struct PurchaseInvoiceFormView: View {
                             .codeInput(.never)
                             .multilineTextAlignment(.trailing)
                     }
-                    LabeledContent("Kategoria") {
-                        TextField("", text: $form.category)
-                            .multilineTextAlignment(.trailing)
-                    }
+                    // The ledger books a cost by the category's code alone (`expenseAccount`): a typed
+                    // label such as "Tarvikkeet & ostot" went to Muut kulut (X166).
+                    ReceiptCategoryField(category: $form.category, custom: $customCategory)
                 } header: {
                     Text("Tunnisteet")
                 } footer: {
@@ -106,6 +117,8 @@ struct PurchaseInvoiceFormView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
             .formKeyboard()
+            // "Muu kategoria…" adds its text row: the rows below ease to their new place.
+            .motion(.snappy, value: customCategory)
             .navigationTitle(existing == nil ? "Uusi ostolasku" : "Muokkaa ostolaskua")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -227,6 +240,8 @@ struct PurchasePaymentSheet: View {
                     Section { Text(failure).foregroundStyle(Theme.danger) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle("Kirjaa maksu")
             .navigationBarTitleDisplayMode(.inline)
@@ -235,7 +250,9 @@ struct PurchasePaymentSheet: View {
                     Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Merkitse maksetuksi") { Task { await save() } }.disabled(busy)
+                    // As the sales twin: the wide "Merkitse maksetuksi" pushed the title out of the bar,
+                    // and it also names the menu's other action (X161).
+                    Button("Tallenna") { Task { await save() } }.disabled(busy)
                 }
             }
             .onAppear {
@@ -246,6 +263,7 @@ struct PurchasePaymentSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationBackground(Theme.canvas)
         .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 
@@ -303,6 +321,8 @@ struct PurchaseMarkPaidSheet: View {
                     Section { Text(failure).foregroundStyle(Theme.danger) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle("Merkitse maksetuksi")
             .navigationBarTitleDisplayMode(.inline)
@@ -317,6 +337,7 @@ struct PurchaseMarkPaidSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .presentationBackground(Theme.canvas)
         .discardGuard(dirty: dirty, busy: busy, asking: $confirmDiscard) { dismiss() }
     }
 

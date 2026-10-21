@@ -96,10 +96,13 @@ private func invoice(status: String = "open", display: String = "open", paid: De
     #expect(PurchaseFilter.groups(rows, filter: .open).first?.items.count == 1)
 }
 
-@Test func purchaseRowSecondaryMatchesTheWeb() throws {
-    #expect(try invoice(display: "open").rowSecondary == "A-12 · eräpäivä 15.9.")
-    #expect(try invoice(display: "overdue", number: nil).rowSecondary == "Myöhässä, eräpäivä 15.9.")
-    #expect(try invoice(paid: 24, open: 100).rowSecondary == "A-12 · eräpäivä 15.9. · avoinna 100,00\u{00A0}€")
+// X133 X134: the day with its year, as Myynti's rows print it, and no "myöhässä": the row's
+// badge already says it.
+@Test func purchaseRowSecondaryCarriesTheYearAndNoOverdueWord() throws {
+    #expect(try invoice(display: "open").rowSecondary == "A-12 · eräpäivä 15.9.2026")
+    #expect(try invoice(display: "overdue", number: nil).rowSecondary == "Eräpäivä 15.9.2026")
+    #expect(try invoice(display: "overdue").rowSecondary == "A-12 · eräpäivä 15.9.2026")
+    #expect(try invoice(paid: 24, open: 100).rowSecondary == "A-12 · eräpäivä 15.9.2026 · avoinna 100,00\u{00A0}€")
 }
 
 @Test func purchaseStatusLabels() {
@@ -174,6 +177,22 @@ private func invoice(status: String = "open", display: String = "open", paid: De
     #expect(json.keys.sorted() == ["invoiceNumber", "notes"])
     #expect(json["invoiceNumber"] is NSNull)
     #expect(json["notes"] as? String == "Uusi")
+}
+
+// X166: the ledger books an ostolasku by its category code alone, so the detail shows the label and
+// the form sends the code. A label typed before the picker is not a known code: the form opens on
+// "Muu kategoria…" with it, and picking a category replaces it.
+@Test func purchaseCategoryIsTheReceiptCode() throws {
+    #expect(ReceiptCategory.label(for: "tarvikkeet") == "Tarvikkeet & ostot")
+    let typed = try decode(PurchaseInvoice.self, invoiceJSON.replacingOccurrences(of: #""category":null"#, with: #""category":"Tarvikkeet & ostot""#))
+    var form = PurchaseInvoiceForm(editing: typed)
+    #expect(form.category == "Tarvikkeet & ostot")
+    #expect(!ReceiptCategory.isKnown(form.category))
+    form.category = "tarvikkeet"
+    let patch = PurchaseInvoicePatch(from: try #require(form.validate().input), existing: typed)
+    let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(patch)) as! [String: Any]
+    #expect(json.keys.sorted() == ["category"])
+    #expect(json["category"] as? String == "tarvikkeet")
 }
 
 @Test func purchaseStatusChangeAndPaymentBodies() throws {

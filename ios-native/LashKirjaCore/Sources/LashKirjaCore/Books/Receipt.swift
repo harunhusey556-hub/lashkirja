@@ -12,6 +12,8 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
         /// Only on a suggestion or a candidate.
         public let score: Double?
         public let reasons: [String]?
+        /// A candidate's reasons in Finnish ("summa sama"), as the bank row picker gives them.
+        public let explanation: [String]?
 
         public var bestScore: Double? { score ?? matchScore }
         public var bestReasons: [String]? { reasons ?? matchReasons }
@@ -53,11 +55,13 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
     public let fxRate: Double?
     public let fxRateDate: String?
     public let fxSource: String?
+    /// `.invoice` for a bill filed as an ostolasku; only the paged list sends it, nil elsewhere.
+    public let kind: ReceiptDocumentKind?
 
     enum CodingKeys: String, CodingKey {
         case id, vendor, date, category, type, reference, invoiceNumber, fileName, source, confidence
         case createdAt, updatedAt, totalAmount, reviewStatus, notes, vatDetails, linkedTransaction, match, matchStatus
-        case currency, originalAmount, vatTreatment, fxRate, fxRateDate, fxSource
+        case currency, originalAmount, vatTreatment, fxRate, fxRateDate, fxSource, kind
     }
 
     public init(from decoder: Decoder) throws {
@@ -97,6 +101,8 @@ public struct Receipt: Decodable, Sendable, Identifiable, Hashable {
         fxRate = try? c.decodeIfPresent(Double.self, forKey: .fxRate)
         fxRateDate = try? c.decodeIfPresent(String.self, forKey: .fxRateDate)
         fxSource = try? c.decodeIfPresent(String.self, forKey: .fxSource)
+        // Only a row's tag reads it: an unknown value hides the tag rather than failing the list.
+        kind = (try? c.decodeIfPresent(String.self, forKey: .kind)).flatMap(ReceiptDocumentKind.init(rawValue:))
     }
 
     public var isIncome: Bool { type == "tulo" }

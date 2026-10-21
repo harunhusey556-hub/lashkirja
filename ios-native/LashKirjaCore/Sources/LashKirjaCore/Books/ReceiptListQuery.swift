@@ -74,6 +74,9 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
     public var maxAmount = ""
     /// Only receipts with no VAT breakdown (Raportit's "Ilman ALV-erittelyä"); never remembered.
     public var missingVat = false
+    /// A figure's list: every document the figure counts, the bills filed as ostolaskut too (no
+    /// `kind`). Raportit's Menot counted 35 and its list showed 34 kuittia (X079); never remembered.
+    public var drill = false
 
     public init() {}
 
@@ -84,6 +87,7 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
         query.tab = tab
         query.category = category
         query.missingVat = missingVat
+        query.drill = true
         return query
     }
 
@@ -111,10 +115,11 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
 
     private var trimmedSearch: String { String(search.trimmingCharacters(in: .whitespacesAndNewlines).prefix(100)) }
 
-    /// The month/search/category scope shared by the list and the tab counts. The counts always
-    /// count the kuitit (`kind=receipt`); the Laskut chip's own number comes back in the same answer.
+    /// The month/search/category scope shared by the list and the tab counts. Kuitit counts the
+    /// kuitit (`kind=receipt`), a drill every document; the Laskut chip's own number comes back in
+    /// the same answer.
     public func countsQuery() -> [String: String] {
-        var q: [String: String] = ["kind": "receipt"]
+        var q: [String: String] = drill ? [:] : ["kind": "receipt"]
         if !trimmedSearch.isEmpty { q["q"] = trimmedSearch }
         if !month.isEmpty { q["month"] = month }
         if !category.isEmpty { q["category"] = category }
@@ -170,7 +175,15 @@ public struct ReceiptListQuery: Sendable, Equatable, Hashable {
         let narrowed = !trimmedSearch.isEmpty || !month.isEmpty || !category.isEmpty
             || source != .all || !minAmount.isEmpty || !maxAmount.isEmpty || missingVat
         if tab == .laskut { return narrowed ? "Ei hakua vastaavia laskuja." : "Ei laskuja." }
-        return isFiltered ? "Ei hakua vastaavia kuitteja." : "Ei kuitteja."
+        if narrowed { return "Ei hakua vastaavia kuitteja." }
+        // A chip alone is not a search: "Tulot (0)" said "Ei hakua vastaavia kuitteja." (X043).
+        switch tab {
+        case .tulo: return "Ei tuloja."
+        case .meno: return "Ei menoja."
+        case .linked: return "Ei kohdistettuja kuitteja."
+        case .unlinked: return "Ei kohdistamattomia kuitteja."
+        case .all, .laskut: return "Ei kuitteja."
+        }
     }
 
     /// The header over the rows: "12 kuittia", "3 laskua".
@@ -208,6 +221,16 @@ public enum ReceiptMatchText {
 
     /// "90 %"
     public static func percent(_ score: Double?) -> String { "\(Int(((score ?? 0) * 100).rounded())) %" }
+
+    /// A bank row's second line on the receipt: the server's Finnish reasons in the words of
+    /// "Valitse pankkitapahtuma" ("Miksi: summa sama · veloitettu 1 päivä oston jälkeen", X039);
+    /// from a server without them, the codes and the score ("summa, myyjä · 90 %").
+    public static func detail(_ tx: Receipt.LinkedTransaction) -> String {
+        if let why = BankMatchText.why(tx.explanation ?? []) { return why }
+        let words = Self.reasons(tx.bestReasons)
+        let score = Self.percent(tx.bestScore)
+        return words.isEmpty ? score : "\(words) · \(score)"
+    }
 
     /// Bank amount minus receipt total when they disagree by more than a fee
     /// (2 € or 0,5 %, as `linkAmountGapCents` in lib/fee-tolerance.ts); nil otherwise.
@@ -323,6 +346,8 @@ public struct ReceiptRowText: Sendable, Equatable {
     public let amount: Decimal?
     public let isIncome: Bool
     public let linked: Bool
+    /// "Ostolasku" on a bill filed as one, nil on a kuitti.
+    public let kindTag: String?
 
     public init(_ receipt: Receipt) {
         title = receipt.title
@@ -332,5 +357,34 @@ public struct ReceiptRowText: Sendable, Equatable {
         isIncome = receipt.isIncome
         // W27: a bill paid from the bank through its ostolasku shows the link mark too.
         linked = receipt.isBankMatched
+        // A figure's list (`drill`) shows the bills among the kuitit, so a bill says what it is (X079).
+        kindTag = receipt.kind == .invoice ? ReceiptDocumentKind.invoice.title : nil
+    }
+}
+
+/// One sign for one figure on every screen (X001 X038 X068 X080): money out reads −9,43 €, money
+/// back reads 50,00 €. A receipt's booked total is turned the way the Kuitit row turns it: a meno
+/// total is negated, so a credit note's negative meno total reads as the refund it is.
+public enum MoneyDirection {
+    public static func receiptAmount(_ total: Decimal, isIncome: Bool) -> Decimal {
+        isIncome ? total : -total
+    }
+
+    /// A bank row the API sends without its sign (the bank row pickers). The caller knows the
+    /// direction: the picker is shared with purchase invoices, whose payments are money out.
+    public static func rowAmount(_ amount: Decimal, moneyIn: Bool) -> Decimal {
+        moneyIn ? abs(amount) : -abs(amount)
+    }
+}
+
+extension Receipt {
+    /// The total with its cash sign (`MoneyDirection`); nil without a total.
+    public var shownAmount: Decimal? { totalAmount.map { MoneyDirection.receiptAmount($0, isIncome: isIncome) } }
+
+    /// Its bank row brings money in: a tulo, or a meno credit note's refund (the server's
+    /// `receiptDirection`, which picks the rows the bank row picker lists).
+    public var bankMoneyIn: Bool {
+        guard let shown = shownAmount, shown != 0 else { return isIncome }
+        return shown > 0
     }
 }

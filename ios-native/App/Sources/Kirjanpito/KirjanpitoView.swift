@@ -11,10 +11,10 @@ struct KirjanpitoView: View {
 
     var body: some View {
         List {
-            // Two sections. Pankkitapahtumat, Tiliotteet and Pankkiyhteys open from the Pankki hub
-            // (Vaatii toimia, Viimeisimmät, Tiliotteet, Pankkiyhteys); its row carries the open count.
+            // Pankki opens the bank rows themselves (O2: a hub between them was one tap more);
+            // Tiliotteet and Pankkiyhteys open from there. Its row carries the open count.
             Section("Joka viikko") {
-                NavigationLink(value: Route.bankHub) {
+                NavigationLink(value: Route.bankFeed) {
                     HubRow(title: "Pankki", subtitle: openRows > 0 ? "\(openRows) tapahtumaa vaatii toimia" : "Tapahtumat, saldot ja tiliotteet", symbol: "building.columns.fill")
                 }
                 NavigationLink(value: Route.receipts) {
@@ -45,7 +45,8 @@ struct KirjanpitoView: View {
                     HubRow(title: "ALV-ilmoitus", subtitle: "Kauden arvonlisävero", symbol: "percent")
                 }
                 NavigationLink(value: Route.ledger) {
-                    HubRow(title: "Kirjanpito", subtitle: "Tuloslaskelma, tase ja päiväkirja", symbol: "book.closed")
+                    // Not "Kirjanpito": that is this tab's own name (X180).
+                    HubRow(title: "Tulos ja tase", subtitle: "Tuloslaskelma, tase ja päiväkirja", symbol: "book.closed")
                 }
             }
         }
@@ -148,12 +149,12 @@ struct SectionChip: View {
                     Text("\(count)").monospacedDigit().foregroundStyle(selected ? Theme.onInk.opacity(0.8) : Theme.ink2)
                 }
             }
-            .font(.subheadline.weight(selected ? .semibold : .regular))
+            .chipFont(selected: selected)
             .foregroundStyle(selected ? Theme.onInk : Theme.ink)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(selected ? Theme.ink : Theme.surface, in: Capsule())
-            .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
+            .overlay(Capsule().strokeBorder(Theme.line, lineWidth: selected ? 0 : 1))
         }
         .buttonStyle(.pressable)
         .accessibilityAddTraits(selected ? .isSelected : [])

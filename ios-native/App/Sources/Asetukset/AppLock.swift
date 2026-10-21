@@ -198,8 +198,10 @@ final class AppLock {
 struct LockScreen: View {
     @Environment(AppModel.self) private var app
     @State private var lock = AppLock.shared
+    @State private var queue = OfflineReceiptQueueModel.shared
     @State private var pin = ""
     @State private var wrong = false
+    @State private var confirmSignOut = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -251,11 +253,9 @@ struct LockScreen: View {
             if lock.biometricsEnabled {
                 Button { Task { await lock.unlockWithBiometrics() } } label: { Label("Face ID", systemImage: "faceid") }
             }
-            // Forgot the PIN: signing out removes the lock; signing in again needs the password.
-            Button("Unohditko PIN-koodin? Kirjaudu ulos", role: .destructive) {
-                lock.disable()
-                Task { await app.logout() }
-            }
+            // Forgot the PIN: signing out removes the lock; signing in again needs the password. It
+            // deletes the receipts still on the phone too, so it asks first, as Asetukset does.
+            Button("Unohditko PIN-koodin? Kirjaudu ulos", role: .destructive) { confirmSignOut = true }
             .font(.footnote)
             .padding(.top, 12)
         }
@@ -265,6 +265,11 @@ struct LockScreen: View {
         .task {
             if lock.biometricsEnabled { await lock.unlockWithBiometrics() }
             focused = lock.isLocked
+        }
+        .confirmSheet(isPresented: $confirmSignOut, title: "Kirjaudutaanko ulos?", message: queue.signOutWarning ?? "",
+                      confirmTitle: "Kirjaudu ulos") {
+            lock.disable()
+            Task { await app.logout() }
         }
     }
 
@@ -297,9 +302,14 @@ struct AppLockSettingsView: View {
                     Button("Poista lukitus", role: .destructive) { lock.disable(); enabled = false }
                 }
             } else {
+                // Named in their rows: two rows of dots read alike once typed into (X146).
                 Section {
-                    SecureField("Uusi PIN (4–8 numeroa)", text: $newPin).keyboardType(.numberPad)
-                    SecureField("PIN uudelleen", text: $confirmPin).keyboardType(.numberPad)
+                    LabeledContent("Uusi PIN") {
+                        SecureField("4–8 numeroa", text: $newPin).keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("PIN uudelleen") {
+                        SecureField("", text: $confirmPin).keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                    }
                     Button {
                         enable()
                     } label: {
@@ -320,8 +330,11 @@ struct AppLockSettingsView: View {
             }
             if let message { Text(message).foregroundStyle(Theme.danger) }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         .formKeyboard()
         .navigationTitle("Sovelluslukitus")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func enable() {

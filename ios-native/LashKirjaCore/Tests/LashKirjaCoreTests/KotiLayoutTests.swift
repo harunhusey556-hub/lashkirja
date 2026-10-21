@@ -120,6 +120,8 @@ private let trend = BalanceTrend(points: [
     #expect(Koti.openRow(try totals(500, overdue: 80, count: 1), kind: .receivables)!.secondary == "1 lasku myöhässä · 80,00\(nbsp)€")
     #expect(Koti.openRow(try totals(500, overdue: 80, count: 0), kind: .receivables)!.secondary == "80,00\(nbsp)€ myöhässä")
     #expect(late.accessibilityLabel == "Avoimet ostolaskut, 500,00\(nbsp)€, 2 laskua myöhässä · 120,00\(nbsp)€")
+    // Under "Avoimet laskut" the rows show the short title; VoiceOver keeps the whole one.
+    #expect(calm.shortTitle == "Myyntilaskut" && late.shortTitle == "Ostolaskut")
 }
 
 @Test func positionRowsLeaveOutFiguresThatDidNotLoad() throws {
@@ -141,10 +143,11 @@ private let trend = BalanceTrend(points: [
 
 // MARK: Order
 
-@Test func moneyComesRightAfterTheStatus() {
+// Q3 (owner, as on the web): what needs the owner sits above Rahatilanne.
+@Test func tasksComeRightAfterTheStatus() {
     let all = KotiLayout.sections(.init(setupOpen: true, partialFailure: true, balanceCard: true, hasTasks: true, failedJobs: true,
                                         hasPositions: true, cashflowMoved: true, handled: true))
-    #expect(all == [.status, .partialFailure, .balance, .tasks, .failedJobs, .money, .positions, .setup, .cashflow, .handled])
+    #expect(all == [.status, .partialFailure, .tasks, .balance, .failedJobs, .money, .positions, .setup, .cashflow, .handled])
     #expect(KotiLayout.sections(.init()) == [.status, .money])
 }
 
@@ -298,6 +301,17 @@ private func setup(_ json: String) throws -> Dashboard.Setup {
     #expect(half.detail == "3 / 6 tapahtumaa on kunnossa")
     let all = Koti.monthStatus(done: 4, total: 4, blocking: 0)
     #expect(all.progress == 1 && all.headline == "Kaikki kunnossa")
+}
+
+@Test func aPastMonthSaysWhatWasLeftOpenNotWhatIsLeftBeforeItsEnd() {
+    // M018: Syyskuu on 18.10. read "2 asiaa ennen kuun loppua", for a month that had ended (web kotiHeadline).
+    let past = Koti.monthStatus(done: 8, total: 9, blocking: 2, atCurrentMonth: false)
+    #expect(past.headline == "2 asiaa kesken")
+    #expect(past.progress == 8.0 / 9.0)
+    #expect(Koti.monthStatus(done: 0, total: 0, blocking: 1, atCurrentMonth: false).headline == "1 asia kesken")
+    #expect(Koti.monthStatus(done: 3, total: 3, blocking: 0, atCurrentMonth: false).headline == "Kaikki kunnossa")
+    // The month on screen keeps its words.
+    #expect(Koti.monthStatus(done: 8, total: 9, blocking: 2, atCurrentMonth: true).headline == "2 asiaa ennen kuun loppua")
 }
 
 // MARK: Greeting (web lib/koti-greeting.test.ts)

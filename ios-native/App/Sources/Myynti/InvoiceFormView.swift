@@ -11,11 +11,16 @@ struct InvoiceFormView: View {
     /// Called with the new invoice's id after a create, before the sheet closes: the presenter
     /// opens the invoice once the sheet is gone (the web replaces the form with the invoice).
     let onCreated: ((String) -> Void)?
+    /// Presented over a sheet (Lisää): Peruuta, the discard question and a save close through that
+    /// sheet, whose dismissal takes this one down with it in one movement, as CaptureFlow's
+    /// `onClose`. This sheet going first showed Lisää again before it went too (X139).
+    let onClose: (() -> Void)?
 
     @State private var draft = InvoiceDraft(customerId: "", issueDate: APIDate.dayString(Date()), paymentTermDays: 14)
-    @State private var issueDate = Date()
+    /// The picked day as the DatePicker draws it (`APIDate.pickerDate`), in any device zone: Helsinki
+    /// midnight drew as the day before west of Helsinki, and a picked day saved one day late.
+    @State private var issueDate = APIDate.pickerDate(APIDate.dayString(Date())) ?? Date()
     @State private var customers: [Customer] = []
-    @State private var showNewCustomer = false
     @State private var showCustomerPicker = false
     @State private var showCatalog = false
     /// One key per invoice being created: a retry after a lost answer gets the same invoice back.
@@ -47,16 +52,18 @@ struct InvoiceFormView: View {
     /// `preview` (`AppModel.invoiceFormPreview`) opens the form finished in its first frame: line,
     /// customers, catalog and a kept draft in place. Without it `.task` fills them in after the
     /// first frame (the "Lisää → Uusi lasku" flash, w44).
-    init(existing: Invoice?, presetCustomerId: String? = nil, preview: InvoiceFormPreview? = nil, onCreated: ((String) -> Void)? = nil) {
+    init(existing: Invoice?, presetCustomerId: String? = nil, preview: InvoiceFormPreview? = nil, onCreated: ((String) -> Void)? = nil,
+         onClose: (() -> Void)? = nil) {
         self.existing = existing
         self.presetCustomerId = presetCustomerId
         self.onCreated = onCreated
+        self.onClose = onClose
         guard let preview else { return }
         let opening = InvoiceForm.opening(existing: existing, presetCustomerId: presetCustomerId, customers: preview.customers,
                                           sellerRegistered: preview.sellerRegistered, kept: preview.kept,
                                           today: APIDate.dayString(Date()))
         _draft = State(initialValue: opening.draft)
-        _issueDate = State(initialValue: APIDate.day(opening.draft.issueDate) ?? Date())
+        _issueDate = State(initialValue: APIDate.pickerDate(opening.draft.issueDate) ?? Date())
         _baseline = State(initialValue: opening.baseline)
         _priceTexts = State(initialValue: opening.priceTexts)
         _restored = State(initialValue: opening.restored)
@@ -109,6 +116,8 @@ struct InvoiceFormView: View {
                     linesSection
                     detailsSection
                 }
+                .scrollContentBackground(.hidden)
+                .background(Theme.canvas)
                 .onChange(of: scrollTarget) { _, target in
                     guard let target else { return }
                     withMotion { proxy.scrollTo(rowId(target), anchor: .center) }
@@ -123,20 +132,10 @@ struct InvoiceFormView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if existing == nil {
-                    ToolbarItem(placement: .principal) {
-                        VStack(spacing: 0) {
-                            Text("Uusi lasku").font(.headline).foregroundStyle(Theme.ink)
-                            // The number's line is there from the first frame and fades in once the
-                            // server names it: swapping the plain title for this one moved the title up.
-                            Text(InvoiceSequence.label(nextNumber) ?? " ").font(.caption2).foregroundStyle(Theme.ink2)
-                                .opacity(nextNumber == nil ? 0 : 1)
-                        }
-                        .motion(.easeOut(duration: 0.2), value: nextNumber)
-                        .accessibilityElement(children: .combine)
-                    }
+                    ToolbarItem(placement: .principal) { InvoiceFormTitle(nextNumber: nextNumber) }
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                    Button("Peruuta") { if dirty { confirmDiscard = true } else { close() } }.disabled(busy)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     // Navigation only: the total is in the bar under the form, and a long amount or a
@@ -155,14 +154,11 @@ struct InvoiceFormView: View {
                 message: existing == nil ? "Laskua ei ole vielä luotu." : "Muutoksia ei ole tallennettu.",
                 confirmTitle: "Hylkää muutokset",
                 // Kept in memory: "Uusi lasku" opens with it again.
-                secondary: existing == nil ? ConfirmRequest.Action(title: "Säilytä luonnos ja sulje", run: { dismiss() }) : nil,
+                secondary: existing == nil ? ConfirmRequest.Action(title: "Säilytä luonnos ja sulje", run: { close() }) : nil,
                 cancelTitle: "Jatka muokkausta"
             ) {
                 if existing == nil, let owner { SalesDraftStore.shared.clear(owner: owner) }
-                dismiss()
-            }
-            .sheet(isPresented: $showNewCustomer) {
-                CustomerFormSheet(existing: nil) { created in addCreatedCustomer(created) }
+                close()
             }
             .sheet(isPresented: $showCustomerPicker) {
                 CustomerPickerSheet(customers: customers, selectedId: draft.customerId,
@@ -176,7 +172,7 @@ struct InvoiceFormView: View {
             }
             // A date moved into 2026 turns old 14 % lines into 13,5 % (as the web form does).
             .onChange(of: issueDate) { _, date in
-                draft.lines.adjustVatRates(issueDate: APIDate.dayString(date))
+                draft.lines.adjustVatRates(issueDate: APIDate.pickerDay(date))
             }
             .onChange(of: snapshot) { _, current in keepDraft(current) }
             .perfReady("laskuUusi", baseline != nil)
@@ -208,6 +204,8 @@ struct InvoiceFormView: View {
                 InvoiceCustomerCard(name: existing.customer.name, detail: InvoiceForm.customerDetail(existing.customer)) { showCustomerPicker = true }
                     .id(rowId(.customer))
             } else {
+                // One row (X141): the picker it opens has its own "Uusi asiakas" on top. Offered here
+                // too, it was a second accent row of the same weight.
                 Button { showCustomerPicker = true } label: {
                     HStack {
                         Label("Valitse asiakas", systemImage: "person.crop.circle")
@@ -218,8 +216,6 @@ struct InvoiceFormView: View {
                 }
                 .foregroundStyle(Theme.accentDark)
                 .id(rowId(.customer))
-                Button { showNewCustomer = true } label: { Label("Uusi asiakas", systemImage: "person.badge.plus") }
-                    .foregroundStyle(Theme.accentDark)
             }
             if let message = errors[.customer] { InvoiceFieldError(message: message) }
         } header: {
@@ -392,7 +388,7 @@ struct InvoiceFormView: View {
 
     // MARK: Bindings
 
-    private var issueDay: String { APIDate.dayString(issueDate) }
+    private var issueDay: String { APIDate.pickerDay(issueDate) }
 
     private var termBinding: Binding<InvoiceForm.TermChoice> {
         Binding(
@@ -413,9 +409,9 @@ struct InvoiceFormView: View {
     /// The due date as a picker value; picking one sets the term the create call sends.
     private var dueBinding: Binding<Date> {
         Binding(
-            get: { APIDate.day(InvoiceForm.dueDate(issueDate: issueDay, termDays: draft.paymentTermDays) ?? "") ?? issueDate },
+            get: { APIDate.pickerDate(InvoiceForm.dueDate(issueDate: issueDay, termDays: draft.paymentTermDays) ?? "") ?? issueDate },
             set: { date in
-                if let days = InvoiceForm.termDays(issueDate: issueDay, dueDate: APIDate.dayString(date)) {
+                if let days = InvoiceForm.termDays(issueDate: issueDay, dueDate: APIDate.pickerDay(date)) {
                     draft.paymentTermDays = days
                 }
             }
@@ -423,8 +419,8 @@ struct InvoiceFormView: View {
     }
 
     private var dueRange: ClosedRange<Date> {
-        let start = APIDate.day(issueDay) ?? Calendar.current.startOfDay(for: issueDate)
-        let end = APIDate.day(InvoiceForm.dueDate(issueDate: issueDay, termDays: InvoiceForm.maxPaymentTermDays) ?? "") ?? start
+        let start = Calendar.current.startOfDay(for: issueDate)
+        let end = APIDate.pickerDate(InvoiceForm.dueDate(issueDate: issueDay, termDays: InvoiceForm.maxPaymentTermDays) ?? "") ?? start
         return start...end
     }
 
@@ -540,7 +536,7 @@ struct InvoiceFormView: View {
     /// The draft with the picked date, as it would be sent.
     private var snapshot: InvoiceDraft {
         var current = draft
-        current.issueDate = APIDate.dayString(issueDate)
+        current.issueDate = APIDate.pickerDay(issueDate)
         return current
     }
 
@@ -584,7 +580,7 @@ struct InvoiceFormView: View {
     private func startOver() {
         guard let baseline else { return }
         draft = baseline
-        issueDate = APIDate.day(baseline.issueDate) ?? Date()
+        issueDate = APIDate.pickerDate(baseline.issueDate) ?? Date()
         priceTexts = [:]
         seedPriceTexts(blankZero: true)
         customTerm = false
@@ -623,7 +619,7 @@ struct InvoiceFormView: View {
             customers = active
             catalog = items
             draft = opening.draft
-            issueDate = APIDate.day(opening.draft.issueDate) ?? Date()
+            issueDate = APIDate.pickerDate(opening.draft.issueDate) ?? Date()
             priceTexts = opening.priceTexts
             restored = opening.restored
             showDetails = !opening.draft.notes.isEmpty
@@ -677,10 +673,14 @@ struct InvoiceFormView: View {
         }
     }
 
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
+    }
+
     private func save() async {
         guard !busy else { return }
         focus = nil
-        draft.issueDate = APIDate.dayString(issueDate)
+        draft.issueDate = APIDate.pickerDay(issueDate)
         draft.followSellerVat(registered: sellerRegistered)
         let problems = InvoiceForm.fieldErrors(draft, priceTexts: priceTexts, vatRegistered: sellerRegistered)
         if !problems.isEmpty {
@@ -711,11 +711,35 @@ struct InvoiceFormView: View {
             // Saved: nothing left to lose, so the sheet may close without asking.
             baseline = snapshot
             Haptics.success()
-            dismiss()
+            close()
         } catch {
             failure = error.userMessage
             Haptics.error()
         }
+    }
+}
+
+/// "Uusi lasku" over the number the server will give it.
+struct InvoiceFormTitle: View {
+    let nextNumber: Int?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Uusi lasku").font(.headline).foregroundStyle(Theme.ink)
+            // The number's line is there from the first frame and fades in once the server names it:
+            // swapping the plain title for this one moved the title up. It is as wide as a four-digit
+            // number from the start, since the bar re-centres a title whose width changes: it jumped
+            // 25 pt left and eased back when the number came (M092).
+            ZStack {
+                Text("Seuraava laskunumero: 0000").hidden().accessibilityHidden(true)
+                Text(InvoiceSequence.label(nextNumber) ?? " ")
+                    .opacity(nextNumber == nil ? 0 : 1)
+                    .motion(.easeOut(duration: 0.2), value: nextNumber)
+            }
+            .font(.caption2)
+            .foregroundStyle(Theme.ink2)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

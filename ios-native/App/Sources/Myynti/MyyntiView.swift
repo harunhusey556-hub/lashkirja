@@ -3,6 +3,8 @@ import LashKirjaCore
 
 struct MyyntiView: View {
     @Environment(AppModel.self) private var app
+    /// Asiakkaat, Toistuvat laskut and a created invoice open on the stack's path (M024).
+    @Environment(\.openRoute) private var openRoute
     /// Opens the new-invoice form once on appear (the assistant's "/laskut/uusi" link).
     var openNewInvoice = false
     /// A report link's period or customer (`/laskut?month=…`); empty for the Myynti tab itself.
@@ -24,12 +26,7 @@ struct MyyntiView: View {
     @State private var openedNew = false
     /// A just-created invoice, opened when the form's sheet has closed.
     @State private var createdId: String?
-    @State private var openedInvoiceId: String?
-    @State private var shortcut: Shortcut?
     @State private var limit = ShowMore()
-
-    /// Asiakkaat and Toistuvat laskut, one compact line under the summary.
-    enum Shortcut: Hashable { case customers, recurring }
 
     /// A link opens exactly the list it names: its status chip, or Kaikki when it names none.
     /// `preview` (the app's `salesPreview` for the same scope and chip) is on screen in the first
@@ -74,17 +71,18 @@ struct MyyntiView: View {
                 }
                 Section {
                     // A drilled list is about its rows; the registers stay on the Myynti tab.
+                    // The section runs to the screen's edges for the chips: these rows keep the cards' margin.
                     if let title = scope.title {
                         Label(title, systemImage: "line.3.horizontal.decrease.circle")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Theme.ink)
                             .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 0))
+                            .listRowInsets(EdgeInsets(top: 0, leading: 4 + ChipRow.inset, bottom: 0, trailing: ChipRow.inset))
                             .listRowSeparator(.hidden)
                     } else {
                         shortcuts
                             .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets())
+                            .listRowInsets(EdgeInsets(top: 0, leading: ChipRow.inset, bottom: 0, trailing: ChipRow.inset))
                             .listRowSeparator(.hidden)
                     }
                     chips
@@ -92,6 +90,7 @@ struct MyyntiView: View {
                         .listRowInsets(EdgeInsets(top: 12, leading: 0, bottom: 0, trailing: 0))
                         .listRowSeparator(.hidden)
                 }
+                .chipRowSection()
                 let rows = visible(list.invoices)
                 Section {
                     if rows.isEmpty {
@@ -119,17 +118,6 @@ struct MyyntiView: View {
                 } footer: {
                     if let note = SalesListQuery.limitNote(rowCount: list.invoices.count) { Text(note) }
                 }
-                if scope.isEmpty {
-                    Section("Muut") {
-                        Button { showMatch = true } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Label("Hae asiakkaiden maksut pankista", systemImage: "building.columns")
-                                Text("Kirjaa maksut viitenumeron mukaan").font(.caption).foregroundStyle(Theme.ink2)
-                            }
-                        }
-                        .foregroundStyle(Theme.ink)
-                    }
-                }
             } else {
                 ScreenStateView(state: state, retry: load) { (_: InvoiceList) in EmptyView() }
                     .listRowBackground(Color.clear)
@@ -145,8 +133,20 @@ struct MyyntiView: View {
         }
         .navigationTitle(scope.isEmpty ? "Myynti" : "Laskut")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { Perf.beginOpen("laskuUusi"); newInvoice = SheetRequest() } label: { Label("Uusi lasku", systemImage: "plus") }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                // The rest in Toiminnot (M035): the bank's payments were a full-width card under the list.
+                if scope.isEmpty {
+                    Menu {
+                        Button { showMatch = true } label: {
+                            Label("Hae asiakkaiden maksut pankista", systemImage: "building.columns")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("Toiminnot")
+                }
+                // The one primary, in words: as "+" it was an icon of the same weight as those beside it.
+                Button("Uusi lasku") { Perf.beginOpen("laskuUusi"); newInvoice = SheetRequest() }
             }
         }
         .sheet(item: $newInvoice, onDismiss: openCreated) { _ in
@@ -154,13 +154,6 @@ struct MyyntiView: View {
         }
         .sheet(isPresented: $showMatch) {
             BankMatchSheet { message in notice = message }
-        }
-        .navigationDestination(item: $openedInvoiceId) { id in InvoiceDetailView(invoiceId: id, preview: app.invoicePreview(id)) }
-        .navigationDestination(item: $shortcut) { target in
-            switch target {
-            case .customers: CustomersView()
-            case .recurring: RecurringInvoicesView(preview: app.lastPainted("/api/recurring-invoices"))
-            }
         }
         .onAppear {
             guard openNewInvoice, !openedNew else { return }
@@ -196,19 +189,22 @@ struct MyyntiView: View {
     private func openCreated() {
         guard let id = createdId else { return }
         createdId = nil
-        openedInvoiceId = id
+        openRoute(.invoice(id))
     }
 
     /// Two tiles as wide as the cards around them, so they read as places to go, not filters.
     private var shortcuts: some View {
         HStack(spacing: 10) {
-            shortcutTile("Asiakkaat", symbol: "person.2", target: .customers)
-            shortcutTile("Toistuvat laskut", symbol: "repeat", target: .recurring)
+            shortcutTile("Asiakkaat", symbol: "person.2", route: .customers)
+            shortcutTile("Toistuvat laskut", symbol: "repeat", route: .recurringInvoices)
         }
     }
 
-    private func shortcutTile(_ title: String, symbol: String, target: Shortcut) -> some View {
-        Button { shortcut = target } label: {
+    /// A button that pushes its route, not a NavigationLink: two links in one List row make the
+    /// row one tap target (as InvoiceDetailView's customer). The route goes through
+    /// `appDestinations`, so the screen has the inline title of every pushed screen (M033).
+    private func shortcutTile(_ title: String, symbol: String, route: Route) -> some View {
+        Button { openRoute(route) } label: {
             HStack(spacing: 10) {
                 Image(systemName: symbol)
                     .font(.body.weight(.semibold))
@@ -248,19 +244,22 @@ struct MyyntiView: View {
                                 Text("\(count)").monospacedDigit().foregroundStyle(selected ? Theme.onInk.opacity(0.8) : Theme.ink2)
                             }
                         }
-                        .font(.subheadline.weight(selected ? .semibold : .regular))
+                        .chipFont(selected: selected)
                         .foregroundStyle(selected ? Theme.onInk : Theme.ink)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .background(selected ? Theme.ink : Theme.surface, in: Capsule())
-                        .overlay(Capsule().stroke(Theme.line, lineWidth: selected ? 0 : 1))
+                        .overlay(Capsule().strokeBorder(Theme.line, lineWidth: selected ? 0 : 1))
                     }
                     .buttonStyle(.pressable)
                     .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
             .padding(.vertical, 4)
+            .padding(.horizontal, ChipRow.inset)
         }
+        .accessibilityIdentifier("sales-chips")
+        .chipRowScroll()
         // A chip whose status vanished (credited after a refresh) falls back to "Kaikki".
         .onChange(of: counts) { _, _ in
             if !SalesFilter.chips(counts).contains(where: { $0.filter == filter }) { filter = .all }
@@ -595,7 +594,8 @@ struct InvoiceRow: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(invoice.customer.name).font(.body).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
-                Text(secondary).font(.caption).foregroundStyle(Theme.ink2)
+                // The badge beside it says "Myöhässä"; the line no longer says it too (M100).
+                Text(invoice.rowSecondary).font(.caption).foregroundStyle(Theme.ink2)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
@@ -605,21 +605,16 @@ struct InvoiceRow: View {
         }
         .padding(.vertical, 2)
     }
-
-    private var secondary: String {
-        if invoice.isCreditNote { return "Hyvityslasku \(invoice.number)" }
-        if invoice.displayStatus == .draft { return "Lasku \(invoice.number)" }
-        let base = "Lasku \(invoice.number) · \(invoice.displayStatus == .overdue ? "myöhässä, eräpäivä" : "eräpäivä") \(APIDate.displayDay(invoice.dueDate))"
-        return base + (invoice.creditedRowSuffix ?? "")
-    }
 }
 
 struct StatusBadge: View {
     let status: InvoiceStatus
     /// A part credit leaves the status as it was; the badge says "Osittain hyvitetty" instead.
     var partlyCredited = false
+    /// Words of its own in the status's colours: the invoice's "Myöhässä 15 päivää".
+    var text: String? = nil
     var body: some View {
-        Text(partlyCredited ? InvoiceCreditDisplay.partlyCreditedLabel : status.label)
+        Text(text ?? (partlyCredited ? InvoiceCreditDisplay.partlyCreditedLabel : status.label))
             .font(.caption2.weight(.semibold))
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(color.opacity(0.12), in: Capsule())

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jobTitle, looksLikeFileName, receiptTitle, shortDay, statementTitle } from "./display-titles";
+import { jobTitle, looksLikeFileName, receiptTitle, shortDay, statementFileSecondary, statementTitle } from "./display-titles";
 
 describe("F28: a file name is never a title", () => {
   it("recognises file and camera names", () => {
@@ -35,5 +35,28 @@ describe("F28: a file name is never a title", () => {
     expect(statementTitle({ fileType: "csv", periodMonth: "2026-08" })).toBe("Tiliote · elokuu 2026");
     expect(statementTitle({ fileType: "enablebanking", periodMonth: "2026-08" })).toBe("Pankkiyhteys · elokuu 2026");
     expect(shortDay("not a date")).toBeNull();
+  });
+
+  it("a tiliote file's line names the file, not the month its title already says (X095)", () => {
+    const october = ["tiliote-pitka.csv", "tiliote-abc.csv", "tiliote-audit.csv"].map((fileName) => ({
+      fileName,
+      fileType: "csv",
+      periodMonth: "2026-10",
+      bankAccount: { name: "Käyttötili" },
+      totals: { txCount: 5 },
+    }));
+    const lines = october.map(statementFileSecondary);
+    expect(lines).toEqual([
+      "tiliote-pitka.csv · Käyttötili · 5 tapahtumaa",
+      "tiliote-abc.csv · Käyttötili · 5 tapahtumaa",
+      "tiliote-audit.csv · Käyttötili · 5 tapahtumaa",
+    ]);
+    for (const line of lines) expect(line).not.toMatch(/lokakuu/i);
+    expect(
+      statementFileSecondary({ fileName: "Nordea FI21 1234", fileType: "enablebanking", periodMonth: "2026-09", bankAccount: { name: "Käyttötili" }, totals: { txCount: 3 } })
+    ).toBe("Käyttötili · 3 tapahtumaa");
+    expect(statementFileSecondary({ fileName: "x.pdf", fileType: "pdf", periodMonth: null, bankAccount: null, totals: { txCount: 1 } })).toBe(
+      "Ei kuukautta · x.pdf · 1 tapahtumaa"
+    );
   });
 });

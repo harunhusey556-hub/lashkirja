@@ -48,6 +48,9 @@ enum Route: Hashable {
     case privacy
     case help
     case passkeys
+    /// Asetukset: Laitteet and Sähköpostimallit, built at the push with what Asetukset warmed.
+    case devices
+    case emailTemplates
     case changeEmail
     case emailImport
     /// Kuitit opened on a month and tab (`/kuitit?month=…&type=…`).
@@ -67,7 +70,8 @@ enum Route: Hashable {
     case receiptsMissingVat(period: String)
     /// Sähköposti: what mail sync brought in, the bills and the archived non-bills.
     case emailInbox
-    /// Pankki: balances, the month's money in and out, and the bank rows in one place.
+    /// Pankki by its old link name (`/pankki`, the hub that stood before the rows): opens the bank
+    /// rows, as `bankFeed` does, so older links and replies keep working.
     case bankHub
     /// Myynti opened on a period ("YYYY" / "YYYY-MM", "" = any), a status chip ("" = Kaikki) or one customer.
     case invoicesFiltered(month: String, status: String, customerId: String)
@@ -112,7 +116,7 @@ extension Route {
         case .privacy: return .privacy
         case .help: return .help
         case .emailImport: return .emailImport
-        case .bankHub: return .bankHub
+        case .bankHub: return .bankFeed
         case .statements: return .statements
         case .emailInbox: return .emailInbox
         }
@@ -133,6 +137,22 @@ extension Route {
             return item.invoiceId.map(Route.invoice)
         case .unknown:
             return nil
+        }
+    }
+
+    /// Koti's "Näytä kaikki (N)" under a kind (web `KIND_LIST`): the list holding all of that kind.
+    /// Bank rows open Pankki on the month's rows that need action (Q1: Pankki is the rows).
+    static func forShowAll(_ kind: DashboardItem.Kind, month: String) -> Route? {
+        switch kind {
+        case .pendingReceipt: return .receipts
+        // The month's receipts without a VAT breakdown, the list the server counted.
+        case .vatGap: return .receiptsMissingVat(period: month)
+        case .missingReceipt, .receiptMatch: return .bankFeedFiltered(month: month, onlyOpen: true, focus: nil)
+        case .invoiceMatch: return .invoices
+        case .paymentDuplicate: return .workQueue
+        case .draftInvoice: return .invoicesFiltered(month: month, status: SalesFilter.draft.rawValue, customerId: "")
+        case .overdueInvoice: return .invoicesFiltered(month: "", status: SalesFilter.overdue.rawValue, customerId: "")
+        case .unknown: return nil
         }
     }
 }
@@ -167,8 +187,31 @@ extension View {
     }
 }
 
-/// The screen a route opens; also used by `navigationDestination(item:)` where a sheet hands a
-/// route back to the screen under it (BankRowSheet's "Avaa kuitti").
+/// Opens a route from code (a tile, a created invoice) on the path of the stack the screen is in,
+/// as a NavigationLink would. A screen pushed with `navigationDestination(item:)` sits outside
+/// that path, and whatever it then pushed by value landed under it: the customer opened under
+/// Asiakkaat, and Back skipped the list (M024).
+struct OpenRouteAction: Equatable {
+    /// The stack it pushes onto. Two actions for one stack push the same way, so a container's body
+    /// running again is no change for the screens that read this one.
+    let stack: String
+    let push: @MainActor (Route) -> Void
+
+    @MainActor func callAsFunction(_ route: Route) { push(route) }
+
+    static func == (lhs: OpenRouteAction, rhs: OpenRouteAction) -> Bool { lhs.stack == rhs.stack }
+}
+
+extension EnvironmentValues {
+    /// Set on every stack that has `appDestinations()` and a screen that opens routes from code
+    /// (the tabs, the assistant, Asetukset, the send sheet). Elsewhere (TabPrebuild's offscreen
+    /// copies) nothing is pushed.
+    @Entry var openRoute: OpenRouteAction = OpenRouteAction(stack: "") { _ in }
+}
+
+/// The screen a route opens; also used by the `navigationDestination(item:)` pushes that are still
+/// outside the path (PeriodsView's "Täydennä"). A sheet's hand-off (BankRowSheet's "Avaa kuitti")
+/// goes through `openRoute`.
 struct RouteScreen: View {
     @Environment(AppModel.self) private var app
     let route: Route
@@ -181,8 +224,8 @@ struct RouteScreen: View {
         case .customer(let id): CustomerDetailView(customerId: id)
         case .receipts: ReceiptsView()
         case .receipt(let id): ReceiptDetailView(receiptId: id)
-        case .bankFeed: BankFeedView()
-        case .bankAccounts: BankAccountsView()
+        case .bankFeed, .bankHub: BankFeedView()
+        case .bankAccounts: BankAccountsView(overview: app.lastPainted("/api/bank-accounts"), connections: app.lastPainted("/api/bank/connections"))
         case .alv(let period): AlvView(period: period)
         case .settings: SettingsView()
         case .purchaseInvoices: PurchaseInvoicesView()
@@ -194,7 +237,9 @@ struct RouteScreen: View {
         case .workQueue: WorkQueueView()
         case .privacy: PrivacyView()
         case .help: HelpView()
-        case .passkeys: PasskeysView()
+        case .passkeys: PasskeysView(preview: app.lastPainted(PasskeyScreen.listPath))
+        case .devices: DevicesView(preview: app.lastPainted(DevicesView.path))
+        case .emailTemplates: EmailTemplatesView(preview: app.lastPainted(EmailTemplatesView.path, query: EmailTemplatesView.query))
         case .changeEmail: ChangeEmailView()
         case .emailImport:
             // A connected or removed mailbox changes the profile other screens read from AppModel.
@@ -216,7 +261,6 @@ struct RouteScreen: View {
         case .receiptsMissingVat(let period):
             ReceiptsView(month: period, missingVat: true, drilled: true, preview: app.receiptsPreview(.drilled(month: period, missingVat: true)))
         case .emailInbox: EmailInboxView()
-        case .bankHub: BankHubView()
         case .invoicesFiltered(let month, let status, let customerId):
             let scope = InvoiceScope(month: month, customerId: customerId), filter = SalesFilter(rawValue: status) ?? .all
             MyyntiView(scope: scope, status: filter, preview: app.salesPreview(scope: scope, filter: filter))

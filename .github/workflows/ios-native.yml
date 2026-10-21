@@ -24,6 +24,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 'Peruuta' is the cancel word everywhere: a short 'Peru' had slipped into three screens (X042).
+      - name: No "Peru" buttons
+        run: |
+          if grep -rnF '"Peru"' ios-native/App/Sources ios-native/LashKirjaCore/Sources; then
+            echo '::error::Use "Peruuta", not "Peru" (X042).'
+            exit 1
+          fi
       - uses: swift-actions/setup-swift@v2
         with:
           swift-version: "6.1"

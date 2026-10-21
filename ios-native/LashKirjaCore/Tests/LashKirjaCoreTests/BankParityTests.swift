@@ -27,6 +27,22 @@ private func encodedObject<T: Encodable>(_ value: T) throws -> [String: Any] {
     #expect(BankFeed.query(month: "2026-09") == ["month": "2026-09"])
 }
 
+/// N2: the month header's "Tulot · Menot" shows only for a month whose rows are all in.
+@Test func feedMonthTotalsWaitForTheWholeMonth() {
+    let october = BankFeed.Month(month: "2026-10", rows: [], open: 0)
+    let september = BankFeed.Month(month: "2026-09", rows: [], open: 0)
+    let undated = BankFeed.Month(month: "", rows: [], open: 0)
+    // The last page is in: every month is whole.
+    #expect(BankFeed.monthComplete("2026-09", in: [october, september], hasMore: false))
+    #expect(BankFeed.monthComplete("", in: [october, undated], hasMore: false))
+    // Pages come newest first: October is whole once September has begun, September is not yet.
+    #expect(BankFeed.monthComplete("2026-10", in: [october, september], hasMore: true))
+    #expect(!BankFeed.monthComplete("2026-09", in: [october, september], hasMore: true))
+    // Undated rows are no older month, and are themselves whole only on the last page.
+    #expect(!BankFeed.monthComplete("2026-10", in: [october, undated], hasMore: true))
+    #expect(!BankFeed.monthComplete("", in: [october, september, undated], hasMore: true))
+}
+
 @Test func monthLabelIsCapitalisedFinnish() {
     #expect(StatementText.month("2026-10") == "Lokakuu 2026")
     #expect(StatementText.month(nil) == "Ei kuukautta")
@@ -196,6 +212,25 @@ private func encodedObject<T: Encodable>(_ value: T) throws -> [String: Any] {
     #expect(draft.openingBalance == "12,50")
     #expect(draft.openingDate == "2026-01-01")
     #expect(BankAccountText.subtitle(a) == "Ei IBANia · Oletus · 1 kk ei täsmää · Saldo täsmää Elokuu 2026 · 2 tiliotetta")
+}
+
+/// X093 (N9): the account sheet's caption stood over its IBAN row repeating the list row word for
+/// word, masked IBAN included. Without an IBAN row "Ei IBANia" still says so.
+@Test func accountSheetCaptionLeavesTheIbanToItsRow() throws {
+    let a = try decode(BankAccount.self, #"{"id":"a","name":"Käyttötili","bankName":"Nordea","iban":"FI2112345600000785","bic":null,"currency":"EUR","openingBalance":2500,"openingDate":"2026-06-01","isDefault":true,"archivedAt":null,"currentBalance":2410,"statementCount":4,"mismatchCount":1,"lastReconciledMonth":null}"#)
+    #expect(BankAccountText.subtitle(a) == "Nordea · FI•••• 0785 · Oletus · 1 kk ei täsmää · 4 tiliotetta")
+    #expect(BankAccountText.detailCaption(a) == "Nordea · Oletus · 1 kk ei täsmää · 4 tiliotetta")
+
+    let bare = try decode(BankAccount.self, #"{"id":"b","name":"Tili","bankName":null,"iban":"FI2112345600000785","currency":"EUR"}"#)
+    #expect(BankAccountText.subtitle(bare) == "FI•••• 0785")
+    #expect(BankAccountText.detailCaption(bare) == nil)
+
+    let usd = try decode(BankAccount.self, #"{"id":"c","name":"Dollaritili","bankName":null,"iban":"FI2112345600000785","currency":"USD","statementCount":1}"#)
+    #expect(BankAccountText.detailCaption(usd) == "USD · 1 tiliote")
+
+    let cash = try decode(BankAccount.self, #"{"id":"d","name":"Kassa","bankName":null,"iban":null,"currency":"EUR","statementCount":0}"#)
+    #expect(BankAccountText.detailCaption(cash) == BankAccountText.subtitle(cash))
+    #expect(BankAccountText.detailCaption(cash) == "Ei IBANia · 0 tiliotetta")
 }
 
 @Test func accountRemovalCopy() throws {

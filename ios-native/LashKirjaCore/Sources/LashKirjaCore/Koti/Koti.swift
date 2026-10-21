@@ -2,11 +2,13 @@ import Foundation
 
 /// Koti's wording, shared by the view and its tests.
 public enum Koti {
-    public static func headline(blocking: Int) -> String {
+    /// A month already over has no "ennen kuun loppua" left: its open things are "kesken", as the
+    /// web says (`kotiHeadline`).
+    public static func headline(blocking: Int, atCurrentMonth: Bool = true) -> String {
         switch blocking {
         case ..<1: "Kaikki kunnossa"
-        case 1: "1 asia ennen kuun loppua"
-        default: "\(blocking) asiaa ennen kuun loppua"
+        case 1: atCurrentMonth ? "1 asia ennen kuun loppua" : "1 asia kesken"
+        default: atCurrentMonth ? "\(blocking) asiaa ennen kuun loppua" : "\(blocking) asiaa kesken"
         }
     }
 
@@ -52,6 +54,15 @@ public enum Koti {
         /// A bank to reconnect or to scope opens the account list, where that is done.
         public let fixesBank: Bool
         public var id: Kind { kind }
+        /// Under the "Avoimet laskut" heading the rows need not say "Avoimet" again; VoiceOver
+        /// keeps the whole title, as it reads a row without its heading.
+        public var shortTitle: String {
+            switch kind {
+            case .bank: title
+            case .receivables: "Myyntilaskut"
+            case .payables: "Ostolaskut"
+            }
+        }
         public var accessibilityLabel: String {
             [title, amount.map { Money.format($0) }, secondary].compactMap { $0 }.joined(separator: ", ")
         }

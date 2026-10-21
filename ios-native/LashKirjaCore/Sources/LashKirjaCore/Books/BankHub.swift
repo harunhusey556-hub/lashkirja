@@ -85,6 +85,17 @@ public enum BankHub {
         public var count = 0
         public var net: Decimal { income - expenses }
         public init() {}
+
+        /// One row in, by its type: `totals` and `BankFeed.monthLines` count alike.
+        mutating func add(_ row: BankTransaction) {
+            count += 1
+            switch row.type {
+            case "tulo": income += row.amount
+            case "meno": expenses += abs(row.amount)
+            case "oma_siirto", "palkka": transfers += row.amount
+            default: break
+            }
+        }
     }
 
     /// The recent-rows filter chips, by row type as the month totals split it: salaries and own
@@ -131,13 +142,7 @@ public enum BankHub {
         var totals = MonthTotals()
         for statement in statements {
             for row in statement.transactions where Self.month(of: row, in: statement) == month {
-                totals.count += 1
-                switch row.type {
-                case "tulo": totals.income += row.amount
-                case "meno": totals.expenses += abs(row.amount)
-                case "oma_siirto", "palkka": totals.transfers += row.amount
-                default: break
-                }
+                totals.add(row)
             }
         }
         return totals
@@ -210,6 +215,15 @@ public enum BankHub {
                 needsCheck: false
             )
         }
+        return ledger + connected
+    }
+
+    /// The account lines' ids and balances, as `accountLines` has them, without the rows (they
+    /// only give a line its latest day): what Saldo yhteensä adds up, so the total does not walk
+    /// every row and format dates each time Pankki updates.
+    public static func balanceLines(_ position: BankHubPosition) -> [(id: String, balance: Decimal?)] {
+        let ledger = position.accounts.filter { $0.archivedAt == nil }.map { (id: $0.id, balance: $0.balance) }
+        let connected = position.connectedAccounts.map { (id: "connected-\($0.id)", balance: $0.balance) }
         return ledger + connected
     }
 

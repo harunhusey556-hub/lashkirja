@@ -3,6 +3,7 @@ import LashKirjaCore
 
 /// The picked customer on the invoice form: name, Y-tunnus and email at a glance, "Vaihda" to pick another.
 struct InvoiceCustomerCard: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let name: String
     let detail: String?
     let onChange: () -> Void
@@ -15,7 +16,10 @@ struct InvoiceCustomerCard: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).font(.body.weight(.semibold)).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
-                if let detail { Text(detail).font(.caption).foregroundStyle(Theme.ink2).lineLimitUnlessLarge() }
+                // Two lines: beside "Vaihda" one line cut the email ('laskut@kaune…', X026).
+                if let detail {
+                    Text(detail).font(.caption).foregroundStyle(Theme.ink2).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                }
             }
             Spacer(minLength: 8)
             Button("Vaihda", action: onChange)
@@ -73,6 +77,8 @@ struct CustomerPickerSheet: View {
                     if rows.isEmpty && !search.isEmpty { Text("Ei asiakkaita haulla \u{201C}\(search)\u{201D}.") }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Nimi, Y-tunnus tai sähköposti")
             .onChange(of: search) { limit.reset() }
             .navigationTitle("Valitse asiakas")
@@ -88,6 +94,7 @@ struct CustomerPickerSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationBackground(Theme.canvas)
     }
 }
 
@@ -132,6 +139,8 @@ struct CatalogPickerSheet: View {
                     Text("Pyyhkäise tuotetta vasemmalle poistaaksesi sen valikosta. Laskut, joilla sitä on käytetty, eivät muutu.")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .searchable(text: $search, prompt: "Hae tuotetta")
             .onChange(of: search) { limit.reset() }
             .navigationTitle("Lisää tuotteista")
@@ -141,5 +150,6 @@ struct CatalogPickerSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationBackground(Theme.canvas)
     }
 }

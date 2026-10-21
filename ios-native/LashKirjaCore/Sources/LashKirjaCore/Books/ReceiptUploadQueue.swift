@@ -51,9 +51,57 @@ public struct UploadQueueRow: Identifiable, Sendable, Equatable {
     /// Set on `saved`: kuitti or ostolasku, as the server filed it; nil where no switch is offered
     /// (a sale, a credit note, a receipt linked to a bank row).
     public var kind: ReceiptDocumentKind?
+    /// Set on `saved` from the form: the owner checked and saved it, so the server's approval is
+    /// never counted as "automaattisesti" (X052).
+    public var savedByHand = false
+
+    /// The word in the row's status slot. A read file says what it waits for: "Valmis" there, beside
+    /// the "Valmis" that closes the screen, read as done (U097). The web's word stays `status.label`.
+    public var slotText: String {
+        status == .ready ? "Odottaa tarkistusta" : status.label
+    }
+
+    /// The one line under the row's name, never the slot's word again ("Lähetetään … Lähetetään",
+    /// M007): nothing while a file is on its way, the reason of a failure, and for a saved document
+    /// what it became and only what still waits for the owner, short enough for one caption line
+    /// ("Ostolasku · eräpäivä 1.11.2026", X051). Approvals are said by the queue's summary.
+    public var detailText: String? {
+        switch status {
+        case .failed: return error
+        case .background: return progress
+        case .saved: return savedText
+        default: return nil
+        }
+    }
+
+    private var savedText: String? {
+        let waiting: String?
+        if duplicate && !(approvalKnown && autoApproved) {
+            waiting = "samanlainen on jo tallennettu"
+        } else {
+            waiting = approvalKnown && !autoApproved ? "odottaa tarkistusta" : nil
+        }
+        // The kind names the document, so the bill's note keeps only what it adds (the due date).
+        let what = kind?.title ?? invoiceNote
+        let note = kind == nil ? nil : invoiceNote.flatMap(Self.afterKind)
+        let line = [what, waiting ?? note].compactMap { $0 }.joined(separator: " · ")
+        guard let first = line.first else { return nil }
+        return first.uppercased() + String(line.dropFirst())
+    }
+
+    /// "eräpäivä 14.10.2026" of "ostolasku luotu, eräpäivä 14.10.2026" (`ReceiptSaveResult.Filed.note`),
+    /// "sama lasku on jo ostolaskuissa" of the bill that was not filed; nil when nothing is left.
+    private static func afterKind(_ note: String) -> String? {
+        var rest = Substring(note)
+        for lead in ["ostolasku luotu", "ostolaskua ei luotu"] where rest.hasPrefix(lead) {
+            rest = rest.dropFirst(lead.count).drop(while: { $0 == "," || $0 == " " })
+        }
+        return rest.isEmpty ? nil : String(rest)
+    }
 
     /// Said under a saved row: what became of the receipt (as the web's upload list), and of the
-    /// bill it was: "Hyväksytty automaattisesti · ostolasku luotu, eräpäivä 14.10.2026".
+    /// bill it was: "Hyväksytty automaattisesti · ostolasku luotu, eräpäivä 14.10.2026". The screen
+    /// shows `slotText` and `detailText`.
     public var outcomeText: String? {
         guard status == .saved else { return nil }
         let approval: String?
@@ -71,7 +119,7 @@ public struct UploadQueueRow: Identifiable, Sendable, Equatable {
     /// A save the server refused keeps what was read, so the form can take it from there.
     public var canOpenForm: Bool { status == .failed && draft != nil }
 
-    /// The saved row offers its one-tap "Kuitti ⇄ Ostolasku" (the AI's decision, the owner's word).
+    /// The saved row offers "Kuitti ⇄ Ostolasku" from its menu (the AI's decision, the owner's word).
     public var canSwitchKind: Bool { status == .saved && receiptId != nil && kind != nil }
 }
 
@@ -145,13 +193,15 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
     public mutating func markReady(_ id: String, draft: ReceiptDraft) {
         patch(id) { $0.status = .ready; $0.progress = "Odottaa tarkistusta"; $0.error = nil; $0.draft = draft }
     }
-    /// `autoApproved` nil: the server did not say (`ReceiptSaving.Outcome.approved`).
+    /// `autoApproved` nil: the server did not say (`ReceiptSaving.Outcome.approved`). `byHand`: saved
+    /// from the form.
     public mutating func markSaved(_ id: String, autoApproved: Bool? = false, duplicate: Bool = false, invoiceNote: String? = nil,
-                                   receiptId: String? = nil, kind: ReceiptDocumentKind? = nil) {
+                                   receiptId: String? = nil, kind: ReceiptDocumentKind? = nil, byHand: Bool = false) {
         patch(id) {
             $0.invoiceNote = invoiceNote
             $0.receiptId = receiptId
             $0.kind = kind
+            $0.savedByHand = byHand
             $0.status = .saved
             $0.progress = nil
             $0.error = nil
@@ -313,9 +363,10 @@ public struct ReceiptUploadQueue: Sendable, Equatable {
     public var summaryLine: String? {
         guard !isWorking else { return nil }
         let saved = rows.filter { $0.status == .saved }
-        let approved = saved.filter { $0.autoApproved }.count
-        // Saved by a server that did not say whether it approved (it approves by default).
-        let unknown = saved.filter { !$0.approvalKnown }.count
+        let approved = saved.filter { $0.autoApproved && !$0.savedByHand }.count
+        // Saved by a server that did not say whether it approved (it approves by default), or
+        // checked and saved by the owner in the form: neither was approved "automaattisesti".
+        let unknown = saved.filter { !$0.approvalKnown || ($0.autoApproved && $0.savedByHand) }.count
         // A saved receipt the server did not approve waits in Kuitit; a file read but not yet saved waits here.
         let waiting = saved.count - approved - unknown + rows.filter { $0.status == .ready }.count
         let failed = rows.filter { $0.status == .failed }.count

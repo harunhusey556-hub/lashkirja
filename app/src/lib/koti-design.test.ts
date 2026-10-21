@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { moneyTrend, monthIsComplete } from "./koti-design";
+import { moneyTrend, monthIsComplete, trendTone } from "./koti-design";
 
 describe("Koti design: figures remain tied to the displayed month and accounting basis", () => {
   it("compares the displayed month with its immediate predecessor across a year boundary", () => {
@@ -24,6 +24,11 @@ describe("Koti design: figures remain tied to the displayed month and accounting
   it("does not invent percentages for absent history or a zero baseline", () => {
     expect(moneyTrend(null, "2026-09", "kuitit", "income", 150).percent).toBeNull();
     expect(moneyTrend([{ month: "2026-08", income: 0, expenses: 0, source: "kuitit" }], "2026-09", "kuitit", "income", 150).percent).toBeNull();
+  });
+  it("calls only growing sales good news (X004)", () => {
+    expect(trendTone("income", -100)).toBe("neutral");
+    expect(trendTone("income", 12)).toBe("success");
+    expect(trendTone("expenses", 12)).toBe("neutral");
   });
 });
 

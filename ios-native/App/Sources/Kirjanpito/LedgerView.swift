@@ -44,7 +44,9 @@ struct LedgerView: View {
                     .listRowBackground(Color.clear)
             }
         }
-        .navigationTitle("Kirjanpito")
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
+        .navigationTitle("Tulos ja tase")
         .refreshable { await load() }
         .task(id: year) {
             state.restart()

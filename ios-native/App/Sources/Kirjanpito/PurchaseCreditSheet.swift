@@ -35,10 +35,14 @@ struct PurchaseCreditSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    LabeledContent("Hyvitettävä summa (€)") {
+                    // The field took the row's width and cut its label to 'Hyvitettävä summa…' (X160).
+                    LabeledContent {
                         TextField("62,00", text: $form.amount)
                             .moneyInput()
                             .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 120)
+                    } label: {
+                        Text("Hyvitettävä summa (€)").layoutPriority(1)
                     }
                     LabeledContent("ALV (€)") {
                         TextField("Laskennallinen", text: $form.vat)
@@ -58,6 +62,8 @@ struct PurchaseCreditSheet: View {
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle("Hyvitä ostolasku")
             .navigationBarTitleDisplayMode(.inline)
@@ -66,7 +72,8 @@ struct PurchaseCreditSheet: View {
                     Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { Task { await create() } } label: { InFlightLabel("Luo hyvityslasku", inFlight: busy) }
+                    // One short verb, as the sales credit sheet: the long label left 'Hyvitä os…' (X160).
+                    Button { Task { await create() } } label: { InFlightLabel("Hyvitä", inFlight: busy) }
                         .disabled(busy)
                 }
             }

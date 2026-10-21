@@ -157,15 +157,16 @@ private struct KotiApprovalForm: View {
     @ViewBuilder private func editor(_ field: KotiApproval.Field) -> some View {
         switch field {
         case .vendor:
-            TextField("Myyjä", text: $form.vendor).textContentType(.organizationName)
+            // A name is not a word to correct (U009).
+            TextField("Myyjä", text: $form.vendor).textContentType(.organizationName).autocorrectionDisabled()
             fieldError("vendor")
         case .amount:
             TextField("Summa €", text: Binding(get: { form.totalText }, set: { form.setTotal($0) }))
                 .moneyInput()
             fieldError("totalAmount")
         case .date:
-            DatePicker("Päivä", selection: Binding(get: { APIDate.day(form.date) ?? Date() },
-                                                    set: { form.setDate(APIDate.dayString($0)) }),
+            DatePicker("Päivä", selection: Binding(get: { APIDate.pickerDate(form.date) ?? Date() },
+                                                    set: { form.setDate(APIDate.pickerDay($0)) }),
                        displayedComponents: .date)
             fieldError("date")
         case .category:

@@ -44,6 +44,7 @@ export const ReceiptRow = memo(function ReceiptRow({
   const matchStatus = RECEIPT_MATCH_STATUS[matchKey];
   const amountText = `${receipt.type === "tulo" ? "+" : ""}${formatEur(receipt.totalAmount)}`;
   const secondaryText = rowSecondary(receipt);
+  const isInvoice = receipt.kind === "invoice";
 
   return (
     // Touching or hovering a row loads the full receipt, so the tap opens it already filled in.
@@ -79,8 +80,14 @@ export const ReceiptRow = memo(function ReceiptRow({
           amount={amountText}
           amountTone={receipt.type === "tulo" ? "positive" : "default"}
           secondary={secondaryText}
-          ariaLabel={`${receipt.vendor || "Tuntematon"}, ${amountText}, ${secondaryText}, ${matchStatus.label}`}
-          trailing={<StatusTag tone={matchStatus.tone}>{matchStatus.label}</StatusTag>}
+          ariaLabel={`${receipt.vendor || "Tuntematon"}, ${amountText}, ${secondaryText}, ${isInvoice ? "Ostolasku, " : ""}${matchStatus.label}`}
+          trailing={
+            // A report drill lists every counted document (X079), so a filed bill says what it is.
+            <span className="inline-flex items-center gap-1.5">
+              {isInvoice && <StatusTag tone="neutral">Ostolasku</StatusTag>}
+              <StatusTag tone={matchStatus.tone}>{matchStatus.label}</StatusTag>
+            </span>
+          }
         />
       </div>
     </div>

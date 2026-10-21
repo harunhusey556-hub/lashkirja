@@ -311,7 +311,9 @@ public struct ConversationList: Decodable, Sendable {
 
 /// One `data:` event of the streamed `POST /api/ai/chat`.
 public enum ChatEvent: Equatable, Sendable {
-    case started(conversationId: String)
+    /// `title`: the conversation's name as the server stored it with this question (a first
+    /// question names a new conversation); nil from a server that does not send it.
+    case started(conversationId: String, title: String? = nil)
     case delta(String)
     case finished(ChatMessage)
     case failed(String)
@@ -319,6 +321,7 @@ public enum ChatEvent: Equatable, Sendable {
     private struct Raw: Decodable {
         let conversationId: String?
         let userMessageId: String?
+        let title: String?
         let delta: String?
         let done: Bool?
         let incomplete: Bool?
@@ -342,7 +345,7 @@ public enum ChatEvent: Equatable, Sendable {
             if message.content.isEmpty, let error = raw.error { message.content = error }
             return .finished(message)
         }
-        if let id = raw.conversationId, raw.userMessageId != nil { return .started(conversationId: id) }
+        if let id = raw.conversationId, raw.userMessageId != nil { return .started(conversationId: id, title: raw.title) }
         return nil
     }
 }

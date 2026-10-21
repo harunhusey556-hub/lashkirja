@@ -98,8 +98,11 @@ struct LoadFailureView: View {
             Text(failure.message)
         } actions: {
             if failure.canRetry {
+                // Named apart from the refresh banner's "Yritä uudelleen", which sits over content
+                // still shown: a check for this page must not take the banner for it.
                 Button("Yritä uudelleen") { Task { await retry() } }
                     .buttonStyle(.primary)
+                    .accessibilityIdentifier("load-failure-retry")
             }
         }
         .retryWhenBackOnline(failure, retry)
@@ -190,33 +193,63 @@ extension Error {
     var userMessage: String { (self as? LKError)?.message ?? LKError.unreachable }
 }
 
-/// A brief message with an optional action ("Kumoa"), shown above the tab bar.
+/// A brief message with an optional action ("Kumoa"), shown above the tab bar. A failure `stays`
+/// until the owner closes it or acts on it: gone after five seconds, it could not be read whole.
 struct Toast: Equatable, Identifiable {
     let id = UUID()
     let text: String
     let actionLabel: String?
+    var stays = false
     static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
 }
 
 struct ToastView: View {
     let toast: Toast
     let action: () -> Void
+    /// Closes a toast that stays; one that goes by itself has no close button.
+    var close: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "checkmark.circle").accessibilityHidden(true)
-            Text(toast.text).font(.subheadline).lineLimit(2)
-            Spacer(minLength: 8)
-            if let label = toast.actionLabel {
-                Button(label, action: action).font(.subheadline.bold())
+        content
+            .foregroundStyle(Theme.onInk)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            // Opaque, as the bulk bar and the offline pill: at 0.94 the rows under it read through
+            // its text (X064).
+            .background(Theme.ink, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .bottomClearance()
+            .padding(.horizontal, 16)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    @ViewBuilder private var content: some View {
+        if toast.stays {
+            // Read whole, with the action under the text: what failed, and whether it may have gone
+            // through, is the message (U045). Beside the buttons a long one was a narrow column.
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle").accessibilityHidden(true)
+                    Text(toast.text).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    if let close {
+                        Button(action: close) { Image(systemName: "xmark").font(.subheadline.bold()) }
+                            .accessibilityLabel("Sulje")
+                    }
+                }
+                if let label = toast.actionLabel {
+                    Button(label, action: action).font(.subheadline.bold())
+                }
+            }
+        } else {
+            HStack(spacing: 12) {
+                Image(systemName: "checkmark.circle").accessibilityHidden(true)
+                Text(toast.text).font(.subheadline).lineLimit(2)
+                Spacer(minLength: 8)
+                if let label = toast.actionLabel {
+                    Button(label, action: action).font(.subheadline.bold())
+                }
             }
         }
-        .foregroundStyle(Theme.onInk)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Theme.ink.opacity(0.94), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.horizontal, 16)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }
 
@@ -225,6 +258,20 @@ struct MoneyText: View {
     let amount: Decimal
     var signed = false
     var body: some View { Text(Money.format(amount, signed: signed)).monospacedDigit() }
+}
+
+/// One series of a bar chart named beside a dot of its colour (Koti's cash-flow card, Raportit's
+/// Kuukausittain): the colours alone did not tell income from expenses (X086).
+struct ChartLegendItem: View {
+    let title: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(tint).frame(width: 7, height: 7)
+            Text(title).font(.caption).foregroundStyle(Theme.ink2)
+        }
+    }
 }
 
 /// The label of a button whose request is in flight (`SubmitGuard.inFlight`): the title keeps its
@@ -287,9 +334,10 @@ private struct MotionModifier<Value: Equatable>: ViewModifier {
 
 private struct LineLimitUnlessLargeModifier: ViewModifier {
     @Environment(\.dynamicTypeSize) private var typeSize
+    let lines: Int?
 
     func body(content: Content) -> some View {
-        content.lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+        content.lineLimit(typeSize.isAccessibilitySize ? nil : lines)
     }
 }
 
@@ -326,9 +374,10 @@ extension View {
         frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
     }
 
-    /// One line of a list row, but free to wrap at accessibility text sizes so names are not cut.
-    func lineLimitUnlessLarge() -> some View {
-        modifier(LineLimitUnlessLargeModifier())
+    /// One line of a list row (or `lines`; nil leaves it free), but free to wrap at accessibility
+    /// text sizes so names are not cut.
+    func lineLimitUnlessLarge(_ lines: Int? = 1) -> some View {
+        modifier(LineLimitUnlessLargeModifier(lines: lines))
     }
 
     /// A headline figure: one line, shrinking only as a last resort at the largest text sizes.

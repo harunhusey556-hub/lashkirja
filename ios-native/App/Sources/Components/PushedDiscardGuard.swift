@@ -19,6 +19,9 @@ struct PushedDiscardGuard: ViewModifier {
                         Button { asking = true } label: {
                             Label("Takaisin", systemImage: "chevron.left").labelStyle(.titleAndIcon)
                         }
+                        // In ink, as the system back button it replaces: in the app's accent the first
+                        // typed character turned it into another control (U003).
+                        .tint(Theme.ink)
                         .disabled(busy)
                     }
                 }

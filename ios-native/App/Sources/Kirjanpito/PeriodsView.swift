@@ -11,6 +11,8 @@ struct PeriodsView: View {
     @State private var confirmClose = false
     @State private var closing = false
     @State private var closeError: String?
+    /// A finished month's "Lähetä kirjanpitäjälle": that month's accountant package.
+    @State private var showPackage = false
 
     @State private var lockedThrough = ScreenLoad<PeriodLockState>()
     @State private var choice: String??
@@ -84,6 +86,10 @@ struct PeriodsView: View {
             CaptureFlow(transactionId: target.transactionId)
         }
         .navigationDestination(item: $pushed) { route in RouteScreen(route: route) }
+        .sheet(isPresented: $showPackage) {
+            DocumentPreviewSheet(path: "/api/export/package", query: ["month": month], fileName: "kirjanpito-\(month).zip",
+                                 shareTitle: "Jaa kirjanpitäjälle")
+        }
         .confirmSheet(isPresented: $confirmClose, title: closeTitle, message: closeMessage,
                       confirmTitle: "Merkitse valmiiksi", isDestructive: false) {
             Task { await closeMonth() }
@@ -161,9 +167,13 @@ struct PeriodsView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-                NavigationLink(value: Route.reports) {
-                    Label("Lataa kirjanpitopaketti", systemImage: "arrow.down.doc")
+                // The month's own zip in one tap, the screen's one primary (change 5): the link
+                // went to Raportit, where the period had to be picked again.
+                Button { showPackage = true } label: {
+                    Label("Lähetä kirjanpitäjälle", systemImage: "paperplane").frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.primary)
+                .listRowBackground(Color.clear)
             } else {
                 Text(PeriodClose.subtitle(f)).font(.subheadline).foregroundStyle(Theme.ink2)
             }
@@ -309,11 +319,13 @@ struct PeriodsView: View {
         }
     }
 
+    /// Soft, as the web's ActionPill and Koti's row pills: a dark capsule on every row was one more
+    /// primary each (M008 M076).
     private func pill(_ title: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 5)
-                .foregroundStyle(Theme.onInk)
-                .background(Theme.ink, in: Capsule())
+                .foregroundStyle(Theme.accentDark)
+                .background(Theme.accentSoft, in: Capsule())
         }
         .buttonStyle(.borderless)
         .accessibilityLabel(label)

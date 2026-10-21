@@ -22,10 +22,9 @@ final class AppModel {
         get { versions.version }
         set { versions.bump() }
     }
-    /// The last Pankki figures, kept across visits: coming back shows them at once while they
-    /// refresh behind (the hub is a pushed screen, so its own state goes with it).
-    var bankHubMemory: BankHubMemory?
-    /// The last loaded Pankkitapahtumat per month filter ("" = every month), for the same reason.
+    /// The last loaded Pankki rows per month filter ("" = every month), kept across visits: coming
+    /// back shows them at once while they refresh behind (Pankki is a pushed screen, so its own
+    /// state goes with it).
     var bankFeedMemory: [String: BankFeedMemory] = [:]
     /// Every screen's GET answers: a screen paints the cached answer at once and asks the server
     /// only when it is stale (`dataVersion` moved or older than 60 s). The main lists are kept on
@@ -517,7 +516,7 @@ final class AppModel {
     }
 
     /// After sign-in and on coming back after a while: Koti, Kuitit page 1 with its counts and
-    /// queues, and the Pankki hub load side by side with exactly the screens' queries, so the tab
+    /// queues, and Pankki's balances load side by side with exactly the screens' queries, so the tab
     /// the owner opens paints from the cache. `/api/bootstrap` first, where the server has it.
     func prefetch() {
         guard case .signedIn = phase else { return }
@@ -540,6 +539,8 @@ final class AppModel {
             // Koti is painted: the other tabs' first screens next, before the owner taps them.
             guard !Task.isCancelled else { return }
             await self.warmAll(NextPrefetch.afterKoti(month: MonthKey.current()))
+            // For a walk that opens one of these screens on its cache (P4Tests: the assistant).
+            UITestHooks.mark("afterKoti")
             await self.primePainted(replacing: true)
         }
     }
@@ -566,6 +567,38 @@ final class AppModel {
             default:
                 break
             }
+        }
+    }
+
+    /// Asetukset is open: Laitteet, Sähköpostimallit and Pääsyavaimet (`NextPrefetch.asetukset`) are
+    /// asked now and kept in `lastPainted`, so each push lands on its content (M053 M054 M057).
+    /// Asked even when cached: a write under /api/auth leaves `dataVersion` alone, so the cache could
+    /// hold a list that a sign-out or a rename there has changed since. A failed request leaves
+    /// what was painted last.
+    func warmAsetukset() async {
+        guard case .signedIn = phase else { return }
+        let answered = await withTaskGroup(of: String?.self, returning: Set<String>.self) { group in
+            for request in NextPrefetch.asetukset() {
+                group.addTask {
+                    let answer: Ignored? = try? await self.cachedGet(request.path, query: request.query, force: true, persist: request.persist)
+                    return answer == nil ? nil : request.path
+                }
+            }
+            var paths: Set<String> = []
+            for await path in group { if let path { paths.insert(path) } }
+            return paths
+        }
+        if answered.contains(DevicesView.path), let list: DeviceSessions = await cachedValue(DevicesView.path) {
+            rememberPainted(DeviceSession.currentFirst(list.sessions), DevicesView.path)
+        }
+        if answered.contains(EmailTemplatesView.path),
+           let list: EmailTemplateList = await cachedValue(EmailTemplatesView.path, query: EmailTemplatesView.query) {
+            rememberPainted(list, EmailTemplatesView.path, query: EmailTemplatesView.query)
+        }
+        if answered.contains(PasskeyScreen.listPath), answered.contains(PasskeyScreen.statusPath),
+           let list: PasskeyList = await cachedValue(PasskeyScreen.listPath),
+           let status: PasskeyStatus = await cachedValue(PasskeyScreen.statusPath) {
+            rememberPainted(PasskeyScreen(passkeys: list.passkeys, canCreate: status.native), PasskeyScreen.listPath)
         }
     }
 
@@ -777,7 +810,6 @@ final class AppModel {
         lastPainted = [:]
         versions.endSession()
         // This owner's figures must not show to the next one.
-        bankHubMemory = nil
         bankFeedMemory = [:]
         chat?.shutdown()
         chat = nil

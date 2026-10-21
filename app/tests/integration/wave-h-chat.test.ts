@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
 import { claimAssistantReply, listConversationMessages, priorContextTurns, runAssistantTurn } from "@/lib/chat-store";
 import { decideChatProposal } from "@/lib/chat-decision";
-import { copilotRequestMessages } from "@/lib/chat-turn";
+import { copilotRequestMessages, titleFromMessage } from "@/lib/chat-turn";
 import { prepareChat } from "@/lib/ai-assistant";
 import { limitedModeNotice } from "@/lib/chat-policy";
 import { computeAlvReport } from "@/lib/alv";
@@ -68,6 +68,30 @@ describe("conversations", () => {
     expect(stored?.title).toBe("Hei");
   });
 
+  it("answers the retry of a new chat's lost first answer in that chat, once", async () => {
+    // The lost answer carried the new conversation's id too, so the retry names none.
+    const first = await postMessage("Hei", { clientId: "client-lost-1" });
+    expect(first.response.status).toBe(200);
+    const again = await postMessage("Hei", { clientId: "client-lost-1" });
+    expect(again.response.status).toBe(200);
+    expect(again.body.conversationId).toBe(first.body.conversationId);
+    expect(again.body.id).toBe(first.body.id);
+    expect(await prisma.conversation.count({ where: { userId: user.id } })).toBe(1);
+    expect(await prisma.chatMessage.count({ where: { userId: user.id, role: "user" } })).toBe(1);
+    expect(await prisma.chatMessage.count({ where: { userId: user.id, role: "assistant" } })).toBe(1);
+
+    const other = await readJson<{ id: string }>(
+      await createConversation(buildRequest("POST", "/api/ai/conversations", {}, { cookie }))
+    );
+    const reused = await postMessage("Hei", { conversationId: other.id, clientId: "client-lost-1" });
+    expect(reused.response.status).toBe(409);
+    const changed = await postMessage("Moi", { clientId: "client-lost-1" });
+    expect(changed.response.status).toBe(409);
+    expect(await prisma.chatMessage.count({ where: { userId: user.id } })).toBe(2);
+    // A refused send opens no conversation of its own.
+    expect(await prisma.conversation.count({ where: { userId: user.id } })).toBe(2);
+  });
+
   it("renames, searches, archives, and deletes with undo", async () => {
     const created = await readJson<{ id: string }>(
       await createConversation(buildRequest("POST", "/api/ai/conversations", {}, { cookie }))
@@ -111,6 +135,32 @@ describe("conversations", () => {
       await listConversations(buildRequest("GET", "/api/ai/conversations", undefined, { cookie }))
     );
     expect(restored.conversations.map((row) => row.id)).toContain(created.id);
+  });
+
+  it("names the conversation in the stream's first frame, as stored (U055)", async () => {
+    // Over 60 characters: the stored title is the shortened question, not the question.
+    const question = "Paljonko myyntiä tässä kuussa oli yhteensä ja paljonko siitä on maksettu?";
+    async function firstFrame(message: string, extra: Record<string, unknown> = {}) {
+      const response = await postChat(
+        buildRequest("POST", "/api/ai/chat", { message, clientId: crypto.randomUUID(), stream: true, ...extra }, { cookie })
+      );
+      const frames = (await response.text())
+        .split("\n\n")
+        .filter((chunk) => chunk.startsWith("data: "))
+        .map((chunk) => JSON.parse(chunk.slice(6)) as { conversationId?: string; userMessageId?: string; title?: string });
+      return frames[0];
+    }
+
+    const first = await firstFrame(question);
+    expect(first.userMessageId).toBeTruthy();
+    expect(first.title).toBe(titleFromMessage(question));
+    const stored = await prisma.conversation.findUnique({ where: { id: first.conversationId } });
+    expect(stored?.title).toBe(first.title);
+
+    // A later question keeps the name the first one gave.
+    const later = await firstFrame("Entä viime kuussa?", { conversationId: first.conversationId });
+    expect(later.conversationId).toBe(first.conversationId);
+    expect(later.title).toBe(titleFromMessage(question));
   });
 });
 

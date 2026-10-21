@@ -40,7 +40,8 @@ struct ReceiptDetailView: View {
                 }
                 Section {
                     VStack(spacing: 6) {
-                        if let amount = r.totalAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
+                        // The sign the list and the bank row show: money out −9,43 €, a credit note's refund 50,00 € (C2).
+                        if let amount = r.shownAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
                         // The euro total above is what the books count; the document's own figure says its currency.
                         if let original = ReceiptCurrency.originalLine(currency: r.currency, originalAmount: r.originalAmount) {
                             Text("Alkuperäinen summa \(original)").font(.subheadline).foregroundStyle(Theme.ink2)
@@ -50,7 +51,7 @@ struct ReceiptDetailView: View {
                             Text(rateLine).font(.caption).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
                         }
                         Text(r.title).font(.headline)
-                        // A credit note is said in words too, not only by the minus sign.
+                        // A credit note is said in words: its refund reads as money back, without a sign.
                         Text([r.creditNoteLabel, r.isIncome ? "Tulo" : "Meno"].compactMap { $0 }.joined(separator: " · "))
                             .font(.caption).foregroundStyle(Theme.ink2)
                     }
@@ -91,32 +92,7 @@ struct ReceiptDetailView: View {
                     if let status = r.reviewStatus { LabeledContent("Tila", value: status == "approved" ? "Hyväksytty" : status == "rejected" ? "Hylätty" : "Odottaa") }
                     if let notes = r.notes, !notes.isEmpty { LabeledContent("Selite", value: notes) }
                 }
-                vendorRuleSection(r)
                 matchSection(r)
-                Section {
-                    if r.hasOriginalFile {
-                        Button { showFile = true } label: { Label("Näytä kuitti", systemImage: "doc.viewfinder") }
-                    }
-                    Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
-                    // Ask the server to read the stored file again: a bill that came back wrong,
-                    // or with nothing at all (Kymenlaakson Sähkö's), can be retried from here.
-                    // A poor reading already offers it at the top; it is not repeated here.
-                    if r.hasOriginalFile && !ReceiptReadHelp.needsReread(r) {
-                        Button { Task { await reread() } } label: { Label("Lue uudelleen", systemImage: "arrow.clockwise") }
-                            .disabled(rereadBusy)
-                    }
-                    if r.reviewStatus == "pending" {
-                        Button { Task { await review("approved") } } label: { Label("Hyväksy", systemImage: "checkmark.circle") }
-                            .disabled(reviewBusy)
-                        Button(role: .destructive) { Task { await review("rejected") } } label: { Label("Hylkää", systemImage: "xmark.circle") }
-                            .disabled(reviewBusy)
-                    }
-                    if r.reviewStatus == "rejected" {
-                        // Archived (an e-mail attachment that did not read as a bill, or rejected by hand): back to review.
-                        Button { Task { await review("pending") } } label: { Label("Palauta tarkistettavaksi", systemImage: "arrow.uturn.backward.circle") }
-                            .disabled(reviewBusy)
-                    }
-                }
                 if let failure { Text(failure).foregroundStyle(Theme.danger).transition(.opacity) }
             } else if state.failure == nil, let row = app.receiptPreview(receiptId) {
                 // The row the list showed, at once; the fields, picture and actions fill in.
@@ -133,15 +109,18 @@ struct ReceiptDetailView: View {
         .toolbar {
             if state.value != nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
-                        Button(role: .destructive) { confirmDelete = true } label: { Label("Poista kuitti", systemImage: "trash") }
-                    } label: { Image(systemName: "ellipsis.circle") }
+                    Menu { actions } label: { Image(systemName: "ellipsis.circle") }
                     .accessibilityLabel("Toiminnot")
                 }
             }
         }
         .motion(.snappy, value: failure)
+        // Held from the first loaded frame; it steps aside while a toast says something there.
+        .bottomBar {
+            if let r = state.value, toast == nil, let action = primary(r) {
+                primaryBar(action)
+            }
+        }
         .overlay(alignment: .bottom) {
             if let toast {
                 // ToastView carries its own move+opacity transition, so it eases in and out
@@ -176,7 +155,7 @@ struct ReceiptDetailView: View {
     @ViewBuilder private func previewSections(_ r: Receipt) -> some View {
         Section {
             VStack(spacing: 6) {
-                if let amount = r.totalAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
+                if let amount = r.shownAmount { MoneyText(amount: amount).scaledFont(size: 34, weight: .bold, design: .rounded, relativeTo: .largeTitle).moneyHero() }
                 Text(r.title).font(.headline)
                 Text(r.isIncome ? "Tulo" : "Meno").font(.caption).foregroundStyle(Theme.ink2)
             }
@@ -190,24 +169,103 @@ struct ReceiptDetailView: View {
         }
     }
 
+    // MARK: Actions
+
+    /// What the receipt waits for: the screen's one primary, at the bottom (N3, plan change 4).
+    private enum Primary {
+        case approve, complete, restore
+
+        var title: String {
+            switch self {
+            case .approve: "Hyväksy"
+            // Without an amount or a vendor it is completed first (ReceiptApproval, as the queue's pill).
+            case .complete: "Täydennä"
+            // Archived (an e-mail attachment that did not read as a bill, or rejected by hand): back to review.
+            case .restore: "Palauta tarkistettavaksi"
+            }
+        }
+    }
+
+    private func primary(_ r: Receipt) -> Primary? {
+        if r.reviewStatus == "pending" { return ReceiptApproval.isReady(r) ? Primary.approve : Primary.complete }
+        if r.reviewStatus == "rejected" { return Primary.restore }
+        return nil
+    }
+
+    private func primaryBar(_ primary: Primary) -> some View {
+        Button {
+            // Täydennä opens the form, where the missing amount or vendor is filled in.
+            guard primary != .complete else { editing = true; return }
+            Task { await review(primary == .approve ? "approved" : "pending") }
+        } label: {
+            // The spinner fades into a fixed slot mirrored on the other side, as on Kuitit's
+            // "Kohdista varmat": the title stays centred and still while the answer is on its way.
+            HStack(spacing: 8) {
+                ZStack {
+                    if reviewBusy { ProgressView().tint(Theme.onInk).transition(.opacity) }
+                }
+                .frame(width: 20, height: 20)
+                Text(primary.title).font(.headline)
+                Color.clear.frame(width: 20, height: 20)
+            }
+            .motion(.easeOut(duration: 0.15), value: reviewBusy)
+            .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.primary)
+        .disabled(reviewBusy)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .bottomBarBacking()
+        .transition(.opacity)
+    }
+
+    /// Toiminnot: everything but the primary (U098: "Merkitse ostolaskuksi" and "Käytä tälle
+    /// myyjälle myöhemmin" were accent rows in the body, beside a second Muokkaa).
+    @ViewBuilder private var actions: some View {
+        if let r = state.value {
+            if r.hasOriginalFile {
+                Button { showFile = true } label: { Label("Näytä kuitti", systemImage: "doc.viewfinder") }
+            }
+            Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
+            // Ask the server to read the stored file again: a bill that came back wrong, or with
+            // nothing at all (Kymenlaakson Sähkö's), can be retried from here.
+            if r.hasOriginalFile {
+                Button { Task { await reread() } } label: { Label("Lue uudelleen", systemImage: "arrow.clockwise") }
+                    .disabled(rereadBusy)
+            }
+            if let action = invoiceOffer(r) {
+                Button { Task { await setKind(.invoice) } } label: { Label(action, systemImage: "tray.and.arrow.down") }
+                    .disabled(kindBusy)
+            }
+            vendorRuleAction(r)
+            if r.reviewStatus == "pending" {
+                Button(role: .destructive) { Task { await review("rejected") } } label: { Label("Hylkää", systemImage: "xmark.circle") }
+                    .disabled(reviewBusy)
+            }
+            Button(role: .destructive) { confirmDelete = true } label: { Label("Poista kuitti", systemImage: "trash") }
+        }
+    }
+
     /// The delete dialog names the receipt, so it is clear which one goes.
     private var deleteTitle: String {
         guard let r = state.value else { return "Poistetaanko kuitti?" }
         return "Poistetaanko kuitti · \(r.title)?"
     }
 
+    /// The title already names the vendor; the line under it adds what tells one of its receipts from another.
     private var deleteNote: String {
         guard let r = state.value else { return "" }
-        guard let amount = r.totalAmount else { return "\(r.title) poistetaan." }
-        return "\(r.title) · \(Money.format(amount)) poistetaan."
+        let parts: [String?] = [r.totalAmount.map { Money.format($0) }, r.date.map { APIDate.displayDay($0) }]
+        return parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     // MARK: Ostolasku
 
     /// One document, one home: a receipt filed as an ostolasku says so and links there; the owner can
-    /// also say what the document is ("Ei ole lasku" cancels the ostolasku, "Merkitse ostolaskuksi" files it).
+    /// also say what the document is ("Ei ole lasku" cancels the ostolasku, Toiminnot's "Merkitse
+    /// ostolaskuksi" files it).
     @ViewBuilder private func ostolaskuSection(_ r: Receipt) -> some View {
-        if let notice = ReceiptOstolaskuNotice.make(view: ostolasku, receiptType: r.type) {
+        if let notice = ReceiptOstolaskuNotice.make(view: ostolasku, receiptType: r.type, total: r.totalAmount) {
             switch notice {
             case .filed(let invoiceId, let headline, let canMarkAsReceipt):
                 Section {
@@ -221,14 +279,25 @@ struct ReceiptDetailView: View {
                     }
                 }
                 .listRowBackground(Theme.accentSoft)
-            case .offer(let text):
-                Section {
-                    Text(text).font(.subheadline).foregroundStyle(Theme.ink2)
-                    Button { Task { await setKind(.invoice) } } label: { Label("Merkitse ostolaskuksi", systemImage: "tray.and.arrow.down") }
-                        .disabled(kindBusy)
+            case .offer(let text, _):
+                // The offer itself is in Toiminnot (U098: an accent row on every unfiled expense).
+                // A cancelled ostolasku is still said here; the bare question is not.
+                if ostolasku?.purchaseInvoice != nil {
+                    Section {
+                        Text(text).font(.subheadline).foregroundStyle(Theme.ink2)
+                    }
                 }
             }
         }
+    }
+
+    /// What Toiminnot offers where the section used to: "Merkitse ostolaskuksi", or for a credit
+    /// note "Merkitse ostolaskun hyvitykseksi" (X072).
+    private func invoiceOffer(_ r: Receipt) -> String? {
+        if case .some(.offer(_, let action)) = ReceiptOstolaskuNotice.make(view: ostolasku, receiptType: r.type, total: r.totalAmount) {
+            return action
+        }
+        return nil
     }
 
     /// The notice is extra information on the receipt screen; without it the screen still works.
@@ -246,7 +315,7 @@ struct ReceiptDetailView: View {
                 "PATCH", "/api/receipts/\(receiptId)", body: ReceiptDocumentKindBody(kind)
             )
             Haptics.success()
-            showToast(result.message(for: kind), action: nil, run: nil)
+            showToast(result.message(for: kind, credit: state.value?.isCreditNote == true), action: nil, run: nil)
             app.dataVersion += 1
             let view = await fetchOstolasku()
             withMotion(.snappy) { ostolasku = view }
@@ -260,25 +329,27 @@ struct ReceiptDetailView: View {
 
     // MARK: Vendor rule
 
-    @ViewBuilder private func vendorRuleSection(_ r: Receipt) -> some View {
+    /// Toiminnot's rule item; what the rule does is said in the toast once it is saved.
+    @ViewBuilder private func vendorRuleAction(_ r: Receipt) -> some View {
         if let vendor = r.vendor, !vendor.isEmpty, let category = r.category, !category.isEmpty {
-            Section {
-                if ruleActive {
-                    Button { Task { await undoRule(vendor: vendor) } } label: { Label("Kumoa sääntö", systemImage: "arrow.uturn.backward") }
-                        .disabled(ruleBusy)
-                } else {
-                    Button { Task { await saveRule(vendor: vendor, category: category) } } label: {
-                        Label("Käytä tälle myyjälle myöhemmin", systemImage: "wand.and.stars")
-                    }
+            if ruleActive {
+                Button { Task { await undoRule(vendor: vendor) } } label: { Label("Kumoa sääntö", systemImage: "arrow.uturn.backward") }
                     .disabled(ruleBusy)
+            } else {
+                Button { Task { await rememberVendor(vendor, category: category) } } label: {
+                    Label("Käytä tälle myyjälle myöhemmin", systemImage: "wand.and.stars")
                 }
-            } footer: {
-                let label = ReceiptCategory.label(for: category)
-                Text(ruleActive
-                     ? String("Uudet kuitit myyjältä \(vendor) saavat kategorian \(label).")
-                     : String("Muistaa kategorian \(label) myyjälle \(vendor)."))
+                .disabled(ruleBusy)
             }
         }
+    }
+
+    /// "Käytä tälle myyjälle myöhemmin" from Toiminnot. The section's footer said what the rule
+    /// does; with the item in the menu the toast says it, with Kumoa.
+    private func rememberVendor(_ vendor: String, category: String) async {
+        guard await saveRule(vendor: vendor, category: category) else { return }
+        let label = ReceiptCategory.label(for: category)
+        showToast("Uudet kuitit myyjältä \(vendor) saavat kategorian \(label).", action: "Kumoa") { await undoRule(vendor: vendor) }
     }
 
     /// Whether a rule is on for the vendor; nil when the server could not say (the shown answer stays).
@@ -398,9 +469,7 @@ struct ReceiptDetailView: View {
     }
 
     @ViewBuilder private func matchDetail(_ tx: Receipt.LinkedTransaction) -> some View {
-        let reasons = ReceiptMatchText.reasons(tx.bestReasons)
-        let percent = ReceiptMatchText.percent(tx.bestScore)
-        Text(reasons.isEmpty ? percent : "\(reasons) · \(percent)").font(.caption).foregroundStyle(Theme.ink2)
+        Text(ReceiptMatchText.detail(tx)).font(.caption).foregroundStyle(Theme.ink2)
     }
 
     private func confirm(_ transactionId: String) async {
@@ -646,7 +715,14 @@ struct ReceiptEditSheet: View {
                     .listRowInsets(EdgeInsets())
                 }
                 Section {
-                    TextField("Myyjä", text: $form.vendor).textContentType(.organizationName)
+                    // A label beside the field, as the capture form: a placeholder vanished once filled (U095).
+                    // A name is not a word to correct (U009).
+                    LabeledContent("Myyjä") {
+                        TextField("", text: $form.vendor)
+                            .textContentType(.organizationName)
+                            .autocorrectionDisabled()
+                            .multilineTextAlignment(.trailing)
+                    }
                     fieldError("vendor")
                     DatePicker("Päivä", selection: dateBinding, displayedComponents: .date)
                     fieldError("date")
@@ -674,20 +750,25 @@ struct ReceiptEditSheet: View {
                 } footer: {
                     if fromReread { Text("Tiedot luettiin tiedostosta uudelleen. Tarkista ja tallenna.") }
                 }
+                // No "Kategoria" header: the picker names itself, and the word stood twice (M009).
                 Section {
                     ReceiptCategoryField(category: $form.category, custom: $customCategory)
                     fieldError("category")
-                } header: {
-                    Text("Kategoria")
                 }
                 if form.type == "meno" { foreignPurchaseSection }
                 vatSection
                 Section {
-                    TextField("Viitenumero", text: $form.reference)
+                    LabeledContent("Viitenumero") {
+                        TextField("", text: $form.reference).multilineTextAlignment(.trailing)
+                    }
                     fieldError("reference")
-                    TextField("Laskun numero", text: $form.invoiceNumber)
+                    LabeledContent("Laskun numero") {
+                        TextField("", text: $form.invoiceNumber).multilineTextAlignment(.trailing)
+                    }
                     fieldError("invoiceNumber")
-                    TextField("Selite", text: $form.notes, axis: .vertical)
+                    LabeledContent("Selite") {
+                        TextField("", text: $form.notes, axis: .vertical).multilineTextAlignment(.trailing)
+                    }
                     fieldError("notes")
                 } header: {
                     Text("Lisätiedot")

@@ -54,13 +54,103 @@ extension Koti {
         return reminderWaits(item, now: now) ? "\(base) · muistutettu" : base
     }
 
-    /// What is missing, or the category and VAT the approval books.
+    /// What is missing, or the category and VAT the approval books; a credit note says it is one.
     public static func pendingSubtitle(_ item: DashboardItem) -> String {
-        if !item.gaps.isEmpty { return KotiApproval.gapText(item.gaps) }
-        let rate = item.vatRate.map { "ALV \(ReceiptVat.rateLabel($0))" }
-        let parts = [item.category, rate].compactMap { $0 }
-        return parts.isEmpty ? "Tarkista luokka ja ALV" : parts.joined(separator: " · ")
+        let credit: String? = (item.amount ?? 0) < 0 ? CreditNoteText.label : nil
+        let rest: String
+        if !item.gaps.isEmpty {
+            rest = KotiApproval.gapText(item.gaps)
+        } else {
+            let rate = item.vatRate.map { "ALV \(ReceiptVat.rateLabel($0))" }
+            // The label the Kuitit rows show ("Tarvikkeet & ostot"), not the stored id (X081).
+            let parts = [item.category.map(ReceiptCategory.label(for:)), rate].compactMap { $0 }
+            rest = parts.isEmpty ? "Tarkista luokka ja ALV" : parts.joined(separator: " · ")
+        }
+        return [credit, rest].compactMap { $0 }.joined(separator: " · ")
     }
+
+    /// The row's figure: a receipt's total with its cash sign (`MoneyDirection`), a bank row's
+    /// signed amount and an invoice's sum as the server sends them.
+    public static func taskAmount(_ item: DashboardItem) -> Decimal? {
+        guard let amount = item.amount else { return nil }
+        switch item.kind {
+        case .pendingReceipt, .vatGap: return MoneyDirection.receiptAmount(amount, isIncome: item.type == "tulo")
+        default: return amount
+        }
+    }
+}
+
+// MARK: Tarvitaan sinulta beyond the server's rows (web DashboardClient `moreRows`, `buildAccountTasks`)
+
+extension Koti {
+    /// One row of the task list, in the list's order.
+    public enum TaskEntry: Equatable, Sendable, Identifiable {
+        case item(DashboardItem)
+        /// "Näytä kaikki (N)": the server sends three of a kind; the rest are on the kind's own list.
+        case showAll(DashboardItem.Kind, total: Int)
+        /// "Pankkitilin saldo ei täsmää · Tarkista tiliotteet": accounts whose balance does not
+        /// reconcile. Not one of the month's blocking tasks.
+        case bankMismatch(accounts: Int)
+
+        public var id: String {
+            switch self {
+            case .item(let item): item.id
+            case .showAll(let kind, _): "more:\(kind.rawValue)"
+            case .bankMismatch: "bank-mismatch"
+            }
+        }
+    }
+
+    /// The server's order of kinds (`api/dashboard/items.ts`): documents, then matches, then drafts,
+    /// the non-blocking overdue invoices last.
+    static let taskKinds: [DashboardItem.Kind] = [
+        .pendingReceipt, .vatGap, .missingReceipt, .invoiceMatch, .receiptMatch, .paymentDuplicate, .draftInvoice, .overdueInvoice,
+    ]
+
+    /// The rows of Tarvitaan sinulta: each kind's rows followed by its "Näytä kaikki (N)" when the
+    /// kind has more than is shown, then the bank-mismatch task (the current month only). `visible`
+    /// is the server's rows less those the owner just acted on; those leave the totals too.
+    public static func taskEntries(_ d: Dashboard, visible: [DashboardItem], atCurrentMonth: Bool) -> [TaskEntry] {
+        var entries: [TaskEntry] = []
+        for kind in taskKinds {
+            let shown = visible.filter { $0.kind == kind }
+            entries += shown.map(TaskEntry.item)
+            let hidden = d.items.filter { $0.kind == kind }.count - shown.count
+            let total = (d.itemTotals?[kind.rawValue] ?? 0) - hidden
+            if total > shown.count { entries.append(.showAll(kind, total: total)) }
+        }
+        // A kind this app does not know yet keeps its rows, after the known ones.
+        entries += visible.filter { !taskKinds.contains($0.kind) }.map(TaskEntry.item)
+        if atCurrentMonth, let accounts = d.bank?.needsAttention, accounts > 0 {
+            entries.append(.bankMismatch(accounts: accounts))
+        }
+        return entries
+    }
+
+    public static func showAllTitle(total: Int) -> String { "Näytä kaikki (\(total))" }
+
+    /// What a kind's full list holds (web `KIND_LIST`).
+    public static func showAllLabel(_ kind: DashboardItem.Kind) -> String {
+        switch kind {
+        case .overdueInvoice: "Myöhässä olevat laskut"
+        case .pendingReceipt: "Hyväksyntää odottavat kuitit"
+        case .vatGap: "Kuitit ilman ALV-erittelyä"
+        case .missingReceipt: "Pankkitapahtumat ilman kuittia"
+        case .invoiceMatch: "Laskujen maksut tiliotteella"
+        case .receiptMatch: "Kohdistusehdotukset"
+        case .paymentDuplicate: "Mahdolliset kaksoiskirjaukset"
+        case .draftInvoice: "Lähettämättömät laskut"
+        case .unknown: ""
+        }
+    }
+
+    public static func bankMismatchTitle(accounts: Int) -> String {
+        accounts == 1 ? "Pankkitilin saldo ei täsmää" : "\(accounts) pankkitilin saldo ei täsmää"
+    }
+
+    public static let bankMismatchSubtitle = "Tarkista tiliotteet"
+    /// The pill: a label only, the row opens the accounts.
+    public static let bankMismatchAction = "Tarkista"
 }
 
 // MARK: The approval sheet (web `ReceiptApprovalSheet`, `lib/receipt-approval.ts`)

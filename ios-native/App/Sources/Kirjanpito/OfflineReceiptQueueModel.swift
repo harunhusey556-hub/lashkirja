@@ -117,6 +117,12 @@ final class OfflineReceiptQueueModel {
         corrupt = []
     }
 
+    /// What `clearForSignOut()` would delete, for the sign-out question to say before it is answered
+    /// (X122): the photos not yet sent and the capture rows not yet saved. Nil when nothing would go.
+    var signOutWarning: String? {
+        SignOutWarning.message(waiting: waiting, unsavedReadings: CaptureQueueModel.shared.unfinishedCount)
+    }
+
     /// Sign-out: the photos of the account that left are not kept on the phone (the web wipes its
     /// queue the same way). Stops a send on its way first. For `AppModel.logout`.
     func clearForSignOut() {

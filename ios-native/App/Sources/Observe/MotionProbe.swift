@@ -15,10 +15,12 @@ import os
 ///   MOVE <t> <screen> n=<count> max=<pt> ...   layers moved more than 2 pt since the last tick
 ///   SCROLLJUMP <t> <screen> dy=<pt>            a scroll offset changed with no finger on it
 ///   QUIET <t> <screen>                         nothing moved for 0.4 s of ticks: the layout settled
+///   STALL <t> <screen> ms=<ms>                 the main thread held the ticks back this long
+///   TOUCH <t> <screen>                         a finger came down in the key window (its own time)
 /// scripts/sim/motion-audit.py calls a MOVE after the step's motion went quiet a late layout shift.
 /// Signposts (category `Motion`) mark each screen and how long it took to stop moving.
 @MainActor
-final class MotionProbe: NSObject {
+final class MotionProbe: NSObject, UIGestureRecognizerDelegate {
     static let shared = MotionProbe()
     #if DEBUG
     nonisolated static let active = ProcessInfo.processInfo.arguments.contains("-LKMotionAudit")
@@ -43,6 +45,8 @@ final class MotionProbe: NSObject {
     private var lastTick: CFTimeInterval = 0
     private var windowCount = 0
     private var presented: ObjectIdentifier?
+    /// Windows that carry the touch listener (`shouldReceive`), so each gets one.
+    private var listened: Set<ObjectIdentifier> = []
 
     func start() {
         guard Self.active, link == nil else { return }
@@ -96,6 +100,14 @@ final class MotionProbe: NSObject {
             write("MARK \(Self.now) windows=\(windows.count)")
         }
         guard let window = windows.first(where: \.isKeyWindow) else { return }
+        if listened.insert(ObjectIdentifier(window)).inserted {
+            // Never takes a touch (`shouldReceive` says no), so no gesture of the app waits on it.
+            let listener = UIGestureRecognizer(target: nil, action: nil)
+            listener.cancelsTouchesInView = false
+            listener.delaysTouchesEnded = false
+            listener.delegate = self
+            window.addGestureRecognizer(listener)
+        }
         // When a presentation is asked for: its animation starts with the commit of this turn.
         var front = window.rootViewController
         while let next = front?.presentedViewController { front = next }
@@ -126,6 +138,16 @@ final class MotionProbe: NSObject {
         let top = moved.sorted { $0.delta > $1.delta }.prefix(3)
             .map { "\($0.what):\(Int($0.dx)),\(Int($0.dy))" }.joined(separator: " ")
         write("MOVE \(Self.now) \(screen) n=\(moved.count) max=\(Int(top.isEmpty ? 0 : moved.map(\.delta).max()!)) \(top)")
+    }
+
+    /// The audit's t = 0: when a step's finger reached the app, not when XCUITest was asked for it,
+    /// which can be 1–4 s earlier while it resolves the element (M046, M056). The touch's own time,
+    /// so a main thread busy when it came does not move it later.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        let age = ProcessInfo.processInfo.systemUptime - touch.timestamp
+        let at = Date().timeIntervalSince1970 - (age >= 0 && age < 30 ? age : 0)
+        write("TOUCH \(String(format: "%.3f", at)) \(screen)")
+        return false
     }
 
     private func walk(_ layer: CALayer, space: CALayer, seen: inout [ObjectIdentifier: CGRect],

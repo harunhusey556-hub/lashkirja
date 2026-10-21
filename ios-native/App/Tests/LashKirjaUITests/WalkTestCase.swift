@@ -1,7 +1,7 @@
 import XCTest
 
 /// Base for simulator walks: fresh launch + demo sign-in per test, tap/scroll counting, and
-/// checks recorded to notes.txt (not asserted, so one miss does not hide the rest).
+/// checks recorded to notes.txt and asserted (continueAfterFailure, so one miss does not hide the rest).
 class WalkTestCase: XCTestCase {
     var taps = 0
     var scrolls = 0
@@ -10,20 +10,38 @@ class WalkTestCase: XCTestCase {
     let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
     /// The system password manager offers to save the demo login; not part of the app. On iOS 26 its
     /// "Save Password?" sheet sits in the app's own element tree, not SpringBoard's (CI dump, 2026-10-15).
+    /// The notification question is answered too, should a launch still raise it over a link's
+    /// screen (U027 U104): the flag in setUp stands for it, the shot must not show it.
     func dismissSystemPrompts() {
-        for label in ["Not Now", "Ei nyt"] {
-            probe { for root in [springboard, app!] where root.buttons[label].exists { root.buttons[label].tap() } }
+        let labels = ["Not Now", "Ei nyt", "Don’t Allow", "Don't Allow", "Älä salli"]
+        for root in [springboard, app!] {
+            probe {
+                let prompt = root.buttons.matching(NSPredicate(format: "label IN %@", labels)).firstMatch
+                if prompt.exists { prompt.tap() }
+            }
         }
+    }
+    /// A link's screen is what the shot shows: no system alert over it (U027 U104).
+    func assertNoSystemAlert(_ step: String, file: StaticString = #filePath, line: UInt = #line) {
+        var alerts = 0
+        probe { alerts = springboard.alerts.count }
+        XCTAssertEqual(alerts, 0, "\(step): a system alert is over the app", file: file, line: line)
     }
     var savePasswordPrompt: XCUIElement {
         app.buttons.matching(NSPredicate(format: "label IN %@", ["Not Now", "Ei nyt"])).firstMatch
     }
 
-    override func tearDown() { goOnline(); super.tearDown() }
+    override func tearDown() { goOnline(); keepAnswers(); super.tearDown() }
 
     override func setUp() {
         continueAfterFailure = true
         app = XCUIApplication()
+        // The flag stands for the one-time notification question (as in P0, U027). A later launch
+        // raised it over the walk's taps, and XCTest's own handler could not always answer it (run
+        // 39334491019: "Failed to construct element query matching interruption"; every tab tap of
+        // P3 B after its relaunch, and of P3 C, landed on the alert). First, so no value-less
+        // flag before it can be read as taking the key for its value.
+        app.launchArguments += ["-notifications.asked.v1", "YES"]
         app.launchArguments.append("-LKLaunchPhase")
         let signingIn = launchSignedIn()
         // On a fresh simulator the save offer comes seconds after the tab bar, over the first test's
@@ -99,16 +117,83 @@ class WalkTestCase: XCTestCase {
         if let h = FileHandle(forWritingAtPath: p) { h.seekToEndOfFile(); h.write((s + "\n").data(using: .utf8)!); h.closeFile() }
         else { FileManager.default.createFile(atPath: p, contents: (s + "\n").data(using: .utf8)) }
     }
-    func check(_ name: String, _ ok: Bool) { note("\(ok ? "PASS" : "FAIL") \(name)") }
+    /// A PASS or FAIL line in notes.txt, and asserted: only noted, a FAIL still read as a passed walk
+    /// (U042 U058 U086, and the check() half of U021 U023).
+    func check(_ name: String, _ ok: Bool, file: StaticString = #filePath, line: UInt = #line) {
+        note("\(ok ? "PASS" : "FAIL") \(name)")
+        XCTAssertTrue(ok, name, file: file, line: line)
+    }
 
     func openSettings() {
         app.buttons["Asetukset"].firstMatch.tap(); taps += 1
         _ = app.staticTexts["Sähköpostimallit"].waitForExistence(timeout: 10)
     }
+    /// Kirjanpito → "Kuitit, 28 kuittia" (as StabilityTests.openHubRow).
+    func openKuitit() -> Bool {
+        guard selectTab("Kirjanpito") else { note("MISS tab Kirjanpito not selected"); return false }
+        for _ in 0..<2 where !app.navigationBars["Kuitit"].exists {
+            tapLabel("label BEGINSWITH %@", "Kuitit")
+            _ = app.navigationBars["Kuitit"].waitForExistence(timeout: 10)
+        }
+        return app.navigationBars["Kuitit"].exists
+    }
+    /// One photo kept on the phone, the way a photo taken without a connection waits: the proxy goes
+    /// offline before the capture screen's queue fixture (a launch with `-LKUITest` only) and stays
+    /// offline until `goOnline` (tearDown at the latest), so the photo is still waiting. Ends on Kuitit.
+    func queuePhotoOffline() -> Bool {
+        guard openKuitit() else { note("MISS Kuitit did not open"); return false }
+        goOffline()
+        let camera = app.navigationBars["Kuitit"].buttons["Kuvaa kuitti"]
+        (camera.exists ? camera : app.buttons["Kuvaa kuitti"].firstMatch).tap(); taps += 1
+        let fixture = app.buttons["capture-queue-fixture"].firstMatch
+        guard fixture.waitForExistence(timeout: 10) else {
+            note("MISS no Testikuitti jonoon: is the app a Debug build launched with -LKUITest?"); return false
+        }
+        // A reading kept from an earlier run opens the screen on the queue, with the button lower down.
+        if !fixture.isHittable {
+            app.swipeUp()
+            _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: fixture)], timeout: 5)
+        }
+        fixture.tap(); taps += 1
+        let status = app.descendants(matching: .any).matching(identifier: "capture-queued-status").firstMatch
+        guard status.waitForExistence(timeout: 10) else { note("MISS the queued photo is not shown inside the capture screen"); return false }
+        let screen = app.navigationBars["Uusi kuitti"]
+        let close = screen.buttons.matching(NSPredicate(format: "label IN %@", ["Peruuta", "Sulje"])).firstMatch
+        guard close.exists else { note("MISS the capture screen has no Peruuta or Sulje"); return false }
+        close.tap(); taps += 1
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: screen)
+        return XCTWaiter().wait(for: [gone], timeout: 10) == .completed
+    }
+    /// Asetukset → "Kirjaudu ulos" from Koti: the sign-out question, once it has stopped rising.
+    /// Nil when it did not open.
+    func openSignOutQuestion() -> XCUIElement? {
+        guard selectTab("Koti") else { note("MISS tab Koti not selected"); return nil }
+        openSettings()
+        guard tap("Kirjaudu ulos") else { return nil }
+        let sheet = app.descendants(matching: .any).matching(identifier: "confirm-sheet").firstMatch
+        guard sheet.waitForExistence(timeout: 5) else { note("MISS Kirjaudu ulos did not open the confirm sheet"); return nil }
+        waitStill(app.buttons["confirm-sheet-confirm"].firstMatch)
+        return sheet
+    }
+    /// A sheet slides up: its frames are read once two looks a moment apart agree.
+    func waitStill(_ element: XCUIElement, timeout: TimeInterval = 5) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = element.frame
+        while Date() < deadline {
+            usleep(250_000)
+            let now = element.frame
+            if now == last { return }
+            last = now
+        }
+    }
+    /// Pressed 0.1 s, dragged slowly and held 0.3 s before the release, so where the finger stops
+    /// decides the pop: let go while moving fast, the interactive pop was cancelled at about 46 % on
+    /// the slow simulator and the walk went on on the screen it meant to leave (M001).
     func edgeSwipeBack() {
         let w = app.windows.firstMatch
         w.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
-            .press(forDuration: 0.05, thenDragTo: w.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+            .press(forDuration: 0.1, thenDragTo: w.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)),
+                   withVelocity: .slow, thenHoldForDuration: 0.3)
     }
     /// Drags a sheet down by its navigation bar (the grab area), like a thumb would.
     func swipeSheetDown(_ title: String) {
@@ -127,6 +212,10 @@ class WalkTestCase: XCTestCase {
         for _ in 0...maxScrolls {
             let e = q.firstMatch
             if e.exists && e.frame.minY > 30 && e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 {
+                // A list still gliding after a swipe takes the tap as a stop, not a choice: the row was
+                // tapped mid-glide and nothing opened (OwnerScreens testJ and testM, run 39528413225).
+                waitStill(e)
+                guard e.frame.minY > 30, e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 else { continue }
                 e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); taps += 1; return true
             }
             app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1
@@ -138,6 +227,42 @@ class WalkTestCase: XCTestCase {
         note("MISS could not find \(arg)"); return false
     }
     func tap(_ label: String) -> Bool { tapLabel("label == %@", label) }
+    /// The overdue invoice from Koti's "Tarvitaan sinulta". Koti shows five tasks; with more waiting
+    /// (the CI seed puts documents and matches before it) the overdue row is behind "Näytä enemmän",
+    /// which is then tapped first, as the owner would. The tasks lead Koti (N5), so the button is
+    /// looked for before any scroll: a row behind it is not drawn, and searching for it first
+    /// scrolled the whole screen in vain.
+    func openOverdueFromKoti() -> Bool {
+        let overdue = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "· myöhässä")).firstMatch
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä enemmän")).firstMatch
+        let deadline = Date().addingTimeInterval(20)
+        while !overdue.exists && !more.exists && Date() < deadline { usleep(250_000) }
+        if !overdue.exists && more.exists {
+            // Its centre, where the tap lands, clear of the floating tab bar, which took a tap meant
+            // for the button (N1 run 39187969883).
+            let bar = app.tabBars.firstMatch
+            for _ in 0..<4 where !(more.isHittable && (!bar.exists || more.frame.midY < bar.frame.minY)) {
+                app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1
+            }
+            guard more.isHittable else { note("MISS Näytä enemmän on Koti"); return false }
+            more.tap(); taps += 1
+            _ = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä vähemmän")).firstMatch.waitForExistence(timeout: 5)
+        }
+        return tapLabel("label CONTAINS %@", "· myöhässä")
+    }
+    /// Scrolls the screen (each swipe counted) until `element` sits inside the window, as tapLabel
+    /// does before it taps, and taps nothing: a task can end on the button that does it.
+    /// `bottomBar` is what covers the window's foot: the tab bar on a tab, only the home
+    /// indicator in a sheet, where a list's last row stops 54 pt above the edge.
+    func reveal(_ element: XCUIElement, scrolls maxScrolls: Int = 6, bottomBar: CGFloat = 60) -> Bool {
+        let window = app.windows.firstMatch
+        for attempt in 0...maxScrolls {
+            if element.waitForExistence(timeout: attempt == 0 ? 3 : 1), element.isHittable,
+               element.frame.minY > 30, element.frame.maxY < window.frame.maxY - bottomBar { return true }
+            if attempt < maxScrolls { window.swipeUp(velocity: .slow); scrolls += 1 }
+        }
+        return false
+    }
     /// Opens a link through the host (`simctl openurl`), the way a quick action or Siri would.
     func openURL(_ url: String) {
         let name = "\(shotDir)/\(UUID().uuidString).openurl"
@@ -166,6 +291,10 @@ class WalkTestCase: XCTestCase {
     /// The walk's API proxy drops every connection while this file exists (scripts/sim/api-proxy.py).
     func goOffline() { FileManager.default.createFile(atPath: "\(shotDir)/offline.flag", contents: nil) }
     func goOnline() { try? FileManager.default.removeItem(atPath: "\(shotDir)/offline.flag") }
+    /// While this file exists each request still reaches the API, but the proxy closes the app's
+    /// connection instead of passing the answer on: the work is done and the app cannot know.
+    func loseAnswers() { FileManager.default.createFile(atPath: "\(shotDir)/lose-answer.flag", contents: nil) }
+    func keepAnswers() { try? FileManager.default.removeItem(atPath: "\(shotDir)/lose-answer.flag") }
     func tab(_ name: String) { app.tabBars.buttons[name].firstMatch.tap(); taps += 1; sleep(2) }
     /// Taps a tab until it reports itself selected. The first tap after sign-in can land while the
     /// passkey offer or a system prompt is still leaving, and is then lost (CI round 1: still on Koti).
@@ -181,11 +310,104 @@ class WalkTestCase: XCTestCase {
         }
         return button.isSelected
     }
-    /// One measured task from a fresh launch: records "TAPS <name>: n taps, m scrolls" and a screenshot.
-    func measure(_ name: String, reached: Bool) {
+    /// One measured task from a fresh launch: records "TAPS <name>: n taps, m scrolls" and a screenshot,
+    /// then fails when the task's screen was not reached or the path took more taps or scrolls than
+    /// its budget. Only noted, a walk that stopped short still read as passed (U021, U023).
+    func measure(_ name: String, reached: Bool, maxTaps: Int? = nil, maxScrolls: Int? = nil,
+                 file: StaticString = #filePath, line: UInt = #line) {
         note("\(reached ? "TAPS" : "FAIL-NAV") \(name): \(taps) taps, \(scrolls) scrolls")
-        shot("nav-" + name.replacingOccurrences(of: " ", with: "-"))
+        shot("nav-" + name)
+        XCTAssertTrue(reached, "\(name): the task's screen was not reached", file: file, line: line)
+        if let maxTaps {
+            XCTAssertLessThanOrEqual(taps, maxTaps, "\(name): \(taps) taps, the path's budget is \(maxTaps)", file: file, line: line)
+        }
+        if let maxScrolls {
+            XCTAssertLessThanOrEqual(scrolls, maxScrolls, "\(name): \(scrolls) scrolls, the path's budget is \(maxScrolls)", file: file, line: line)
+        }
     }
     var discardDialog: XCUIElement { app.staticTexts["Hylätäänkö muutokset?"].firstMatch }
 
+    /// The items of a navigation bar beside Back, each label once: a toolbar Menu is a labelled
+    /// button around an unlabelled one.
+    func barItems(_ bar: XCUIElement) -> [String] {
+        var items: [String] = []
+        for button in bar.buttons.allElementsBoundByIndex where button.identifier != "BackButton" {
+            let label = button.label
+            if !label.isEmpty && !items.contains(label) { items.append(label) }
+        }
+        return items
+    }
+
+    /// The band between a bottom bar (`button`, its capsule) and the tab bar under it is the canvas,
+    /// flat: rows scrolled under the bar showed through it, cut across, and a row's own white
+    /// reads 10 above the canvas even where no text falls (X065). The 3 pt over the tab bar are
+    /// left out, where the floating bar's own shadow falls, and 8 pt at each side, where a scroll
+    /// indicator may still be fading. Read until it holds, for up to 3 s: the bar fades in.
+    @discardableResult
+    func assertCanvasUnderBar(_ button: XCUIElement, _ step: String, file: StaticString = #filePath, line: UInt = #line) -> Bool {
+        waitStill(button)
+        let tabs = app.tabBars.firstMatch
+        let window = app.windows.firstMatch.frame
+        guard button.exists, tabs.exists else {
+            XCTFail("\(step): no bar or no tab bar to measure between", file: file, line: line); return false
+        }
+        // A button on or under the tab bar (a row's Hyväksy below the fold, a bar slid behind the
+        // tabs) leaves no band, and the check below would pass on nothing.
+        guard button.frame.maxY <= tabs.frame.minY else {
+            XCTFail("\(step): the bar (maxY \(button.frame.maxY)) is not above the tab bar (minY \(tabs.frame.minY))", file: file, line: line)
+            return false
+        }
+        let band = CGRect(x: window.minX + 8, y: button.frame.maxY + 1, width: window.width - 16,
+                          height: tabs.frame.minY - 3 - (button.frame.maxY + 1))
+        guard band.height >= 1 else {
+            note("INFO \(step): the bar ends at \(button.frame.maxY), the tab bar starts at \(tabs.frame.minY): no band between")
+            return true
+        }
+        let canvas = RGB.canvas.luma
+        func holds(_ read: (mean: Double, spread: Double)?) -> Bool {
+            guard let read else { return false }
+            // Rows showing through are white (luma ~255) and uneven. The floating bar and the tab bar
+            // cast a soft, even shadow on this ~7 pt strip (mean 240 against 243, std 0.9 in run
+            // 39276760350), so the band may be a little darker than the canvas, never brighter.
+            return read.spread < 3 && read.mean <= canvas + 3 && read.mean >= canvas - 8
+        }
+        var read = luma(app, in: band)
+        let deadline = Date().addingTimeInterval(3)
+        while !holds(read) && Date() < deadline {
+            usleep(250_000)
+            read = luma(app, in: band)
+        }
+        let said = read.map { String(format: "mean %.1f (canvas %.1f), std %.2f", $0.mean, canvas, $0.spread) } ?? "unread"
+        note("INFO \(step): band \(band) \(said)")
+        XCTAssertTrue(holds(read), "\(step): the band under the bar is not the flat canvas (\(said)): rows show through", file: file, line: line)
+        return holds(read)
+    }
+
+    /// An action on the open invoice (N6): the screen's one primary when it is that action, else
+    /// the item in the bar's Toiminnot. The tiles under the primary (PDF, Lähetä, Maksu, Kopioi)
+    /// are gone, so the menu is the only other place it is offered.
+    @discardableResult
+    func invoiceAction(_ label: String) -> Bool {
+        let bar = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
+        let menu = bar.buttons["Toiminnot"].firstMatch
+        guard menu.waitForExistence(timeout: 30) else { note("MISS \(label): no invoice with Toiminnot"); return false }
+        let primary = app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
+        if primary.exists && primary.isHittable {
+            primary.tap(); taps += 1
+            return true
+        }
+        menu.tap(); taps += 1
+        // The menu lies over the screen: its item is the last match.
+        let items = app.buttons.matching(NSPredicate(format: "label == %@", label))
+        _ = items.firstMatch.waitForExistence(timeout: 5)
+        guard let item = items.allElementsBoundByIndex.last(where: { $0.isHittable }) else {
+            note("MISS \(label) in Toiminnot")
+            // Closes the menu, so the next step starts from the screen; at the leading edge, which the
+            // trailing menu never reaches.
+            app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap()
+            return false
+        }
+        item.tap(); taps += 1
+        return true
+    }
 }

@@ -104,6 +104,8 @@ struct PurchaseLinkConfirmView: View {
                 .listRowInsets(EdgeInsets())
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         // The failure and the outcome line under the amount come and go without a jump.
         .motion(.snappy, value: failure)
         .motion(.snappy, value: (Money.parse(amountText) ?? 0) > 0)
@@ -148,7 +150,7 @@ struct PurchaseLinkConfirmView: View {
     }
 }
 
-/// Ostolasku → "Kohdista pankkitapahtumaan": the bank rows that may have paid it, best first.
+/// Ostolasku → "Kohdista pankkiin": the bank rows that may have paid it, best first.
 struct PurchaseBankLinkSheet: View {
     @Environment(\.dismiss) private var dismiss
     let invoice: PurchaseInvoice
@@ -160,15 +162,20 @@ struct PurchaseBankLinkSheet: View {
         NavigationStack {
             BankRowPickerList(
                 path: "/api/purchase-invoices/\(invoice.id)/payments/candidates",
-                emptyText: "Lähteviä maksuja, joita ei ole vielä kohdistettu, ei löytynyt laskun ajalta. Hae nimellä tai summalla."
+                emptyText: "Lähteviä maksuja, joita ei ole vielä kohdistettu, ei löytynyt laskun ajalta. Hae nimellä tai summalla.",
+                // An ostolasku's payments are money out.
+                moneyIn: false
             ) {
                 LabeledContent(invoice.supplierName) { MoneyText(amount: invoice.open).fontWeight(.semibold) }
-            } footer: {
-                Text("Valitse pankkitapahtuma, jolla tämä ostolasku maksettiin. Parhaat osumat ovat ylimpänä.")
+            } footer: { list in
+                // Rows listed only for their dates are not "best matches" (X162).
+                Text(list?.matchesNothing == true
+                     ? "Mikään tapahtuma ei vastaa summaa, viitettä tai nimeä. Hae nimellä tai summalla."
+                     : "Valitse pankkitapahtuma, jolla tämä ostolasku maksettiin. Parhaat osumat ovat ylimpänä.")
             } pick: { candidate in
                 target = PurchaseLinkPair(invoice: invoice, row: candidate)
             }
-            .navigationTitle("Kohdista pankkitapahtumaan")
+            .navigationTitle("Kohdista pankkiin")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Sulje") { dismiss() } }
@@ -185,15 +192,19 @@ struct PurchaseBankLinkSheet: View {
 }
 
 /// The searchable list of bank rows one document can be linked to, a server page at a time: the
-/// ostolasku's "Kohdista pankkitapahtumaan" and the kuitti's "Valitse muu pankkitapahtuma". Owner
+/// ostolasku's "Kohdista pankkiin" and the kuitti's "Valitse muu pankkitapahtuma". Owner
 /// 2026-10-15: 599 rows stopped at 30 here, and a kuitti offered only the matcher's few. The
 /// search and the month chips ask the server, so they reach every row, not only the loaded ones.
 struct BankRowPickerList<Header: View, Footer: View>: View {
     @Environment(AppModel.self) private var app
     let path: String
     let emptyText: String
+    /// Which way the listed rows moved money: the API sends them unsigned, and each row shows its
+    /// cash sign as every other bank row does (C2).
+    let moneyIn: Bool
     @ViewBuilder let header: () -> Header
-    @ViewBuilder let footer: () -> Footer
+    /// Under the header; given the loaded rows (nil until the first answer), so it can say what they are.
+    @ViewBuilder let footer: (PurchaseBankCandidateList?) -> Footer
     let pick: (PurchaseBankCandidate) -> Void
 
     @State private var state = ScreenLoad<PurchaseBankCandidateList>()
@@ -206,7 +217,7 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
 
     var body: some View {
         List {
-            Section { header() } footer: { footer() }
+            Section { header() } footer: { footer(state.value) }
             switch state.display {
             case .content(let list):
                 if let banner = state.banner {
@@ -247,10 +258,13 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .padding(.horizontal, ChipRow.inset)
                 }
+                .chipRowScroll()
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
             }
+            .chipRowSection()
         }
         if list.candidates.isEmpty {
             Section {
@@ -265,7 +279,7 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
             Section {
                 ForEach(list.candidates.prefix(limit.visible(list.candidates.count))) { candidate in
                     Button { pick(candidate) } label: {
-                        PurchaseBankCandidateRow(candidate: candidate)
+                        PurchaseBankCandidateRow(candidate: candidate, moneyIn: moneyIn)
                     }
                     .buttonStyle(.pressable)
                     .accessibilityHint("Avaa vahvistus")
@@ -364,6 +378,7 @@ private struct BankRowSkeleton: View {
 
 struct PurchaseBankCandidateRow: View {
     let candidate: PurchaseBankCandidate
+    let moneyIn: Bool
 
     var body: some View {
         HStack(alignment: .top) {
@@ -377,7 +392,7 @@ struct PurchaseBankCandidateRow: View {
                 }
             }
             Spacer()
-            MoneyText(amount: candidate.amount).font(.subheadline.weight(.semibold))
+            MoneyText(amount: MoneyDirection.rowAmount(candidate.amount, moneyIn: moneyIn)).font(.subheadline.weight(.semibold))
         }
         .contentShape(Rectangle())
     }
@@ -447,6 +462,8 @@ struct PurchaseRowLinkView: View {
                 BankRowSkeleton()
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
         .searchable(text: $search, prompt: "Toimittaja, numero tai summa")
         .navigationTitle("Kohdista ostolaskuun")
         .navigationBarTitleDisplayMode(.inline)
@@ -655,13 +672,15 @@ struct ReceiptBankPickerSheet: View {
         NavigationStack {
             BankRowPickerList(
                 path: "/api/receipts/\(receipt.id)/bank-candidates",
-                emptyText: "Vapaita pankkitapahtumia ei löytynyt. Hae nimellä tai summalla."
+                emptyText: "Vapaita pankkitapahtumia ei löytynyt. Hae nimellä tai summalla.",
+                moneyIn: receipt.bankMoneyIn
             ) {
+                // As on the receipt and its rows: an expense −9,43 €, a credit note's refund 50,00 € (X038).
                 LabeledContent(receipt.title) {
-                    if let amount = receipt.totalAmount { MoneyText(amount: amount).fontWeight(.semibold) }
+                    if let amount = receipt.shownAmount { MoneyText(amount: amount).fontWeight(.semibold) }
                 }
                 if let failure { Text(failure).font(.subheadline).foregroundStyle(Theme.danger).transition(.opacity) }
-            } footer: {
+            } footer: { _ in
                 Text("Valitse pankkitapahtuma, jolla tämä kuitti maksettiin. Parhaat osumat ovat ylimpänä.")
             } pick: { candidate in
                 picked = candidate
@@ -675,7 +694,8 @@ struct ReceiptBankPickerSheet: View {
             .confirmSheet(presenting: $picked) { candidate in
                 ConfirmRequest(
                     title: "Kohdistetaanko · \(candidate.title)?",
-                    message: [candidate.detail, Money.format(candidate.amount)].filter { !$0.isEmpty }.joined(separator: " · "),
+                    message: [candidate.detail, Money.format(MoneyDirection.rowAmount(candidate.amount, moneyIn: receipt.bankMoneyIn))]
+                        .filter { !$0.isEmpty }.joined(separator: " · "),
                     confirmTitle: "Kohdista",
                     isDestructive: false,
                     onConfirm: { Task { await link(candidate) } }

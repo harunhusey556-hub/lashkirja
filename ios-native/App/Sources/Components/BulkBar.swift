@@ -1,40 +1,58 @@
 import SwiftUI
 import LashKirjaCore
 
-/// The bar under a list in "Valitse" mode (web `kuitit/BulkBar.tsx`): how many rows are picked,
-/// Peruuta, and the list's own actions. Shown only while something is picked.
+/// The bar under a list in "Valitse" mode (web `kuitit/BulkBar.tsx`): how many rows are picked and
+/// the list's own actions. Shown only while something is picked. No Peruuta of its own: every list
+/// that shows it ends the mode with the toolbar's "Valmis", and two exits doing one thing was one
+/// too many (X040).
 struct BulkBar<Actions: View>: View {
     let count: Int
     let busy: Bool
-    let onCancel: () -> Void
     @ViewBuilder let actions: () -> Actions
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("\(count) valittu")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Theme.onInk)
-                Spacer()
-                if busy { ProgressView().tint(Theme.onInk) }
-                Button("Peruuta", action: onCancel)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.onInk)
+        // The count and the actions in one row while they fit; at large text sizes the actions go
+        // under the count, side by side and then one per line.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                header
+                actions()
             }
-            // Side by side while they fit; at large text sizes one per line.
-            ViewThatFits(in: .horizontal) {
+            VStack(alignment: .leading, spacing: 10) {
+                header
                 HStack(spacing: 8) { actions() }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                header
                 VStack(alignment: .leading, spacing: 8) { actions() }
             }
-            .disabled(busy)
         }
+        .disabled(busy)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Theme.ink.opacity(0.94), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        // Opaque: at 0.94 the row under the bar read through it (X041).
+        .background(Theme.ink, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Valitut: \(count)")
+        .accessibilityIdentifier("bulk-bar")
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        // Also where no bottom bar holds it (Pankki, Ostolaskut put it in their own inset).
+        .bottomClearance()
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text("\(count) valittu")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.onInk)
+            Spacer(minLength: 0)
+            // One fixed slot for the spinner, so the actions keep their place when a run starts.
+            ZStack {
+                if busy { ProgressView().tint(Theme.onInk) }
+            }
+            .frame(width: 20, height: 20)
+        }
     }
 }
 

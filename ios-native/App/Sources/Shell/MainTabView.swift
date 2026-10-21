@@ -20,14 +20,21 @@ struct MainTabView: View {
                             .motionProbe("tab.\(item)")
                             .toolbar {
                                 ToolbarItemGroup(placement: .topBarTrailing) {
-                                    Button { Perf.beginOpen("chat"); app.prepareChat(); showAssistant = true } label: { Image(systemName: "bubble.left") }
-                                        .accessibilityLabel("Avustaja")
+                                    // On Koti only (Q2, M035): on every root it was one more icon beside
+                                    // each tab's own primary. From another tab it is two taps away.
+                                    if item == .koti {
+                                        Button { Perf.beginOpen("chat"); app.prepareChat(); showAssistant = true } label: { Image(systemName: "bubble.left") }
+                                            .accessibilityLabel("Avustaja")
+                                    }
                                     Button { Perf.beginOpen("asetukset"); showSettings = true } label: { Image(systemName: "person.crop.circle") }
                                         .accessibilityLabel("Asetukset")
                                 }
                             }
                             .appDestinations()
                     }
+                    // Over the tab's every screen, just above the tab bar (B4): see OfflineBanner.
+                    .overlay(alignment: .bottom) { OfflineBanner() }
+                    .environment(\.openRoute, openRoute(item))
                 }
             }
             // "+" is a plain tab item that opens the Lisää sheet; selecting it never switches tab
@@ -55,7 +62,6 @@ struct MainTabView: View {
         .fullScreenCover(isPresented: Bindable(OnboardingGate.shared).isPresented) { OnboardingView() }
         // "Kuvaa kuitti" on a notification: the camera for that bank row, whatever tab is showing.
         .fullScreenCover(item: Bindable(app).pendingCapture) { capture in CaptureFlow(transactionId: capture.transactionId) }
-        .overlay(alignment: .top) { OfflineBanner() }
         .alert("Poisto epäonnistui", isPresented: Binding(get: { app.removalFailure != nil }, set: { if !$0 { app.removalFailure = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -66,6 +72,9 @@ struct MainTabView: View {
             guard let pending else { return }
             app.pendingRoute = nil
             // A notification tap or a sheet's hand-off: the screen must not open under a sheet.
+            // The assistant's keyboard goes first: left to the closing sheet it stayed over the
+            // screen, tab bar hidden, for 1.5 s (M064).
+            if showAssistant { Keyboard.dismiss() }
             showSettings = false
             showAssistant = false
             showAdd = false
@@ -88,6 +97,8 @@ struct MainTabView: View {
         .onChange(of: app.pendingQuickAction, initial: true) { _, action in
             guard let action else { return }
             app.pendingQuickAction = nil
+            // As for a route above: the assistant's keyboard does not outlive its sheet.
+            if showAssistant { Keyboard.dismiss() }
             showSettings = false
             showAdd = false
             showAssistant = false
@@ -155,6 +166,14 @@ struct MainTabView: View {
             if next.count > (paths[item] ?? []).count, let row = next.last?.perfRow { Perf.beginOpen(row) }
             paths[item] = NavigationStackRule.collapse(next)
         })
+    }
+
+    /// A screen of this tab opening a route from code: onto the tab's path, by a link's rules.
+    private func openRoute(_ item: AppTab) -> OpenRouteAction {
+        OpenRouteAction(stack: "tab.\(item)") { route in
+            let tabPath = path(item)
+            tabPath.wrappedValue += [route]
+        }
     }
 
     /// "Lisää" is an action, not a place: it opens the add sheet and stays on the current tab.

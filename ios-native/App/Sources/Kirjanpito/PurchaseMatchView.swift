@@ -50,13 +50,17 @@ struct PurchaseMatchView: View {
     private func content(_ data: PurchaseMatchData) -> some View {
         if !data.rows.isEmpty {
             Section {
-                Button { Task { await acceptAllSure() } } label: {
-                    if bulkBusy { ProgressView() } else { Text(PurchaseMatch.bulkTitle(sureCount: data.sureCount)) }
+                // Only while a sure pair waits: with none it was the screen's one button and did
+                // nothing ("Ei varmoja maksuja kohdistettavaksi."). The footer line stays alone (X168).
+                if data.sureCount > 0 {
+                    Button { Task { await acceptAllSure() } } label: {
+                        if bulkBusy { ProgressView() } else { Text(PurchaseMatch.bulkTitle(sureCount: data.sureCount)) }
+                    }
+                    .buttonStyle(.primary)
+                    .disabled(bulkBusy || busyId != nil)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
                 }
-                .buttonStyle(.primary)
-                .disabled(bulkBusy || busyId != nil)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
             } footer: {
                 Text("Pankin maksut avoimille ostolaskuille.")
             }
@@ -119,11 +123,13 @@ struct PurchaseMatchView: View {
                 Text(reasons).font(.caption).foregroundStyle(Theme.ink2)
             }
             HStack(spacing: 12) {
+                // Soft, as the row pills elsewhere: filled, it was a second primary beside "Hyväksy
+                // kaikki varmat" for the same payment (M076).
                 Button { Task { await accept(suggestion) } } label: {
-                    if busyId == invoice.id { ProgressView() } else { Text("Hyväksy") }
+                    if busyId == invoice.id { ProgressView() } else { Text("Hyväksy").foregroundStyle(Theme.accentDark) }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
+                .tint(Theme.accentSoft)
                 .disabled(!suggestion.canAccept || busy)
                 .accessibilityLabel("Hyväksy maksu ostolaskulle \(invoice.supplierName)")
                 Button("Hylkää") { Task { await reject(suggestion) } }

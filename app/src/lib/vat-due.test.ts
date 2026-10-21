@@ -5,6 +5,7 @@ import {
   vatAmountToPay,
   vatChangedNote,
   vatChangedSinceFiling,
+  vatChooseStepText,
   vatDueAmount,
   vatDueDate,
   vatDueSecondary,
@@ -85,6 +86,18 @@ describe("what the VAT figure does not contain yet (TF-11)", () => {
 
 describe("filing card sentences (F73)", () => {
   const plain = (value: string) => value.replace(/ /g, " ");
+
+  it("names a month in lower case inside step 2's sentence (U017)", () => {
+    expect(vatChooseStepText(vatDueFor({ kind: "month", year: 2026, month: 9 }).label)).toBe(
+      "Valitse Arvonlisävero ja kausiveroilmoitus kaudelle syyskuu 2026."
+    );
+    expect(vatChooseStepText(vatDueFor({ kind: "quarter", year: 2026, quarter: 3 }).label)).toBe(
+      "Valitse Arvonlisävero ja kausiveroilmoitus kaudelle Q3/2026."
+    );
+    expect(vatChooseStepText(vatDueFor({ kind: "year", year: 2026 }).label)).toBe(
+      "Valitse Arvonlisävero ja kausiveroilmoitus kaudelle 2026."
+    );
+  });
 
   it("never doubles the full stop after a due date like 12.10.", () => {
     expect(vatFileStepText("2026-10-12")).toBe("Kirjoita kentät tältä sivulta ja lähetä ilmoitus viimeistään 12.10.");

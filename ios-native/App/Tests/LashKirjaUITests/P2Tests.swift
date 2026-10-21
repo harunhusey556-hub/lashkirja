@@ -1,6 +1,9 @@
 import XCTest
+import UIKit
 
-/// P2 additions: Spotlight routes, receipt thumbnails, next invoice number.
+/// P2 additions: Spotlight routes, receipt thumbnails, next invoice number, dates in Helsinki, one
+/// sign per figure, Koti's "Näytä kaikki" counts, category labels, and the invoice form's unit pill
+/// and customer card fitting their line.
 final class P2Tests: WalkTestCase {
     /// Reads ids from the demo API the app uses (through the walk proxy), with the demo-seed login.
     func demoJSON(_ path: String) -> [String: Any] {
@@ -25,6 +28,119 @@ final class P2Tests: WalkTestCase {
         return call(get)
     }
 
+    /// POSTs `body` to `path` on the demo API as the `--ci` seed's second account
+    /// (demo-seed.ts ensureCiOnboardingUser), which holds no receipts. The answer's status; 0 when
+    /// nothing answered or the account was refused.
+    @discardableResult
+    func postAsEmptyAccount(_ path: String, _ body: String) -> Int {
+        func call(_ route: String, _ payload: String, token: String?) -> (status: Int, json: [String: Any]) {
+            var req = URLRequest(url: URL(string: "http://127.0.0.1:3998" + route)!)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "content-type")
+            if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+            req.httpBody = payload.data(using: .utf8)
+            var out: (status: Int, json: [String: Any]) = (status: 0, json: [:])
+            let done = expectation(description: route)
+            URLSession.shared.dataTask(with: req) { data, response, _ in
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let json = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+                out = (status: status, json: json)
+                done.fulfill()
+            }.resume()
+            wait(for: [done], timeout: 30)
+            return out
+        }
+        let login = call("/api/auth/token", #"{"email":"onboarding@lashkirja.fi","password":"demo123"}"#, token: nil)
+        guard let token = login.json["token"] as? String else { return 0 }
+        return call(path, body, token: token).status
+    }
+
+    /// M010 (P4): the review queue says once that its receipts wait. Under "Odottaa hyväksyntää · N"
+    /// stood "Odottavat hyväksyntää ennen kirjanpitoon siirtymistä.", and the rows a Täydennä already
+    /// marks were counted again under them in "N kuittia vaatii täydennyksen.".
+    func testH_ReviewSectionSaysItOnce() {
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        let header = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Odottaa hyväksyntää")).firstMatch
+        guard header.waitForExistence(timeout: 20) else {
+            dump(app, "p2h-no-queue"); XCTFail("no Odottaa hyväksyntää on Kuitit: is the seed demo-seed.ts --ci?"); return
+        }
+        waitStill(header)
+        shot("p2h-review-section"); dump(app, "p2h-review-section")
+        let waiting = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "hyväksyntää")).allElementsBoundByIndex.map(\.label)
+        note("INFO P2 H: \(waiting)")
+        XCTAssertEqual(waiting.count, 1, "the review section says more than once that receipts wait: \(waiting)")
+        let footnote = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "vaatii täydennyksen."))
+        XCTAssertEqual(footnote.count, 0, "the review section counts the incomplete rows again under them")
+    }
+
+    /// X042 (P4): Summarajaus cancels with 'Peruuta', as every sheet and question around it does.
+    func testN_SummarajausCancelsWithPeruuta() {
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        let actions = app.navigationBars["Kuitit"].buttons["Toiminnot"].firstMatch
+        guard actions.waitForExistence(timeout: 10) else { XCTFail("no Toiminnot on Kuitit"); return }
+        actions.tap(); taps += 1
+        let filter = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Suodata")).firstMatch
+        guard filter.waitForExistence(timeout: 5) else { dump(app, "p2n-menu"); XCTFail("Toiminnot has no Suodata"); return }
+        filter.tap(); taps += 1
+        let amount = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Summa\u{2026}")).firstMatch
+        guard amount.waitForExistence(timeout: 5) else { dump(app, "p2n-filter"); XCTFail("Suodata has no Summa\u{2026}"); return }
+        amount.tap(); taps += 1
+        let alert = app.alerts["Summarajaus"]
+        guard alert.waitForExistence(timeout: 5) else { dump(app, "p2n-no-alert"); XCTFail("Summa\u{2026} did not ask for the limits"); return }
+        shot("p2n-summarajaus")
+        let buttons = alert.buttons.allElementsBoundByIndex.map(\.label).sorted()
+        XCTAssertEqual(buttons, ["Käytä", "Peruuta"], "the Summarajaus alert's buttons")
+        alert.buttons["Peruuta"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5), "Peruuta left Summarajaus up")
+    }
+
+    /// X043 (P4): a chip alone is not a search. Tulot (0) said "Ei hakua vastaavia kuitteja." with
+    /// nothing narrowed. The demo account has an income receipt (Korttimaksut, in the finished month),
+    /// so this signs in as the seed's second account, which has none. That account's sessions end with
+    /// the test, so the next launch signs in as the demo account again, as after P0 L.
+    func testO_TulotWithoutIncomeSaysEiTuloja() {
+        defer { postAsEmptyAccount("/api/auth/sessions", #"{"scope":"all"}"#) }
+        // Answered here: the first-sign-in questions would cover the tabs.
+        let answers = #"{"entityType":"toiminimi","vatRegistered":false,"vatPeriod":"month","salesTypes":["ripsipalvelut"],"expenseCategories":["tarvikkeet"]}"#
+        guard postAsEmptyAccount("/api/onboarding", answers) == 200 else {
+            XCTFail("onboarding@lashkirja.fi did not take its answers: is the seed demo-seed.ts --ci?"); return
+        }
+        guard openSignOutQuestion() != nil else {
+            dump(app, "p2o-no-question"); XCTFail("Asetukset > Kirjaudu ulos did not ask"); return
+        }
+        app.buttons["confirm-sheet-confirm"].firstMatch.tap(); taps += 1
+        let email = app.textFields.firstMatch
+        let password = app.secureTextFields.firstMatch
+        guard password.waitForExistence(timeout: 20), email.exists else {
+            dump(app, "p2o-no-form"); XCTFail("signing out did not open the sign-in screen"); return
+        }
+        type(email, "onboarding@lashkirja.fi")
+        type(password, "demo123")
+        app.buttons["Kirjaudu sisään"].firstMatch.tap(); taps += 1
+        guard app.tabBars.firstMatch.waitForExistence(timeout: 30) else {
+            dump(app, "p2o-no-tabs"); XCTFail("onboarding@lashkirja.fi did not sign in"); return
+        }
+        probe { _ = savePasswordPrompt.waitForExistence(timeout: 10) }
+        dismissSystemPrompts()
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        // The device keeps the last Kuitit filters for whoever signs in next; a month would narrow the list.
+        let narrowing = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Poista suodatin")).firstMatch
+        for _ in 0..<4 where narrowing.exists {
+            narrowing.tap(); taps += 1
+            _ = narrowing.waitForNonExistence(timeout: 2)
+        }
+        let tulot = app.buttons["receipt-tab-tulo"].firstMatch
+        guard tulot.waitForExistence(timeout: 10) else { dump(app, "p2o-no-chip"); XCTFail("no Tulot chip on Kuitit"); return }
+        tulot.tap(); taps += 1
+        let said = app.staticTexts["Ei tuloja."].waitForExistence(timeout: 20)
+        shot("p2o-tulot-empty"); dump(app, "p2o-tulot-empty")
+        note("INFO P2 O: \(tulot.label)")
+        XCTAssertTrue(said, "Tulot (0) does not say 'Ei tuloja.'")
+        XCTAssertFalse(app.staticTexts["Ei hakua vastaavia kuitteja."].exists, "Tulot (0) with nothing narrowed says nothing matched")
+        // Back on Kaikki: the tab, too, is kept for whoever signs in next.
+        app.buttons["receipt-tab-all"].firstMatch.tap(); taps += 1
+    }
+
     func testA_SpotlightInvoiceRoute() {
         let invoices = demoJSON("/api/invoices")["invoices"] as? [[String: Any]] ?? []
         guard let sent = invoices.first(where: { $0["status"] as? String == "sent" }), let id = sent["id"] as? String,
@@ -32,6 +148,7 @@ final class P2Tests: WalkTestCase {
         openURL("lashkirja://invoice/\(id)")
         let ok = app.staticTexts["Lasku \(number)"].waitForExistence(timeout: 20)
         shot("p2-spotlight-invoice"); check("P2 Spotlight invoice link opens Lasku \(number)", ok)
+        assertNoSystemAlert("p2-spotlight-invoice")
     }
     func testB_SpotlightCustomerRoute() {
         let customers = demoJSON("/api/customers")["customers"] as? [[String: Any]] ?? []
@@ -39,16 +156,617 @@ final class P2Tests: WalkTestCase {
         else { check("P2 demo API lists Anna Asiakas", false); return }
         openURL("lashkirja://customer/\(id)")
         let ok = app.staticTexts["Anna Asiakas"].waitForExistence(timeout: 20)
+        // U027: the name was found under the notification question, which hid the card in the shot.
         shot("p2-spotlight-customer"); check("P2 Spotlight customer link opens Anna Asiakas", ok)
+        assertNoSystemAlert("p2-spotlight-customer")
     }
+    /// U038: only a loaded receipt picture counts. `app.images` also counted the chevrons and the tab
+    /// bar's icons, so the check passed on a list without a single picture. The thumbnails speak to
+    /// XCUITest only under `-LKUITest` (ReceiptThumbnail), so the app is launched again with it.
     func testC_ReceiptThumbnails() {
-        tab("Kirjanpito"); tap("Kuitit"); sleep(6)
+        app.terminate()
+        app.launchArguments.append("-LKUITest")
+        launchSignedIn()
+        dismissSystemPrompts()
+        XCTAssertTrue(selectTab("Kirjanpito"), "Kirjanpito is not selected")
+        tap("Kuitit"); sleep(6)
+        let pictures = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier == %@ AND label == %@", "receipt-thumbnail", "Pienoiskuva"))
+        // Each row fetches its picture once it is on screen.
+        for _ in 0..<30 where pictures.count == 0 { sleep(1) }
         shot("p2-receipts"); dump(app, "p2-receipts")
-        check("P2 Kuitit list shows image thumbnails", app.images.count > 0)
+        check("P2 Kuitit list shows image thumbnails (\(pictures.count))", pictures.count > 0)
+        XCTAssertGreaterThan(pictures.count, 0, "no Kuitit row shows its picture")
+        // U031 (B11): the chips reach the screen's edges; the fourth was cut at the card's ('Kohdistet').
+        assertChipRowEdge("receipt-chips", "P2 C Kuitit")
+
+        // U030, U032 (N3): one primary in the bar, the camera, and Toiminnot for the rest. The
+        // filter and "Valitse kuitteja" were circled icons of the camera's weight, and "Valitse
+        // kuitteja" told VoiceOver it was selected.
+        let bar = app.navigationBars["Kuitit"]
+        let items = barItems(bar)
+        check("P2 C Kuitit bar is Kuvaa kuitti + Toiminnot (\(items))", items.sorted() == ["Kuvaa kuitti", "Toiminnot"])
+        XCTAssertEqual(items.sorted(), ["Kuvaa kuitti", "Toiminnot"], "the Kuitit bar beside Back")
+        let actions = bar.buttons["Toiminnot"].firstMatch
+        guard actions.exists else { dump(app, "p2c-no-toiminnot"); XCTFail("no Toiminnot on Kuitit"); return }
+        actions.tap()
+        let select = app.buttons["Valitse kuitteja"].firstMatch
+        guard select.waitForExistence(timeout: 5) else { dump(app, "p2c-menu"); XCTFail("Toiminnot has no Valitse kuitteja"); return }
+        let filter = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Suodata")).firstMatch
+        XCTAssertTrue(filter.exists, "Toiminnot has no Suodata")
+        XCTAssertFalse(select.isSelected, "Valitse kuitteja reports Selected")
+        shot("p2-receipts-toiminnot")
+        select.tap()
+        let all = app.buttons["Valitse kaikki"].firstMatch.waitForExistence(timeout: 5)
+        let done = bar.buttons["Valmis"].firstMatch.exists
+        check("P2 C Valitse kuitteja shows Valitse kaikki and Valmis", all && done)
+        XCTAssertTrue(all && done, "Valitse kuitteja did not start picking: Valitse kaikki \(all), Valmis \(done)")
+
+        // X132 X147 (B11): Ostolaskut's, Myynti's and the template editor's chip rows reach the
+        // screen's edges too. They ended in a chip cut at the card's edge ('Od', '{era').
+        if done {
+            bar.buttons["Valmis"].firstMatch.tap()
+            _ = app.buttons["Valitse kaikki"].firstMatch.waitForNonExistence(timeout: 5)
+        }
+        bar.buttons["BackButton"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Kirjanpito"].waitForExistence(timeout: 10), "Back from Kuitit did not reach Kirjanpito")
+        tapLabel("label BEGINSWITH %@", "Ostolaskut")
+        if app.navigationBars["Ostolaskut"].waitForExistence(timeout: 10) {
+            assertChipRowEdge("purchase-chips", "P2 C Ostolaskut")
+        } else { XCTFail("Ostolaskut did not open") }
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        assertChipRowEdge("sales-chips", "P2 C Myynti")
+        XCTAssertTrue(selectTab("Koti"), "Koti is not selected")
+        openSettings()
+        guard tap("Sähköpostimallit"), tap("Uusi malli") else { XCTFail("Sähköpostimallit > Uusi malli did not open"); return }
+        assertChipRowEdge("template-placeholders", "P2 C Uusi malli")
+        // The section gives up its side margins for the row and gives them back to its header: read
+        // beside the header above it, for the review.
+        let viesti = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Viesti")).firstMatch
+        let placeholders = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Paikkamerkit")).firstMatch
+        if viesti.exists && placeholders.exists {
+            note("INFO P2 C Uusi malli headers: Viesti x \(viesti.frame.minX), Paikkamerkit x \(placeholders.frame.minX)")
+        }
+        shot("p2-template-placeholders")
     }
+
+    /// U038: the caption is the server's next number, and the form opens on the Helsinki day with the
+    /// due date 14 days on. The check read only "Seuraava laskunumero", so it passed while the picker
+    /// drew 17.10.2026 above "Eräpäivä 1.11.2026 · 14 pv" on the UTC simulator.
     func testD_NextInvoiceNumber() {
+        let next = demoJSON("/api/invoices/sequence")["nextNumber"] as? Int
         tab("Myynti"); tap("Uusi lasku"); sleep(4)
         let caption = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Seuraava laskunumero'")).firstMatch
         shot("p2-next-number"); check("P2 new invoice shows \(caption.exists ? caption.label : "no next number")", caption.exists)
+        let expected = next.map { "Seuraava laskunumero: \($0)" } ?? "no sequence from the demo API"
+        check("P2 the next number is the server's (\(expected))", caption.exists && caption.label == expected)
+        XCTAssertEqual(caption.exists ? caption.label : nil, expected)
+        expectFormDates(issue: HelsinkiDay.today(), "P2 D")
+    }
+
+    /// U012 U025 U063 U090 U102: a day shown or picked is the Helsinki day in any device zone. At
+    /// Etc/GMT+12 Helsinki midnight always drew as the day before ('Laskun päivä 17.10.2026' above
+    /// 'Eräpäivä 1.11.2026 · 14 pv'), and a picked day was saved one day late.
+    func testE_InvoiceDatesFollowHelsinki() {
+        relaunch(zone: "Etc/GMT+12")
+        let today = HelsinkiDay.today()
+        let next = demoJSON("/api/invoices/sequence")["nextNumber"] as? Int
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        tap("Uusi lasku")
+        guard app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15) else { XCTFail("Uusi lasku did not open"); return }
+        waitEnabled(app.buttons["Luo lasku"].firstMatch)
+        shot("p2e-new-invoice")
+        expectFormDates(issue: today, "P2 E")
+
+        // The next day, in the month the calendar opens on (the day before on a month's last day).
+        let picked = today.adding(1).month == today.month ? today.adding(1) : today.adding(-1)
+        guard pick(picked) else { return }
+        shot("p2e-picked")
+        expectFormDates(issue: picked, "P2 E picked")
+
+        // Saved as a draft: the server has the day that was picked, and the due date from it.
+        guard createInvoice() else { return }
+        let created = next.map { "Lasku \($0)" } ?? "Lasku ?"
+        let opened = app.navigationBars[created].waitForExistence(timeout: 20)
+        check("P2 E the created invoice opens (\(created))", opened)
+        XCTAssertTrue(opened, "\(created) did not open after Luo lasku")
+        let invoices = demoJSON("/api/invoices")["invoices"] as? [[String: Any]] ?? []
+        let draft = invoices.first { next != nil && ($0["number"] as? Int) == next }
+        let issue = (draft?["issueDate"] as? String).map { String($0.prefix(10)) }
+        let due = (draft?["dueDate"] as? String).map { String($0.prefix(10)) }
+        check("P2 E the draft's issueDate is \(picked.iso) (\(issue ?? "none"))", issue == picked.iso)
+        XCTAssertEqual(issue, picked.iso, "the draft's issueDate")
+        XCTAssertEqual(due, picked.adding(14).iso, "the draft's dueDate")
+
+        // The recurring editor's 'Alkaa' opens on the Helsinki day too.
+        if opened { back(created) }
+        tap("Toistuvat laskut")
+        let newSchedule = app.buttons["Uusi toistuva lasku"].firstMatch
+        if newSchedule.waitForExistence(timeout: 15) {
+            newSchedule.tap(); taps += 1
+            let sheet = app.navigationBars["Uusi toistuva lasku"]
+            XCTAssertTrue(sheet.waitForExistence(timeout: 10), "Uusi toistuva lasku did not open")
+            let start = shownDay(app.datePickers.firstMatch)
+            shot("p2e-recurring")
+            check("P2 E Alkaa is \(today.shown) (shows \(start ?? "nothing"))", start == today.shown)
+            XCTAssertEqual(start, today.shown, "Alkaa")
+            sheet.buttons["Peruuta"].tap()
+            if app.buttons["Hylkää muutokset"].waitForExistence(timeout: 2) { app.buttons["Hylkää muutokset"].tap() }
+            XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Uusi toistuva lasku did not close")
+            // Toistuvat laskut is on Myynti's path now: back to the list the payment part opens from.
+            back("Toistuvat laskut")
+            _ = app.navigationBars["Toistuvat laskut"].waitForNonExistence(timeout: 10)
+        } else {
+            XCTFail("no Uusi toistuva lasku on Toistuvat laskut")
+        }
+
+        // Kirjaa maksu: from 13.00 Helsinki time a device at Kiritimati (UTC+14) is on the next day,
+        // before it one at Etc/GMT+12 on the day before, so the device's own day is never Helsinki's.
+        let zone = HelsinkiDay.hour() >= 13 ? "Pacific/Kiritimati" : "Etc/GMT+12"
+        if zone != "Etc/GMT+12" { relaunch(zone: zone) }
+        // From Myynti, not Koti: the draft this test just created joins Koti's first five tasks and
+        // pushes the overdue row under "Näytä enemmän" (run 39180204687).
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        // The row's badge says "Myöhässä" and its line the due date; the line no longer says
+        // "myöhässä" too (N6, M100). Not the late chip or the bar, which name no due date.
+        guard tapLabel("label CONTAINS 'Myöhässä' AND label CONTAINS %@", "· eräpäivä") else { XCTFail("no overdue invoice on Myynti"); return }
+        let invoiceBar = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
+        let actions = invoiceBar.buttons["Toiminnot"].firstMatch
+        guard invoiceBar.waitForExistence(timeout: 20), actions.waitForExistence(timeout: 30) else {
+            dump(app, "p2e-no-invoice"); XCTFail("the overdue invoice did not open with Toiminnot"); return
+        }
+        let number = Int(invoiceBar.identifier.dropFirst("Lasku ".count))
+        // The primary or a Toiminnot item (N6): the Maksu tile is gone.
+        guard invoiceAction("Kirjaa maksu") else { dump(app, "p2e-no-pay"); XCTFail("the overdue invoice offers no Kirjaa maksu"); return }
+        let sheet = app.navigationBars["Kirjaa maksu"]
+        guard sheet.waitForExistence(timeout: 10) else { XCTFail("Kirjaa maksu did not open"); return }
+        let shown = shownDay(app.datePickers.firstMatch)
+        shot("p2e-payment")
+        let helsinki = HelsinkiDay.today()
+        check("P2 E Maksupäivä at \(zone) is \(helsinki.shown) (shows \(shown ?? "nothing"))", shown == helsinki.shown)
+        XCTAssertEqual(shown, helsinki.shown, "Maksupäivä at \(zone)")
+        // One euro, not the open amount the sheet fills in: Lasku 2 is the seed's only overdue
+        // invoice, and the classes after this one in a full run (P3 B, P5) still open it.
+        let amount = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@", "Summa", "Summa")).firstMatch
+        guard amount.waitForExistence(timeout: 5) else { dump(app, "p2e-no-amount"); XCTFail("no Summa in Kirjaa maksu"); return }
+        let filled = (amount.value as? String) ?? ""
+        // The sum sits at the trailing edge, as on the purchase sheet: type()'s centre tap put the caret before it.
+        amount.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5)).withOffset(CGVector(dx: -2, dy: 0)).tap(); taps += 1
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: amount)], timeout: 2)
+        amount.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: filled.count + 2) + "1")
+        XCTAssertEqual(amount.value as? String, "1", "Summa before Tallenna")
+        sheet.buttons["Tallenna"].tap(); taps += 1
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 20), "Kirjaa maksu did not close after Tallenna")
+        let listed = demoJSON("/api/invoices")["invoices"] as? [[String: Any]] ?? []
+        guard let id = listed.first(where: { number != nil && ($0["number"] as? Int) == number })?["id"] as? String else {
+            XCTFail("the demo API does not list \(invoiceBar.identifier)"); return
+        }
+        let payments = (demoJSON("/api/invoices/\(id)")["invoice"] as? [String: Any])?["payments"] as? [[String: Any]] ?? []
+        let paid = (payments.last?["paidDate"] as? String).map { String($0.prefix(10)) }
+        let shownIso = shown.flatMap(HelsinkiDay.init(shown:))?.iso
+        check("P2 E the saved paidDate is the day the picker showed (\(paid ?? "none") vs \(shownIso ?? "none"))", paid != nil && paid == shownIso)
+        XCTAssertEqual(paid, shownIso, "paidDate against the day Maksupäivä showed")
+    }
+
+    /// X001 X038 X068 X080: one figure, one sign, on every screen. Money out reads with a minus and
+    /// money back without. The seed's pending credit note Audit Hyvitys Odottaa Oy (booked −18,90 €)
+    /// is 18,90 € on Koti, in Kuitit's queue and on its page. The expense ABC Prisma Kotka and its
+    /// bank row KSO ABC Sahkonlataus are −9,43 € in the list, on the page, as the page's bank row and
+    /// in "Valitse pankkitapahtuma".
+    func testK_AmountsAgree() {
+        let refund = "18,90\u{00A0}€", expense = "\u{2212}9,43\u{00A0}€"
+
+        let party = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Audit Hyvitys Odottaa Oy", "Audit Hyvitys Odottaa Oy,")).firstMatch
+        let koti = party.waitForExistence(timeout: 20) ? moneyBeside(party) : nil
+
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        let queueRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Audit Hyvitys Odottaa Oy,")).firstMatch
+        let queue = queueRow.waitForExistence(timeout: 15) && reveal(queueRow) ? money(in: queueRow.label) : nil
+        var page: String?
+        if queue != nil {
+            queueRow.tap(); taps += 1
+            if app.navigationBars["Kuitti"].buttons["Toiminnot"].waitForExistence(timeout: 15) { page = heroAmount() }
+            shot("p2k-credit-note")
+            back("Kuitti")
+        }
+
+        // Kuitit's rows are drawn as they scroll into view: looked for by scrolling, not by waiting.
+        let listRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "ABC Prisma Kotka,")).firstMatch
+        let list = reveal(listRow, scrolls: 8) ? money(in: listRow.label) : nil
+        var abcPage: String?, bankRow: String?, picker: String?
+        if list != nil {
+            listRow.tap(); taps += 1
+            if app.navigationBars["Kuitti"].buttons["Toiminnot"].waitForExistence(timeout: 15) { abcPage = heroAmount() }
+            let candidate = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "KSO ABC Sahkonlataus")).firstMatch
+            if reveal(candidate) { bankRow = money(in: candidate.label) }
+            shot("p2k-expense")
+            let other = app.buttons["Valitse muu pankkitapahtuma"].firstMatch
+            if reveal(other) {
+                other.tap(); taps += 1
+                let sheet = app.navigationBars["Valitse pankkitapahtuma"]
+                // The page under the sheet lists the same row; only the sheet's can be tapped.
+                let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "KSO ABC Sahkonlataus"))
+                if sheet.waitForExistence(timeout: 10), let row = firstHittable(rows, timeout: 20) { picker = money(in: row.label) }
+                shot("p2k-picker")
+                if sheet.buttons["Sulje"].exists { sheet.buttons["Sulje"].tap() }
+            }
+        }
+
+        let seen = "Koti \(koti ?? "-"), queue \(queue ?? "-"), page \(page ?? "-"); list \(list ?? "-"), page \(abcPage ?? "-"), bank row \(bankRow ?? "-"), picker \(picker ?? "-")"
+        let agree = [koti, queue, page].allSatisfy { $0 == refund } && [list, abcPage, bankRow, picker].allSatisfy { $0 == expense }
+        if !agree { dump(app, "p2k-amounts") }
+        check("P2 K one sign per figure: \(seen)", agree)
+        XCTAssertEqual(koti, refund, "Koti's task row for the pending credit note")
+        XCTAssertEqual(queue, refund, "Kuitit's queue row for the pending credit note")
+        XCTAssertEqual(page, refund, "the pending credit note's page")
+        XCTAssertEqual(list, expense, "Kuitit's row for ABC Prisma Kotka")
+        XCTAssertEqual(abcPage, expense, "ABC Prisma Kotka's page")
+        XCTAssertEqual(bankRow, expense, "ABC Prisma Kotka's bank row KSO ABC Sahkonlataus")
+        XCTAssertEqual(picker, expense, "KSO ABC Sahkonlataus in Valitse pankkitapahtuma")
+    }
+
+    /// X005: Koti says how many of a kind there are. A kind with more than the three rows the server
+    /// sends gets "Näytä kaikki (N)", N being the API's itemTotals, and it opens the bank rows that
+    /// need action (Q1).
+    func testL_KotiShowAllMatchesTheAPI() {
+        let today = HelsinkiDay.today()
+        let dashboard = demoJSON(String(format: "/api/dashboard?month=%04d-%02d", today.year, today.month))
+        let totals = dashboard["itemTotals"] as? [String: Int] ?? [:]
+        let sent = (dashboard["items"] as? [[String: Any]] ?? []).filter { $0["kind"] as? String == "missing_receipt" }.count
+        guard let total = totals["missing_receipt"], total > sent else {
+            XCTFail("the CI seed should leave more bank rows without a receipt than the \(sent) Koti is sent: \(totals)"); return
+        }
+        let title = "Näytä kaikki (\(total))"
+        // The row reads as one label or as its two texts, by iOS version.
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+        let kind = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Pankkitapahtumat ilman kuittia")).firstMatch
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä enemmän")).firstMatch
+        // Koti shows five tasks at first; the row may be behind "Näytä enemmän".
+        if !row.waitForExistence(timeout: 20), more.exists, reveal(more) { more.tap(); taps += 1 }
+        let shown = row.waitForExistence(timeout: 5) && reveal(row) && kind.exists
+        if !shown { dump(app, "p2l-koti-show-all") }
+        check("P2 L Koti shows '\(title)' for the bank rows without a receipt", shown)
+        XCTAssertTrue(shown, "Koti has no '\(title) · Pankkitapahtumat ilman kuittia' (itemTotals \(totals))")
+        guard shown else { return }
+        row.tap(); taps += 1
+        let needsAction = app.segmentedControls.firstMatch.buttons["Vaatii toimia"]
+        let opened = app.navigationBars["Pankki"].waitForExistence(timeout: 15) && needsAction.waitForExistence(timeout: 10) && needsAction.isSelected
+        shot("p2l-show-all")
+        check("P2 L Näytä kaikki opens Pankki on Vaatii toimia", opened)
+        XCTAssertTrue(opened, "Näytä kaikki did not open Pankki on Vaatii toimia")
+    }
+
+    /// X081: Raportit's Luokittain names a category as Kuitit does ('Tarvikkeet & ostot'), not by
+    /// the id it is stored under ('tarvikkeet').
+    func testM_RaportitCategoryLabels() {
+        XCTAssertTrue(selectTab("Raportit"), "Raportit is not selected")
+        // The year's figures first: the categories come in the same answer, at the bottom.
+        _ = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", Self.moneyPattern)).firstMatch.waitForExistence(timeout: 20)
+        let label = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Tarvikkeet & ostot")).firstMatch
+        let shown = reveal(label, scrolls: 10)
+        let raw = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "tarvikkeet")).firstMatch
+        shot("p2m-luokittain")
+        if !shown { dump(app, "p2m-luokittain") }
+        check("P2 M Luokittain reads Tarvikkeet & ostot \(shown), no raw id \(!raw.exists)", shown && !raw.exists)
+        XCTAssertTrue(shown, "Raportit's Luokittain has no 'Tarvikkeet & ostot'")
+        XCTAssertFalse(raw.exists, "Raportit shows the stored id: \(raw.exists ? raw.label : "")")
+    }
+
+    /// A money figure as the app prints it: "−9,43 €", "1 234,50 €" (U+2212 minus, no-break spaces).
+    private static let moneyPattern = "[+\u{2212}-]?[0-9][0-9\u{00A0} ]*,[0-9]{2}\u{00A0}€"
+
+    /// The first money figure in a label ("ABC Prisma Kotka, 16.10.2026 · Tarvikkeet & ostot, −9,43 €").
+    private func money(in label: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: Self.moneyPattern),
+              let match = regex.firstMatch(in: label, range: NSRange(label.startIndex..., in: label)),
+              let range = Range(match.range, in: label) else { return nil }
+        return String(label[range])
+    }
+
+    /// The figure on `anchor`'s row: in its label when the row reads as one element, else the money
+    /// text right of it nearest its middle.
+    private func moneyBeside(_ anchor: XCUIElement) -> String? {
+        if let inLabel = money(in: anchor.label) { return inLabel }
+        let frame = anchor.frame
+        let texts = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", Self.moneyPattern)).allElementsBoundByIndex
+        return texts
+            .filter { $0.frame.minX >= frame.maxX && abs($0.frame.midY - frame.midY) < 40 }
+            .min { abs($0.frame.midY - frame.midY) < abs($1.frame.midY - frame.midY) }?
+            .label
+    }
+
+    /// A receipt page's figure: the tallest money text on the screen.
+    private func heroAmount() -> String? {
+        app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", Self.moneyPattern)).allElementsBoundByIndex
+            .max { $0.frame.height < $1.frame.height }?
+            .label
+    }
+
+    /// U013 U026 U092 U103: Rivi 1's unit pill reads 'kpl ⌃⌄' on the stepper's line. The row gave the
+    /// stepper and the pill an equal share narrower than the stepper, and the pill became a tall
+    /// empty capsule, about 27 x 73 pt, with only its chevron showing.
+    func testF_UnitMenuFitsTheLine() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        guard tap("Uusi lasku"), app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15) else {
+            XCTFail("Uusi lasku did not open"); return
+        }
+        let unit = app.buttons["Yksikkö kpl"].firstMatch
+        guard reveal(unit) else { dump(app, "p2f-no-unit"); XCTFail("Rivi 1 shows no Yksikkö kpl"); return }
+        waitStill(unit)
+        shot("p2f-unit-menu")
+        let pill = unit.frame
+        XCTAssertLessThanOrEqual(pill.height, 44, "the unit pill is \(pill.height) pt tall")
+        XCTAssertGreaterThanOrEqual(pill.width, 40, "the unit pill is \(pill.width) pt wide")
+        let plus = app.buttons["Lisää määrää"].firstMatch
+        let price = app.textFields["Rivin 1 à-hinta euroina"].firstMatch
+        guard plus.exists, price.exists else { dump(app, "p2f-row"); XCTFail("Rivi 1 has no Lisää määrää or no price field"); return }
+        XCTAssertFalse(overlaps(pill, plus.frame), "the unit pill \(pill) lies over Lisää määrää \(plus.frame)")
+        XCTAssertFalse(overlaps(pill, price.frame), "the unit pill \(pill) lies over the price field \(price.frame)")
+    }
+
+    /// X026: on Lasku 4 > Muokkaa the Asiakas card shows Kauneus Oy's Y-tunnus and e-mail whole. On one
+    /// line beside "Vaihda" the e-mail was cut to 'laskut@kaune…'. Text the audit finds cut on the
+    /// invoice under the form is that screen's, not the card's. Wrapped whole on two lines the detail
+    /// still drew the audit's guess for larger sizes (p2j-customer-card, run 39322642358): that is B5's.
+    func testJ_CustomerCardFits() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        // The seed's draft (demo-seed.ts): Kauneus Oy, Y-tunnus 2454577-7, laskut@kauneus.example.
+        guard tapLabel("label MATCHES %@", ".*Lasku 4(\\D.*)?"), app.navigationBars["Lasku 4"].waitForExistence(timeout: 20) else {
+            dump(app, "p2j-no-draft"); XCTFail("Lasku 4 did not open from Myynti"); return
+        }
+        let under = clippedTexts()
+        // A Toiminnot item on the draft (N6): the Muokkaa tile is gone.
+        guard invoiceAction("Muokkaa"), app.navigationBars["Muokkaa laskua"].waitForExistence(timeout: 15) else {
+            dump(app, "p2j-no-form"); XCTFail("Muokkaa did not open Muokkaa laskua"); return
+        }
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Y-tunnus 2454577-7")).firstMatch
+        guard card.waitForExistence(timeout: 15) else { dump(app, "p2j-no-card"); XCTFail("the form has no Asiakas card for Kauneus Oy"); return }
+        waitStill(card)
+        shot("p2j-customer-card")
+        // What the audit says for a real cut is unseen, so the line is measured too: whole, the caption
+        // wraps to two lines (lineLimit 2); cut, it was one line beside Vaihda.
+        let detail = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Y-tunnus 2454577-7")).firstMatch
+        XCTAssertGreaterThanOrEqual(detail.frame.height, UIFont.preferredFont(forTextStyle: .caption1).lineHeight * 1.5, "the Y-tunnus/e-mail line is on one line beside Vaihda, where it was cut: \(detail.frame)")
+        let cut = clippedTexts(within: card.frame).filter { !under.contains($0) }
+        XCTAssertEqual(cut, [], "text cut on the Asiakas card")
+    }
+
+    /// X037 X053 X062 X070 X082 (B12): the pending row of "Odottaa hyväksyntää" shows the whole
+    /// vendor and a one-line detail. The 'Tarkista' pill beside the amount cut the CI seed's
+    /// 'Audit Hyvitys Odottaa Oy' to 'Audit Hyvitys Odott…' and wrapped its '· Tarvikkeet & ostot'.
+    func testI_ReviewRowFits() throws {
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Audit Hyvitys Odottaa Oy,")).firstMatch
+        guard row.waitForExistence(timeout: 20) else {
+            dump(app, "p2i-no-row"); XCTFail("no Audit Hyvitys Odottaa Oy in Odottaa hyväksyntää: is the seed demo-seed.ts --ci?"); return
+        }
+        waitStill(row)
+        shot("p2i-review-row"); dump(app, "p2i-review-row")
+        let header = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Odottaa hyväksyntää")).firstMatch
+        let rows = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@ OR label ENDSWITH %@", ", Tarkista", ", Täydennä"))
+        var card = row.frame
+        if header.exists { card = card.union(header.frame) }
+        for other in rows.allElementsBoundByIndex where other.exists { card = card.union(other.frame) }
+
+        // No text in the card is cut at this size. The audit also guesses at larger text sizes
+        // ("may be clipped at larger Dynamic Type sizes"); those belong to B5 and are noted only.
+        var clipped: [String] = []
+        try app.performAccessibilityAudit(for: .textClipped) { issue in
+            guard let element = issue.element, element.exists, element.frame.intersects(card) else { return true }
+            let text = "\(element.label): \(issue.compactDescription) – \(issue.detailedDescription)"
+            if text.localizedCaseInsensitiveContains("larger") {
+                self.note("INFO P2 I audit at other sizes: \(text)")
+                return true
+            }
+            clipped.append(text)
+            return false
+        }
+        check("P2 I no text cut in Odottaa hyväksyntää (\(clipped))", clipped.isEmpty)
+
+        // The detail ("<date> · <category>") is one caption line.
+        let detail = row.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", " · ")).firstMatch
+        let caption = UIFont.preferredFont(forTextStyle: .caption1).lineHeight
+        XCTAssertTrue(detail.exists, "the row shows no '<date> · <category>' line")
+        check("P2 I the detail is one line (\(detail.frame.height) pt, caption \(caption) pt)", detail.frame.height <= caption * 1.3)
+        XCTAssertLessThanOrEqual(detail.frame.height, caption * 1.3, "the detail takes \(detail.frame.height) pt: more than one caption line (\(caption) pt)")
+
+        // The pill sits under the amount, inside the row.
+        let pill = row.staticTexts["Tarkista"].firstMatch
+        let amount = row.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "€")).firstMatch
+        XCTAssertTrue(pill.exists && amount.exists, "the row has no Tarkista pill or no amount")
+        note("INFO p2i-geometry: row \(row.frame), detail \(detail.frame), amount \(amount.frame), pill \(pill.frame)")
+        XCTAssertTrue(row.frame.contains(pill.frame), "the pill \(pill.frame) is outside its row \(row.frame)")
+        XCTAssertGreaterThanOrEqual(pill.frame.minY, amount.frame.maxY - 1, "the pill \(pill.frame) is not under the amount \(amount.frame)")
+    }
+
+    /// A fresh launch with the device in `zone`; the simulator itself runs in UTC.
+    private func relaunch(zone: String) {
+        app.terminate()
+        app.launchEnvironment["TZ"] = zone
+        launchSignedIn()
+        dismissSystemPrompts()
+        note("INFO P2 device zone \(zone)")
+    }
+
+    /// The invoice form's two dates as drawn: 'Laskun päivä', and the footer under 'Maksuaika' (14 pv).
+    private func expectFormDates(issue: HelsinkiDay, _ step: String) {
+        let shown = shownDay(app.datePickers.firstMatch)
+        check("\(step) Laskun päivä is \(issue.shown) (shows \(shown ?? "nothing"))", shown == issue.shown)
+        XCTAssertEqual(shown, issue.shown, "\(step): Laskun päivä")
+        let footer = "Eräpäivä \(issue.adding(14).shown) · 14 pv"
+        let due = app.staticTexts[footer].waitForExistence(timeout: 5)
+        check("\(step) footer reads \(footer)", due)
+        XCTAssertTrue(due, "\(step): no '\(footer)' under Maksuaika")
+    }
+
+    /// The day a compact DatePicker shows: its button's value ("18.10.2026").
+    private func shownDay(_ picker: XCUIElement) -> String? {
+        guard picker.waitForExistence(timeout: 10) else { return nil }
+        return picker.buttons.firstMatch.value as? String
+    }
+
+    /// Picks `day` in the 'Laskun päivä' calendar, then closes the calendar.
+    private func pick(_ day: HelsinkiDay) -> Bool {
+        app.datePickers.firstMatch.buttons.firstMatch.tap(); taps += 1
+        let patterns = day.calendarLabelPatterns()
+        let cell = app.buttons.matching(NSPredicate(format: "label MATCHES[c] %@ OR label MATCHES[c] %@ OR label MATCHES[c] %@ OR label == %@",
+                                                    patterns[0], patterns[1], patterns[2], "\(day.day)")).firstMatch
+        guard cell.waitForExistence(timeout: 10) else {
+            dump(app, "p2e-calendar"); XCTFail("no \(day.shown) in the Laskun päivä calendar"); return false
+        }
+        cell.tap(); taps += 1
+        // A date-only calendar closes by itself once a day is picked; only if it stays is it closed
+        // with a tap on the title bar. The dismiss region's centre lies over the Maksuaika segments,
+        // and a tap sent there as the calendar closed itself chose "7 pv" (run 39164873388).
+        let outside = app.descendants(matching: .any)["PopoverDismissRegion"]
+        if !outside.waitForNonExistence(timeout: 3) { app.navigationBars["Uusi lasku"].tap() }
+        _ = outside.waitForNonExistence(timeout: 5)
+        return true
+    }
+
+    /// Anna Asiakas and one priced line, then Luo lasku.
+    private func createInvoice() -> Bool {
+        app.buttons["Valitse asiakas"].firstMatch.tap(); taps += 1
+        let picker = app.navigationBars["Valitse asiakas"]
+        guard picker.waitForExistence(timeout: 10) else { XCTFail("Valitse asiakas did not open"); return false }
+        // The Myynti rows under the sheets carry the same name; only the sheet's row can be tapped.
+        guard let anna = firstHittable(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Anna Asiakas")), timeout: 10) else {
+            dump(app, "p2e-customers"); XCTFail("no Anna Asiakas to pick"); return false
+        }
+        anna.tap(); taps += 1
+        _ = picker.waitForNonExistence(timeout: 10)
+        let description = app.textViews["Rivin 1 kuvaus"].exists ? app.textViews["Rivin 1 kuvaus"] : app.textFields["Rivin 1 kuvaus"]
+        type(description, "Ripsienpidennys")
+        // The keyboard's bar lies over the price field under the description, so a tap on it never
+        // focused it (run 39175542996): the keyboard goes first and the field is brought into view.
+        if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap() }
+        let price = app.textFields["Rivin 1 à-hinta euroina"]
+        if !price.isHittable { app.swipeUp() }
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: price)], timeout: 5)
+        type(price, "10")
+        if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap() }
+        let create = app.buttons["Luo lasku"].firstMatch
+        guard create.waitForExistence(timeout: 5) else { XCTFail("no Luo lasku"); return false }
+        create.tap(); taps += 1
+        return true
+    }
+
+    /// Two frames share an area, not only an edge.
+    private func overlaps(_ a: CGRect, _ b: CGRect) -> Bool {
+        let shared = a.intersection(b)
+        return !shared.isNull && shared.width > 0.5 && shared.height > 0.5
+    }
+
+    /// The texts the textClipped audit finds cut on the screen at this text size (within `area` when one
+    /// is given), by label and what the audit said; the audit itself records nothing. Its guesses at
+    /// larger sizes are only noted, as in testI: they belong to B5. StabilityTests has its own copy,
+    /// without the area.
+    private func clippedTexts(within area: CGRect? = nil) -> [String] {
+        let found = ClippedTexts()
+        do {
+            try app.performAccessibilityAudit(for: .textClipped) { issue in
+                if let area {
+                    guard let frame = issue.element?.frame, self.overlaps(frame, area) else { return true }
+                }
+                let label = issue.element?.label ?? ""
+                let text = "\(label.isEmpty ? issue.compactDescription : label): \(issue.detailedDescription)"
+                if "\(issue.compactDescription) \(issue.detailedDescription)".localizedCaseInsensitiveContains("larger") {
+                    self.note("INFO P2 audit at larger sizes: \(text)")
+                } else {
+                    found.labels.append(text)
+                }
+                return true
+            }
+        } catch {
+            XCTFail("the textClipped audit did not run: \(error)")
+        }
+        return found.labels
+    }
+
+    private func waitEnabled(_ element: XCUIElement) {
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: element)
+        _ = XCTWaiter().wait(for: [enabled], timeout: 15)
+    }
+
+    private func firstHittable(_ query: XCUIElementQuery, timeout: TimeInterval) -> XCUIElement? {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let element = query.allElementsBoundByIndex.first(where: { $0.isHittable }) { return element }
+            usleep(250_000)
+        } while Date() < deadline
+        return nil
+    }
+
+    /// The bar's Back button, as the owner taps it.
+    private func back(_ title: String) {
+        let bar = app.navigationBars[title]
+        let button = bar.buttons["BackButton"].exists ? bar.buttons["BackButton"] : bar.buttons.element(boundBy: 0)
+        button.tap(); taps += 1
+    }
+}
+
+/// What an audit's handler found; a class, so the handler fills it in place.
+private final class ClippedTexts {
+    var labels: [String] = []
+}
+
+/// A calendar day in Helsinki, the day the app and the server count in.
+private struct HelsinkiDay: Equatable {
+    let year: Int
+    let month: Int
+    let day: Int
+
+    static func today() -> HelsinkiDay {
+        let c = calendar(helsinki).dateComponents([.year, .month, .day], from: Date())
+        return HelsinkiDay(year: c.year ?? 0, month: c.month ?? 0, day: c.day ?? 0)
+    }
+
+    static func hour() -> Int { calendar(helsinki).component(.hour, from: Date()) }
+
+    /// "18.10.2026", as the app prints a day.
+    var shown: String { "\(day).\(month).\(year)" }
+    /// "2026-10-18", as the API sends one.
+    var iso: String { String(format: "%04d-%02d-%02d", year, month, day) }
+
+    func adding(_ days: Int) -> HelsinkiDay {
+        let utc = Self.calendar(TimeZone(identifier: "UTC")!)
+        guard let start = utc.date(from: DateComponents(year: year, month: month, day: day)),
+              let date = utc.date(byAdding: .day, value: days, to: start) else { return self }
+        let c = utc.dateComponents([.year, .month, .day], from: date)
+        return HelsinkiDay(year: c.year ?? 0, month: c.month ?? 0, day: c.day ?? 0)
+    }
+
+    /// The calendar's label for this day, in Finnish or English ("sunnuntai 19. lokakuuta",
+    /// "Sunday, October 19", "Sunday 19 October"), as patterns that do not take 19 for 9.
+    func calendarLabelPatterns() -> [String] {
+        let fi = monthName("fi_FI"), en = monthName("en_US")
+        return ["(.*\\D)?\(day)\\. \(fi).*", ".*\(en) \(day)(\\D.*)?", "(.*\\D)?\(day) \(en).*"]
+    }
+
+    private func monthName(_ locale: String) -> String {
+        let utc = TimeZone(identifier: "UTC")!
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: locale)
+        formatter.timeZone = utc
+        formatter.dateFormat = "MMMM"
+        return Self.calendar(utc).date(from: DateComponents(year: year, month: month, day: day)).map(formatter.string(from:)) ?? ""
+    }
+
+    private static let helsinki = TimeZone(identifier: "Europe/Helsinki")!
+
+    private static func calendar(_ zone: TimeZone) -> Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = zone
+        return c
+    }
+}
+
+extension HelsinkiDay {
+    /// "18.10.2026" back to a day; nil for anything else.
+    init?(shown: String) {
+        let parts = shown.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        self.init(year: parts[2], month: parts[1], day: parts[0])
     }
 }

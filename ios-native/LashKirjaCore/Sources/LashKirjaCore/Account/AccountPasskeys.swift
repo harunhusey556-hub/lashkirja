@@ -23,6 +23,36 @@ public struct PasskeyStatus: Decodable, Sendable {
     public let native: Bool
 }
 
+/// Pääsyavaimet's two reads: the saved passkeys, and whether this server can make one for the app.
+public struct PasskeyScreen: Sendable, Equatable {
+    public static let listPath = "/api/auth/passkey"
+    public static let statusPath = "/api/auth/passkey/status"
+
+    public var passkeys: [Passkey]
+    /// False only when the server answered that passkeys are not set up for the app (`native`).
+    public let canCreate: Bool
+
+    public init(passkeys: [Passkey], canCreate: Bool) {
+        self.passkeys = passkeys
+        self.canCreate = canCreate
+    }
+
+    /// Both reads go out together, and the screen gets both answers or the failure: drawn one after
+    /// the other, the list came first and the create row popped in under it (M057). A failure of
+    /// either (offline, a 5xx, cancelled) is the error, never "cannot create here", which hid the
+    /// create button behind a note that the server is not set up (G001).
+    public static func load(api: APIClient) async -> Result<PasskeyScreen, Error> {
+        async let list = Result<PasskeyList, Error>(asyncCatching: { try await api.get(PasskeyScreen.listPath) })
+        async let status = Result<PasskeyStatus, Error>(asyncCatching: { try await api.get(PasskeyScreen.statusPath) })
+        let answers = await (list, status)
+        do {
+            return .success(PasskeyScreen(passkeys: try answers.0.get().passkeys, canCreate: try answers.1.get().native))
+        } catch {
+            return .failure(error)
+        }
+    }
+}
+
 /// `PATCH /api/auth/passkey/[id]`.
 public struct PasskeyRenameBody: Encodable, Sendable {
     public let deviceName: String

@@ -51,9 +51,12 @@ scripts/sim/motion-audit.sh --collect test01_Koti # a run already started: wait,
   `scripts/sim/motion-audit.py`, which writes `sim-shots/motion/motion-report.md` and `.json`, with a
   contact sheet PNG per step (red frame = the frame a check flagged).
 - Each step asks the host for a video through the walk's file channel: `<name>.rec` holds the
-  seconds, `run-ui.sh` runs `simctl io recordVideo` and writes `<name>.recording` (start and stop
-  epoch) once the recording really runs; the test taps only then. `steps.json` lists every step
-  (from, action, to, kind, expected result, tap time).
+  longest it may run (30 s), `run-ui.sh` runs `simctl io recordVideo` and writes `<name>.recording`
+  (start and stop epoch) once the recording really runs; the test taps only then, and ends the
+  recording with `<name>.stop` once the step's result is filmed (its `seconds` past the action, and
+  past a sheet's `MARK presented`). `steps.json` lists every step (from, action, to, kind, expected
+  result, when its element was found, the tap went out and the app's probe saw the touch), and
+  `xcui.log` the stretches XCUITest drove the app, so a main-thread stall can be told apart.
 - The app, launched with `-LKMotionAudit` (Debug only), runs `MotionProbe`: ten times a second it
   reads every layer's frame in its scroll view's content coordinates and logs any move over 2 pt to
   `probe.log`, with the screen's name (`.motionProbe(...)` on tabs, pushed routes and the shell's

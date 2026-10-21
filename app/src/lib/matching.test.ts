@@ -4,6 +4,7 @@ import {
   scorePair,
   computeSuggestions,
   candidatesFor,
+  candidatesForReceipt,
   normalizeRef,
   nameSimilarity,
   SUGGEST_THRESHOLD,
@@ -112,6 +113,34 @@ describe("scorePair", () => {
 
   it("tulo receipt never matches meno transaction", () => {
     expect(scorePair(tx({ type: "meno" }), receipt({ type: "tulo" }))).toBeNull();
+  });
+});
+
+// X069: a credit note is money coming back, so its bank row is the refund, never a payment out.
+describe("credit notes follow the money", () => {
+  const creditNote = receipt({ id: "credit", vendor: "Tukku Oy", totalAmount: -50 });
+  const paymentOut = tx({ id: "out", counterparty: "Tukku Oy", amount: -50, type: "meno" });
+  const refundIn = tx({ id: "in", counterparty: "Tukku Oy", amount: 50, type: "tulo" });
+
+  it("a negative meno receipt is offered only the incoming row", () => {
+    expect(candidatesForReceipt(creditNote, [paymentOut, refundIn], new Set(), 5, "search").map((c) => c.transactionId)).toEqual(["in"]);
+    expect(candidatesForReceipt(creditNote, [paymentOut, refundIn], new Set()).map((c) => c.transactionId)).toEqual(["in"]);
+    expect(scorePair(paymentOut, creditNote)).toBeNull();
+  });
+
+  it("an outflow's suggestions never include the credit note", () => {
+    const expense = receipt({ id: "expense", vendor: "Tukku Oy", totalAmount: 50 });
+    expect(candidatesFor(paymentOut, [creditNote, expense], new Set(), 5, "search").map((c) => c.receiptId)).toEqual(["expense"]);
+    expect(computeSuggestions([paymentOut], [creditNote], new Set())).toEqual([]);
+    expect(computeSuggestions([paymentOut, refundIn], [creditNote], new Set())).toEqual([
+      expect.objectContaining({ transactionId: "in", receiptId: "credit" }),
+    ]);
+  });
+
+  it("a negative tulo (a refund of a sale) is offered only the outgoing row", () => {
+    const saleRefund = receipt({ id: "refund", type: "tulo", vendor: "Tukku Oy", totalAmount: -50 });
+    expect(candidatesForReceipt(saleRefund, [paymentOut, refundIn], new Set(), 5, "search").map((c) => c.transactionId)).toEqual(["out"]);
+    expect(candidatesFor(refundIn, [saleRefund], new Set(), 5, "search")).toEqual([]);
   });
 });
 

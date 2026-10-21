@@ -47,4 +47,14 @@ describe("OstolaskuNoticeView", () => {
     expect(cancelled).toContain("Ostolasku on peruttu, tämä on kuitti.");
     expect(cancelled).not.toContain("Tämä on ostolasku");
   });
+
+  it("asks a credit note whether it is an ostolasku's credit, never whether it is paid later (X072)", () => {
+    const out = renderToStaticMarkup(
+      createElement(OstolaskuNoticeView, { view: { documentType: null, purchaseInvoice: null }, busy: false, credit: true, onSetKind: () => {} })
+    );
+    expect(out).toContain("Onko tämä ostolaskun hyvitys?");
+    expect(out).toContain("Merkitse ostolaskun hyvitykseksi");
+    expect(out).not.toContain("maksetaan myöhemmin");
+    expect(out).not.toContain("Merkitse ostolaskuksi");
+  });
 });

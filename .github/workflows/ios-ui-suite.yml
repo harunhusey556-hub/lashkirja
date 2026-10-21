@@ -9,6 +9,12 @@ name: iOS UI suite
 # app/scripts/audit-seed.ts on top of the demo seed (sure pairs, credit notes). AUDIT-WALK.md maps it.
 on:
   workflow_dispatch:
+    inputs:
+      classes:
+        # A re-run of only the classes a fix touched; the full suite is the default and runs before a merge.
+        description: "UI test classes as a JSON list (default: all nine)"
+        required: false
+        default: '["P0Tests", "P1Tests", "P2Tests", "P3Tests", "P4Tests", "P5Tests", "StabilityTests", "OwnerScreensTests", "IntegrationTests"]'
   push:
     branches: [fix/w36-ui-suite]
 
@@ -125,11 +131,16 @@ jobs:
             sleep 1
           done
           curl -s -o /dev/null -w "GET /login -> %{http_code}\n" "http://127.0.0.1:3999/login"
+          # Every route the walks open, once, as the motion gate does: a cold route's first answer
+          # took 6-8 s under the first test (U096, U110). The warm-up signs its own session out.
+          bash ../scripts/sim/warm-api.sh http://127.0.0.1:3999
           # A second, browser-like session, so the Laitteet walk has another device to sign out
           # (scripts/sim/run-ui.sh does the same).
           curl -s -o /dev/null -w "browser session -> %{http_code}\n" -X POST "http://127.0.0.1:3999/api/auth/token" \
             -H 'content-type: application/json' -A 'Mozilla/5.0 (Macintosh) Safari' \
             -d '{"email":"demo@lashkirja.fi","password":"demo123"}'
+          # The answer-time check below reads only what the server logs from here on.
+          echo "API_LOG_WARM_LINES=$(wc -l < api-server.log | tr -d ' ')" >> "$GITHUB_ENV"
       - name: UI tests (${{ matrix.class }}, simulator)
         working-directory: ios-native/App
         run: |
@@ -138,7 +149,8 @@ jobs:
           mkdir -p "$SH"
           # The host side of the walks, as scripts/sim/run-ui.sh runs it on the Mac: screenshots
           # (.req), links (.openurl) and text size (.contentsize) through simctl, and the API proxy
-          # on :3998 that the tests take offline with offline.flag.
+          # on :3998 that the tests take offline with offline.flag or have lose its answers with
+          # lose-answer.flag. api-proxy.log gets its line per request.
           ( shopt -s nullglob
             while true; do
               for r in "$SH"/*.req; do xcrun simctl io "$SIM_UDID" screenshot "${r%.req}.png" >/dev/null 2>&1; rm -f "$r"; done
@@ -149,6 +161,9 @@ jobs:
             done ) &
           W=$!
           ulimit -n 4096
+          # This runner's python3 is new enough to warn about the proxy's own code (U011: PEP 765).
+          python3 -W error::SyntaxWarning -m py_compile ../../scripts/sim/api-proxy.py \
+            || { echo "::error::scripts/sim/api-proxy.py does not compile cleanly on $(python3 --version)"; exit 1; }
           python3 ../../scripts/sim/api-proxy.py 3998 3999 "$SH/offline.flag" > api-proxy.log 2>&1 &
           P=$!
           trap 'kill $W $P 2>/dev/null' EXIT
@@ -158,6 +173,14 @@ jobs:
             -only-testing:LashKirjaUITests/${{ matrix.class }} -resultBundlePath UITestResults.xcresult \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
             API_BASE_URL=http://127.0.0.1:3998 | xcbeautify --renderer github-actions
+      # U096 U020 U036 U110: once warm, the demo API answers a test in well under 2 s. A slower answer
+      # is a product row on its route (FIX-ROUND.md section 7), not a reason to raise the bar.
+      - name: Demo API answer times
+        if: always() && env.API_LOG_WARM_LINES != ''
+        working-directory: app
+        run: |
+          # Beside routes that were as slow, the host stalled, not the route (F002): noted, not failed.
+          python3 ../scripts/sim/answer-times.py "${{ matrix.class }}" api-server.log "$API_LOG_WARM_LINES" ../ios-native/App/api-proxy.log
       - name: Result
         if: always()
         working-directory: ios-native/App

@@ -66,12 +66,14 @@ struct CustomersView: View {
         .onChange(of: includeArchived) { _, _ in limit.reset() }
         .navigationTitle("Asiakkaat")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 Menu {
-                    Button { showNew = true } label: { Label("Uusi asiakas", systemImage: "person.badge.plus") }
                     Button { showImport = true } label: { Label("Tuo CSV", systemImage: "square.and.arrow.down") }
-                } label: { Image(systemName: "plus") }
-                .accessibilityLabel("Lisää asiakkaita")
+                } label: { Image(systemName: "ellipsis.circle") }
+                .accessibilityLabel("Toiminnot")
+                // "+" adds a customer at once (X029): it opened a menu with the import beside it, two taps.
+                Button { showNew = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Uusi asiakas")
             }
         }
         .sheet(isPresented: $showNew) { CustomerFormSheet(existing: nil) { _ in Task { await load() } } }
@@ -138,6 +140,9 @@ struct ArchivedBadge: View {
 struct CustomerDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    /// A created invoice opens on the stack's path: pushed beside it, the invoice's customer opened
+    /// under it (G005).
+    @Environment(\.openRoute) private var openRoute
     let customerId: String
     @State private var state = ScreenLoad<CustomerDetail>()
     @State private var showEdit = false
@@ -152,7 +157,6 @@ struct CustomerDetailView: View {
     @State private var others: [Customer] = []
     /// A just-created invoice, opened when the form's sheet has closed.
     @State private var createdId: String?
-    @State private var openedInvoiceId: String?
     @State private var invoiceLimit = ShowMore()
 
     var body: some View {
@@ -196,10 +200,9 @@ struct CustomerDetailView: View {
                         ForEach(detail.invoices.prefix(invoiceLimit.visible(detail.invoices.count))) { invoice in
                             NavigationLink(value: Route.invoice(invoice.id)) {
                                 HStack {
-                                    VStack(alignment: .leading) {
-                                        Text("Lasku \(invoice.number)")
-                                        Text(APIDate.displayDay(invoice.issueDate)).font(.caption).foregroundStyle(Theme.ink2)
-                                    }
+                                    // Myynti's line (X027): the invoice date here, unlabelled, read as
+                                    // the same day as Myynti's due date.
+                                    Text(invoice.rowSecondary)
                                     Spacer()
                                     VStack(alignment: .trailing) {
                                         MoneyText(amount: invoice.gross)
@@ -253,12 +256,11 @@ struct CustomerDetailView: View {
             Task { await load() }
             if let id = createdId {
                 createdId = nil
-                openedInvoiceId = id
+                openRoute(.invoice(id))
             }
         }) {
             InvoiceFormView(existing: nil, presetCustomerId: customerId, preview: app.invoiceFormPreview(), onCreated: { id in createdId = id })
         }
-        .navigationDestination(item: $openedInvoiceId) { id in InvoiceDetailView(invoiceId: id, preview: app.invoicePreview(id)) }
         .sheet(isPresented: $showMerge) {
             CustomerMergeSheet(keepId: customerId, others: others) {
                 notice = "Asiakkaat yhdistettiin. Kaksoiskappale arkistoitiin."
@@ -378,14 +380,15 @@ struct CustomerFormSheet: View {
         NavigationStack {
             Form {
                 Section {
+                    // A name is not a word to correct: 'Testi Oy' came up underlined in red (U009).
                     TextField("Nimi", text: $draft.name)
-                        .textContentType(.organizationName).textInputAutocapitalization(.words)
+                        .textContentType(.organizationName).textInputAutocapitalization(.words).autocorrectionDisabled()
                         .focused($focus, equals: .name).submitLabel(.next).onSubmit { focus = .businessId }
                     TextField("Y-tunnus (valinnainen)", text: $draft.businessId)
                         .codeInput(.never)
                         .focused($focus, equals: .businessId).submitLabel(.next).onSubmit { focus = .contact }
                     TextField("Yhteyshenkilö (valinnainen)", text: $draft.contactPerson)
-                        .textContentType(.name).textInputAutocapitalization(.words)
+                        .textContentType(.name).textInputAutocapitalization(.words).autocorrectionDisabled()
                         .focused($focus, equals: .contact).submitLabel(.next).onSubmit { focus = .email }
                 }
                 Section {
@@ -414,6 +417,8 @@ struct CustomerFormSheet: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi asiakas" : "Muokkaa asiakasta")
             .navigationBarTitleDisplayMode(.inline)
@@ -515,6 +520,8 @@ struct CustomerImportSheet: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .navigationTitle("Tuo asiakkaita")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -604,6 +611,8 @@ struct CustomerMergeSheet: View {
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .navigationTitle("Yhdistä kaksoiskappale")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -623,6 +632,7 @@ struct CustomerMergeSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .presentationBackground(Theme.canvas)
     }
 
     private func merge() async {

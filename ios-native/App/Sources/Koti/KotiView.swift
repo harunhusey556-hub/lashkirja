@@ -39,8 +39,8 @@ struct KotiView: View {
     }
 }
 
-/// Koti, top to bottom (`KotiLayout.sections`): the month's status, Rahatilanne, what needs
-/// doing, the month's sales and costs, open invoices, the six-month history.
+/// Koti, top to bottom (`KotiLayout.sections`): the month's status, what needs doing,
+/// Rahatilanne, the month's sales and costs, open invoices, the six-month history.
 private struct KotiContent: View {
     @Environment(AppModel.self) private var app
     @Bindable var model: KotiModel
@@ -69,7 +69,7 @@ private struct KotiContent: View {
         ScrollView {
             ScreenStateView(state: model.state, retry: model.load) { dashboard in
                 let sections = KotiLayout.sections(.init(dashboard: dashboard, atCurrentMonth: model.atCurrentMonth,
-                                                         hasTasks: !model.visibleItems.isEmpty, failedJobs: model.failedJobs,
+                                                         hasTasks: !taskEntries(dashboard).isEmpty, failedJobs: model.failedJobs,
                                                          onboardingOpen: OnboardingGate.shared.isSnoozed))
                 VStack(alignment: .leading, spacing: 12) {
                     header(dashboard)
@@ -153,14 +153,13 @@ private struct KotiContent: View {
                             title: Koti.positionTitle(atCurrentMonth: model.atCurrentMonth))
             }
         case .tasks:
-            tasks
+            tasks(d)
         case .failedJobs:
             failedJobsRow
         case .money:
             moneyCards(d)
         case .positions:
-            positions(Koti.positionRows(d),
-                      title: Koti.positionsTitle(hasBalanceCard: Koti.showsBalanceCard(d.bank), atCurrentMonth: model.atCurrentMonth))
+            positions(Koti.positionRows(d), hasBalanceCard: Koti.showsBalanceCard(d.bank))
         case .cashflow:
             CashflowCard(months: d.cashflow, selected: d.month) { month in Task { await model.show(month: month) } }
         case .handled:
@@ -181,7 +180,8 @@ private struct KotiContent: View {
     private func statusCard(_ d: Dashboard) -> some View {
         let blocking = max(0, (d.blockingTotal ?? 0) - (d.items.count - model.visibleItems.count))
         let status = Koti.monthStatus(done: d.events?.done ?? d.matching.matched,
-                                      total: d.events?.total ?? d.matching.matchable, blocking: blocking)
+                                      total: d.events?.total ?? d.matching.matchable, blocking: blocking,
+                                      atCurrentMonth: model.atCurrentMonth)
         return Card {
             NavigationLink(value: Route.monthClose(d.month)) {
                 HStack(alignment: .center, spacing: 14) {
@@ -297,19 +297,25 @@ private struct KotiContent: View {
         }
     }
 
-    private var tasks: some View {
+    /// The server's rows less those just acted on, each kind's "Näytä kaikki (N)" and the
+    /// bank-mismatch task (`Koti.taskEntries`).
+    private func taskEntries(_ d: Dashboard) -> [Koti.TaskEntry] {
+        Koti.taskEntries(d, visible: model.visibleItems, atCurrentMonth: model.atCurrentMonth)
+    }
+
+    private func tasks(_ d: Dashboard) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionHeader(title: "Tarvitaan sinulta")
-            let items = model.visibleItems
+            let entries = taskEntries(d)
             VStack(spacing: 0) {
-                ForEach(Array(items.prefix(taskLimit.visible(items.count)).enumerated()), id: \.element.id) { index, item in
+                ForEach(Array(entries.prefix(taskLimit.visible(entries.count)).enumerated()), id: \.element.id) { index, entry in
                     if index > 0 { Divider().padding(.leading, 60) }
-                    taskRow(item)
+                    taskEntry(entry)
                         .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
                 }
-                if taskLimit.buttonTitle(total: items.count) != nil {
+                if taskLimit.buttonTitle(total: entries.count) != nil {
                     Divider().padding(.leading, 16)
-                    ShowMoreButton(limit: $taskLimit, total: items.count)
+                    ShowMoreButton(limit: $taskLimit, total: entries.count)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                         .contentShape(Rectangle())
@@ -318,6 +324,27 @@ private struct KotiContent: View {
             }
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .motion(.snappy, value: model.visibleItems)
+        }
+    }
+
+    @ViewBuilder private func taskEntry(_ entry: Koti.TaskEntry) -> some View {
+        switch entry {
+        case .item(let item):
+            taskRow(item)
+        case .showAll(let kind, let total):
+            // The rest of the kind, on its own list (web "Näytä kaikki (N)", X005).
+            if let route = Route.forShowAll(kind, month: model.month) {
+                NavigationLink(value: route) {
+                    ShowAllRow(kind: kind, total: total).contentShape(Rectangle())
+                }
+                .buttonStyle(.pressable)
+            }
+        case .bankMismatch(let accounts):
+            // Where the balances are checked against the statements (web /kirjanpito/pankkitilit).
+            NavigationLink(value: Route.bankAccounts) {
+                BankMismatchRow(accounts: accounts).contentShape(Rectangle())
+            }
+            .buttonStyle(.pressable)
         }
     }
 
@@ -361,14 +388,14 @@ private struct KotiContent: View {
     }
 
     /// Pankkitilit (when there is no balance card), Avoimet myyntilaskut and ostolaskut.
-    private func positions(_ rows: [Koti.PositionRow], title: String) -> some View {
+    private func positions(_ rows: [Koti.PositionRow], hasBalanceCard: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(title: title)
+            SectionHeader(title: Koti.positionsTitle(hasBalanceCard: hasBalanceCard, atCurrentMonth: model.atCurrentMonth))
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                     if index > 0 { Divider().padding(.leading, 60) }
                     NavigationLink(value: route(row)) {
-                        PositionRowView(row: row).contentShape(Rectangle())
+                        PositionRowView(row: row, short: hasBalanceCard).contentShape(Rectangle())
                     }
                     .buttonStyle(.pressable)
                 }
@@ -377,12 +404,15 @@ private struct KotiContent: View {
         }
     }
 
+    /// The open invoices the row names: what is late while something is (the row is red), else
+    /// what waits for payment; never a list with the paid ones in it (N5).
     private func route(_ row: Koti.PositionRow) -> Route {
+        let late = row.tone == .danger
         switch row.kind {
-        case .bank: row.fixesBank ? Route.bankAccounts : Route.bankHub
-        case .receivables: .invoices
-        // Every status, not the chip left on last time: the open total must not open the paid bills.
-        case .payables: .purchaseInvoicesFiltered(status: PurchaseFilter.all.rawValue)
+        case .bank: return row.fixesBank ? Route.bankAccounts : Route.bankFeed
+        case .receivables:
+            return .invoicesFiltered(month: "", status: (late ? SalesFilter.overdue : .sent).rawValue, customerId: "")
+        case .payables: return .purchaseInvoicesFiltered(status: (late ? PurchaseFilter.overdue : .open).rawValue)
         }
     }
 }
@@ -457,7 +487,7 @@ private struct MoneyCard: View {
             if let percent = trend.percent {
                 Text("\(percent > 0 ? "+" : "")\(percent) % vs. \(MonthKey.name(trend.previousMonth).lowercased())")
                     .font(.caption)
-                    .foregroundStyle(income ? Theme.success : Theme.ink2)
+                    .foregroundStyle(MoneyTrend.tone(income ? .income : .expenses, percent: percent) == .success ? Theme.success : Theme.ink2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -517,14 +547,20 @@ private struct TaskRow: View {
                 .background(tint.opacity(0.12), in: Circle())
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.party).font(.body).foregroundStyle(Theme.ink).lineLimitUnlessLarge()
+                // A vendor's whole name, on two lines when it needs them (X007): the amount column
+                // left room that a one-line limit cut off with an ellipsis.
+                Text(item.party).font(.body).foregroundStyle(Theme.ink).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                 Text(subtitle).font(.caption).foregroundStyle(Theme.ink2).lineLimitUnlessLarge()
             }
+            .layoutPriority(typeSize.isAccessibilitySize ? 0 : 1)
             Spacer(minLength: 8)
+            // Whole: beside the name's layoutPriority a flexible column is left its minimum, and a long
+            // subtitle took the rest ('18,90 €' and 'Hyväksy' in about 32 pt).
             VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
-                if let amount = item.amount { MoneyText(amount: amount).font(.subheadline.weight(.semibold)) }
+                if let amount = Koti.taskAmount(item) { MoneyText(amount: amount).font(.subheadline.weight(.semibold)) }
                 actionButton
             }
+            .fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: false)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -542,41 +578,51 @@ private struct TaskRow: View {
         case .remind:
             pill(action, run: remind)
         case .capture:
-            Button(action: capture) {
-                Text(action.label ?? "").font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 5)
-            }
-            .buttonStyle(.pressable)
-            .background(Theme.ink, in: Capsule())
-            .foregroundStyle(Theme.onInk)
+            // Soft as the other row actions: a dark capsule on every such row was one more primary
+            // each (M008 M017 M049 M088).
+            pill(action, run: capture)
         case .open(let label):
             // Not a button: the tap goes through to the row's link, which opens the item.
-            pillLabel(label).allowsHitTesting(false)
+            Self.pillLabel(label).allowsHitTesting(false)
         case .none:
             EmptyView()
         }
     }
 
+    /// How far a pill's target reaches above and below its capsule (X006).
+    private static let pillSlop: CGFloat = 11
+
     private func pill(_ action: Koti.TaskAction, run: @escaping () -> Void) -> some View {
         Button(action: run) {
             ZStack {
-                pillLabel(action.label ?? "").opacity(busy ? 0 : 1)
+                Self.pillLabel(action.label ?? "").opacity(busy ? 0 : 1)
                 if busy { ProgressView().controlSize(.mini) }
             }
+            // A 44 pt tall target around the 24 pt capsule: a near miss opened the row's link
+            // instead (X006). The negative padding below gives the height back, so the row keeps
+            // its height and the capsule its look.
+            .padding(.vertical, Self.pillSlop)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
         .disabled(busy)
         .accessibilityLabel("\(action.label ?? ""): \(item.party)")
+        .padding(.vertical, -Self.pillSlop)
     }
 
-    private func pillLabel(_ title: String) -> some View {
+    static func pillLabel(_ title: String) -> some View {
         Text(title).font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 5)
             .background(Theme.accentSoft, in: Capsule())
             .foregroundStyle(Theme.accentDark)
     }
 
-    private var symbol: String {
-        switch item.kind {
-        case .pendingReceipt: item.fromBank ? "tag" : "doc.text.magnifyingglass"
+    private var symbol: String { Self.kindSymbol(item.kind, fromBank: item.fromBank) }
+    private var tint: Color { Self.kindTint(item.kind) }
+
+    /// Also the icon of the kind's "Näytä kaikki (N)" row.
+    static func kindSymbol(_ kind: DashboardItem.Kind, fromBank: Bool = false) -> String {
+        switch kind {
+        case .pendingReceipt: fromBank ? "tag" : "doc.text.magnifyingglass"
         case .missingReceipt: "camera"
         case .overdueInvoice: "exclamationmark.circle"
         case .invoiceMatch, .receiptMatch: "link"
@@ -587,8 +633,8 @@ private struct TaskRow: View {
         }
     }
 
-    private var tint: Color {
-        switch item.kind {
+    static func kindTint(_ kind: DashboardItem.Kind) -> Color {
+        switch kind {
         case .missingReceipt: Theme.success
         case .overdueInvoice, .paymentDuplicate: Theme.danger
         default: Theme.accent
@@ -608,6 +654,48 @@ private struct TaskRow: View {
         case .draftInvoice: return "Lähettämätön lasku"
         case .unknown: return ""
         }
+    }
+}
+
+/// "Näytä kaikki (27) · Pankkitapahtumat ilman kuittia": the rest of a kind, under its rows.
+private struct ShowAllRow: View {
+    let kind: DashboardItem.Kind
+    let total: Int
+
+    var body: some View {
+        HStack(spacing: 12) {
+            RowIcon(symbol: TaskRow.kindSymbol(kind), tint: TaskRow.kindTint(kind))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Koti.showAllTitle(total: total)).font(.body).foregroundStyle(Theme.ink)
+                Text(Koti.showAllLabel(kind)).font(.caption).foregroundStyle(Theme.ink2)
+            }
+            Spacer(minLength: 8)
+            Chevron()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+}
+
+/// The web's account task: a ledger account whose balance does not reconcile with the bank's
+/// (X009). Not one of the month's blocking tasks.
+private struct BankMismatchRow: View {
+    let accounts: Int
+
+    var body: some View {
+        HStack(spacing: 12) {
+            RowIcon(symbol: "building.columns", tint: Theme.warning)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Koti.bankMismatchTitle(accounts: accounts)).font(.body).foregroundStyle(Theme.ink)
+                Text(Koti.bankMismatchSubtitle).font(.caption).foregroundStyle(Theme.ink2)
+            }
+            .layoutPriority(1)
+            Spacer(minLength: 8)
+            // A label, not a button: the tap goes through to the row's link. Whole, as TaskRow's.
+            TaskRow.pillLabel(Koti.bankMismatchAction).fixedSize()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 }
 
@@ -774,7 +862,7 @@ private struct BalanceCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             // Only the heading is the link: a drag on the chart must never open the bank.
-            NavigationLink(value: Route.bankHub) {
+            NavigationLink(value: Route.bankFeed) {
                 heading.contentShape(Rectangle())
             }
             .buttonStyle(.pressable)
@@ -883,12 +971,14 @@ private struct BalanceCard: View {
 /// One row under Rahatilanne: what it is, how much, and what is late (in the danger colour).
 private struct PositionRowView: View {
     let row: Koti.PositionRow
+    /// Under the "Avoimet laskut" heading: the title without its "Avoimet".
+    let short: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             RowIcon(symbol: symbol, tint: row.tone == .danger ? Theme.danger : row.tone == .warning ? Theme.warning : Theme.accent)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.title).font(.body).foregroundStyle(Theme.ink)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(short ? row.shortTitle : row.title).font(.body).foregroundStyle(Theme.ink)
                 Text(row.secondary)
                     .font(.caption)
                     .foregroundStyle(row.tone == .danger ? Theme.danger : row.tone == .warning ? Theme.warning : Theme.ink2)
@@ -901,7 +991,8 @@ private struct PositionRowView: View {
             Chevron()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        // The owner found the two rows crowded (2026-10-21): more air above and below, not a new layout.
+        .padding(.vertical, 14)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityAddTraits(.isButton)
@@ -977,11 +1068,7 @@ private struct CashflowCard: View {
     }
 
     private func legend(_ title: String, _ tint: Color) -> some View {
-        HStack(spacing: 4) {
-            Circle().fill(tint).frame(width: 7, height: 7)
-            Text(title).font(.caption).foregroundStyle(Theme.ink2)
-        }
-        .accessibilityHidden(true)
+        ChartLegendItem(title: title, tint: tint).accessibilityHidden(true)
     }
 }
 

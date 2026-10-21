@@ -26,59 +26,29 @@ struct BankAccountsView: View {
     @State private var justConnected: String?
     /// The scope sheet opens by itself at most once per visit, so closing it is respected.
     @State private var askedScope = false
+    /// UI tests only (`-LKUITest`): what the first frame was built from, and whether the first load
+    /// is in (StabilityTests.test29).
+    @State private var opening: String?
+    @State private var loaded = false
+
+    /// `overview` and `connections`, what this screen or Pankki last painted for the two GETs
+    /// (`app.lastPainted`), are on screen in the first frame. Read in `.task` instead, after an await
+    /// on the cache, the page opened on a spinner, and the accounts and the connections then came
+    /// in above Tiliotteet and pushed the page down 226 pt (M071).
+    init(overview: BankAccountsOverview? = nil, connections: BankConnections? = nil) {
+        _overview = State(initialValue: overview)
+        _connections = State(initialValue: connections)
+    }
 
     var body: some View {
         List {
-            // First, so a tap on Koti's or the hub's "valitse tilit" notice lands on the button.
+            // First, so a tap on Koti's "valitse tilit" notice lands on the button.
             if let connections {
                 ForEach(BankScope.unscoped(connections.connections)) { connection in
                     Section { unscopedCard(connection) }
                 }
             }
-            if let overview {
-                // A sync's balances show at once, before the accounts are asked again.
-                let fresh = app.versions.balances
-                Section {
-                    LabeledContent("Saldo yhteensä") {
-                        MoneyText(amount: fresh.total(overview.totalBalance, lines: overview.accounts.map { (id: $0.id, balance: $0.balance) }))
-                            .fontWeight(.semibold)
-                    }
-                    if overview.needsAttention > 0 {
-                        Text("\(overview.needsAttention) vaatii saldon tarkistusta").font(.caption).foregroundStyle(Theme.danger)
-                    }
-                }
-                Section {
-                    if overview.accounts.isEmpty {
-                        Text((overview.archivedCount ?? 0) > 0
-                             ? "Ei käytössä olevia tilejä. Arkistoituja tilejä on \(overview.archivedCount ?? 0)."
-                             : "Ei vielä tilejä. Yhdistä pankki tai tuo tiliote tiedostona.")
-                            .foregroundStyle(Theme.ink2)
-                    }
-                    ForEach(overview.accounts) { account in
-                        Button { detail = account } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Text(account.name).foregroundStyle(Theme.ink)
-                                    Spacer()
-                                    if let balance = fresh.balance(account.id, shown: account.balance) { MoneyText(amount: balance).foregroundStyle(Theme.ink) }
-                                }
-                                Text(BankAccountText.subtitle(account)).font(.caption).foregroundStyle(Theme.ink2)
-                            }
-                            .contentShape(Rectangle())
-                            .opacity(account.archivedAt == nil ? 1 : 0.6)
-                        }
-                        .buttonStyle(.pressable)
-                    }
-                    Button { adding = true } label: { Label("Lisää tili käsin", systemImage: "plus.circle") }
-                    if showArchived || (overview.archivedCount ?? 0) > 0 {
-                        Button(showArchived ? "Piilota arkistoidut" : "Näytä arkistoidut (\(overview.archivedCount ?? 0))") {
-                            showArchived.toggle()
-                        }
-                    }
-                } header: {
-                    Text("Kirjanpidon tilit")
-                }
-            }
+            // Above the accounts: Pankki's first row names the consent, and its row opens here.
             Section("Pankkiyhteys") {
                 if let connections {
                     if !connections.enabled || !connections.ready {
@@ -117,7 +87,79 @@ struct BankAccountsView: View {
                 } else if loadFailed {
                     Button("Yritä uudelleen") { Task { await load() } }
                 } else {
-                    ProgressView()
+                    connectionPlaceholder
+                }
+            }
+            if let overview {
+                // A sync's balances show at once, before the accounts are asked again.
+                let fresh = app.versions.balances
+                Section {
+                    LabeledContent("Saldo yhteensä") {
+                        MoneyText(amount: fresh.total(overview.totalBalance, lines: overview.accounts.map { (id: $0.id, balance: $0.balance) }))
+                            .fontWeight(.semibold)
+                    }
+                    .accessibilityIdentifier("bank-accounts-total")
+                    if overview.needsAttention > 0 {
+                        Text("\(overview.needsAttention) vaatii saldon tarkistusta").font(.caption).foregroundStyle(Theme.danger)
+                    }
+                }
+                Section {
+                    if overview.accounts.isEmpty {
+                        Text((overview.archivedCount ?? 0) > 0
+                             ? "Ei käytössä olevia tilejä. Arkistoituja tilejä on \(overview.archivedCount ?? 0)."
+                             : "Ei vielä tilejä. Yhdistä pankki tai tuo tiliote tiedostona.")
+                            .foregroundStyle(Theme.ink2)
+                    }
+                    ForEach(overview.accounts) { account in
+                        Button { detail = account } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(account.name).foregroundStyle(Theme.ink)
+                                    Spacer()
+                                    if let balance = fresh.balance(account.id, shown: account.balance) { MoneyText(amount: balance).foregroundStyle(Theme.ink) }
+                                }
+                                Text(BankAccountText.subtitle(account)).font(.caption).foregroundStyle(Theme.ink2)
+                            }
+                            .contentShape(Rectangle())
+                            .opacity(account.archivedAt == nil ? 1 : 0.6)
+                        }
+                        .buttonStyle(.pressable)
+                    }
+                    Button { adding = true } label: { Label("Lisää tili käsin", systemImage: "plus.circle") }
+                    if showArchived || (overview.archivedCount ?? 0) > 0 {
+                        Button(showArchived ? "Piilota arkistoidut" : "Näytä arkistoidut (\(overview.archivedCount ?? 0))") {
+                            showArchived.toggle()
+                        }
+                    }
+                } header: {
+                    Text("Kirjanpidon tilit")
+                }
+            } else if failure == nil {
+                // Nothing painted yet: the total and greyed accounts hold the space until the first
+                // answer, so nothing under them moves when it comes.
+                Section {
+                    LabeledContent("Saldo yhteensä") {
+                        Text("0 000,00 €").fontWeight(.semibold).redacted(reason: .placeholder).accessibilityHidden(true)
+                    }
+                    .accessibilityIdentifier("bank-accounts-total")
+                }
+                Section {
+                    ForEach(0..<2, id: \.self) { _ in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text("Pankkitili").foregroundStyle(Theme.ink)
+                                Spacer()
+                                Text("0 000,00 €")
+                            }
+                            Text("FI00 0000 0000 0000 00").font(.caption).foregroundStyle(Theme.ink2)
+                        }
+                        .redacted(reason: .placeholder)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Ladataan")
+                    }
+                    Button { adding = true } label: { Label("Lisää tili käsin", systemImage: "plus.circle") }
+                } header: {
+                    Text("Kirjanpidon tilit")
                 }
             }
             Section {
@@ -162,11 +204,20 @@ struct BankAccountsView: View {
             )
         }
         .refreshable {
-            // Pull-to-refresh asks every screen again, the hub and Koti under this one included.
+            // Pull-to-refresh asks every screen again, Pankki and Koti under this one included.
             app.refreshEverything()
             await load()
         }
         .perfReady("pankkiTilit", overview != nil)
+        .onAppear { if UITestHooks.active, opening == nil { opening = overview != nil && connections != nil ? "valmis" : "paikka" } }
+        // StabilityTests.test29: a first frame without the accounts and the connections is M071's jump.
+        .overlay(alignment: .topLeading) {
+            if let opening {
+                Text(opening).font(.caption2).opacity(0.01).allowsHitTesting(false)
+                    .accessibilityIdentifier("bank-accounts-opening")
+                    .accessibilityValue(loaded ? "ladattu" : "ladataan")
+            }
+        }
         .task(id: showArchived) {
             await load()
             askScopeOnce()
@@ -264,6 +315,23 @@ struct BankAccountsView: View {
         }
     }
 
+    /// A connection's row, greyed, until the connections are known: the sections under it keep their
+    /// place when they come (M071).
+    private var connectionPlaceholder: some View {
+        HStack {
+            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.surface).frame(width: 36, height: 36)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Pankin nimi")
+                Text("Voimassa · Yritystili").font(.caption).foregroundStyle(Theme.ink2)
+                Text("Viimeisin onnistunut haku 12.10.2026").font(.caption).foregroundStyle(Theme.ink2)
+            }
+            Spacer()
+        }
+        .redacted(reason: .placeholder)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Ladataan")
+    }
+
     /// The web's "Yhteys pitää vahvistaa uudelleen" / "Pankki on peruuttanut luvan" card.
     private func reconnectCard(_ connection: BankConnection, _ card: BankConsent.Reconnect) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -306,16 +374,21 @@ struct BankAccountsView: View {
         switch accounts {
         case .success(let value):
             overview = value
+            // The next visit's first frame (`init`).
+            app.rememberPainted(value, "/api/bank-accounts", query: query)
             // These balances are at least as new as the ones the sync returned.
             app.versions.settleBalances(loadStartedAt: startedAt)
         case .failure(let error): problem = error.userMessage
         }
         switch links {
-        case .success(let value): connections = value
+        case .success(let value):
+            connections = value
+            app.rememberPainted(value, "/api/bank/connections")
         case .failure(let error): problem = problem ?? error.userMessage
         }
         loadFailed = connections == nil && problem != nil
         failure = problem
+        if UITestHooks.active { loaded = true }
     }
 
     private func changed(_ message: String?) async {
@@ -365,7 +438,17 @@ struct BankAccountsView: View {
     }
 }
 
-/// One tiliote file: title, month · account · rows, and the net amount.
+extension AppModel {
+    /// `/api/bank-accounts` as the cache holds it now, read as Pankkiyhteys ja tilit's own type, into
+    /// `lastPainted`: Pankki paints its first row from the same answer, and the screen that row opens
+    /// then has the accounts in its first frame.
+    func rememberBankAccounts() async {
+        guard let overview: BankAccountsOverview = await cachedValue("/api/bank-accounts") else { return }
+        rememberPainted(overview, "/api/bank-accounts")
+    }
+}
+
+/// One tiliote file: title, file · account · rows, and the net amount.
 struct StatementFileRow: View {
     let statement: Statement
 
@@ -445,6 +528,8 @@ struct BankAccountFormSheet: View {
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle(account == nil ? "Uusi pankkitili" : "Muokkaa tiliä")
             .navigationBarTitleDisplayMode(.inline)
@@ -537,24 +622,15 @@ struct BankAccountDetailSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Text(BankAccountText.subtitle(account)).font(.caption).foregroundStyle(Theme.ink2)
+                    if let caption = BankAccountText.detailCaption(account) {
+                        Text(caption).font(.caption).foregroundStyle(Theme.ink2)
+                            .accessibilityIdentifier("bank-account-caption")
+                    }
                     if let iban = account.iban {
                         LabeledContent("IBAN") { Text(BankIBAN.format(iban)).textSelection(.enabled) }
                     }
                     if let balance = account.balance {
                         LabeledContent("Saldo") { MoneyText(amount: balance).fontWeight(.semibold) }
-                    }
-                }
-                Section {
-                    Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
-                    if account.isDefault != true && account.archivedAt == nil {
-                        Button { Task { await patch(isDefault: true) } } label: { Label("Aseta oletukseksi", systemImage: "star") }
-                    }
-                    if account.archivedAt != nil {
-                        Button { Task { await patch(archived: false) } } label: { Label("Palauta käyttöön", systemImage: "arrow.uturn.backward") }
-                    }
-                    if !(account.archivedAt != nil && (account.statementCount ?? 0) > 0) {
-                        Button(role: .destructive) { confirmRemove = true } label: { Label("Poista", systemImage: "trash") }
                     }
                 }
                 if let failure { Text(failure).foregroundStyle(Theme.danger) }
@@ -590,10 +666,18 @@ struct BankAccountDetailSheet: View {
                     Text("Napauta kuukautta ja kirjaa pankin ilmoittama loppusaldo.")
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .formKeyboard()
             .navigationTitle(account.name)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Valmis") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Valmis") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu { actions } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Toiminnot")
+                }
+            }
             .disabled(busy)
             .sheet(isPresented: $editing) {
                 BankAccountFormSheet(account: account) { message in
@@ -615,6 +699,21 @@ struct BankAccountDetailSheet: View {
             .task { await load() }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// Toiminnot (X093): Muokkaa and a red Poista were two plain rows, one above the other, in the
+    /// body. Poista still asks first.
+    @ViewBuilder private var actions: some View {
+        Button { editing = true } label: { Label("Muokkaa", systemImage: "pencil") }
+        if account.isDefault != true && account.archivedAt == nil {
+            Button { Task { await patch(isDefault: true) } } label: { Label("Aseta oletukseksi", systemImage: "star") }
+        }
+        if account.archivedAt != nil {
+            Button { Task { await patch(archived: false) } } label: { Label("Palauta käyttöön", systemImage: "arrow.uturn.backward") }
+        }
+        if !(account.archivedAt != nil && (account.statementCount ?? 0) > 0) {
+            Button(role: .destructive) { confirmRemove = true } label: { Label("Poista", systemImage: "trash") }
+        }
     }
 
     private func excludedNote(_ r: BankRollforward) -> String? {
@@ -791,6 +890,8 @@ struct BankPickerSheet: View {
                     ScreenStateView(state: banks, retry: load) { (_: [Aspsp]) in EmptyView() }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
             .searchable(text: $search, prompt: "Hae pankkia")
             .navigationTitle("Yhdistä pankki")
             .navigationBarTitleDisplayMode(.inline)

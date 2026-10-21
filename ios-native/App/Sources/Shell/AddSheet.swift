@@ -2,14 +2,17 @@ import SwiftUI
 import UniformTypeIdentifiers
 import LashKirjaCore
 
-/// The "+" actions: each opens its real flow.
+/// The "+" actions: each opens its real flow. The camera, a file and a sales invoice are the rows;
+/// the imports, used now and then, wait in ⋯ (owner, Q4: the camera two taps from any tab).
 struct AddSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
-    @State private var capture = false
+    @State private var capture: CaptureEntry?
     @State private var newInvoice = false
     @State private var importing = false
     @State private var notice: String?
+    /// The notice tells of a statement's rows: it links to them in Kirjanpito > Pankki.
+    @State private var noticeOpensRows = false
     @State private var busy = false
     /// The invoice just made with "Uusi lasku": opened in Myynti once the sheets are gone.
     @State private var createdInvoiceId: String?
@@ -18,51 +21,55 @@ struct AddSheet: View {
     /// The server answered that no mailbox is connected: the notice links to connecting one.
     @State private var mailboxMissing = false
     @State private var showEmailImport = false
-    @State private var detent: PresentationDetent = .medium
+
+    /// The capture page's two ways in from here.
+    private enum CaptureEntry: Identifiable {
+        /// "Kuvaa kuitti": straight to the camera.
+        case camera
+        /// "Lisää tiedosto": the page where camera, photos or files are picked, titled by its row (X140).
+        case file
+        var id: Self { self }
+    }
 
     var body: some View {
         NavigationStack {
             List {
+                Button { capture = .camera } label: { Label("Kuvaa kuitti", systemImage: "camera") }
                 // One button for receipts and bills alike (owner, 2026-10-15): the reading decides
                 // kuitti or ostolasku, and the upload screen's row turns a wrong decision around.
-                Button { capture = true } label: { Label("Lisää tiedosto", systemImage: "doc.badge.plus") }
-                Button { importing = true } label: { Label("Tuo tiliote", systemImage: "square.and.arrow.down") }
-                    .disabled(busy)
+                Button { capture = .file } label: { Label("Lisää tiedosto", systemImage: "doc.badge.plus") }
                 // A sales invoice to a customer; a supplier's bill comes in through "Lisää tiedosto".
                 Button { Perf.beginOpen("laskuUusi"); newInvoice = true } label: { Label("Uusi myyntilasku", systemImage: "doc.text") }
-                if hasMailbox == false {
-                    Button { openEmailImport() } label: { Label("Yhdistä sähköposti", systemImage: "envelope.badge") }
-                        .disabled(busy)
-                } else {
-                    Button { Task { await fetchEmail() } } label: {
-                        // The spinner fades into a fixed slot, so the row never changes.
-                        HStack {
-                            Label("Hae sähköpostista", systemImage: "envelope")
-                            Spacer()
-                            ZStack { if busy { ProgressView().transition(.opacity) } }
-                                .frame(width: 20, height: 20)
-                        }
-                        .motion(.easeOut(duration: 0.15), value: busy)
-                    }
-                    .disabled(busy)
-                }
                 if mailboxMissing {
-                    Button { openEmailImport() } label: {
+                    Button { showEmailImport = true } label: {
                         Text("Sähköpostia ei ole yhdistetty. Yhdistä se tästä ›").font(.footnote).foregroundStyle(Theme.accentDark)
                     }
                     .transition(.opacity)
                 } else if let notice {
-                    Text(notice).font(.footnote).foregroundStyle(Theme.ink2).transition(.opacity)
+                    if noticeOpensRows {
+                        Button { openBankRows() } label: {
+                            Text("\(notice) Näytä tapahtumat ›").font(.footnote).foregroundStyle(Theme.accentDark)
+                        }
+                        .transition(.opacity)
+                    } else {
+                        Text(notice).font(.footnote).foregroundStyle(Theme.ink2).transition(.opacity)
+                    }
                 }
             }
-            // The answer of an import or a mail fetch fades in under the actions; the mailbox
-            // row's words change by a fade once it is known whether a mailbox is connected.
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
+            // The answer of an import or a mail fetch fades in under the actions.
             .motion(.snappy, value: notice)
+            .motion(.snappy, value: noticeOpensRows)
             .motion(.snappy, value: mailboxMissing)
-            .motion(.snappy, value: hasMailbox)
             .navigationTitle("Lisää")
             .navigationBarTitleDisplayMode(.inline)
-            // Connecting a mailbox opens here, so Back returns to these actions.
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { moreMenu }
+            }
+            // Connecting a mailbox opens here, so Back returns to these actions. At the sheet's own
+            // height: grown to full height for it, the sheet stayed there after Back (X138); the owner
+            // can still drag it up.
             .navigationDestination(isPresented: $showEmailImport) {
                 EmailImportView { profile in
                     app.profileChanged(profile)
@@ -78,11 +85,15 @@ struct AddSheet: View {
             // AppModel.dataVersion, so a cancelled flow reloads nothing.
             // The capture closes through this sheet: the sheet's dismissal takes the cover with it,
             // so the owner sees the cover go down once and never this sheet in between.
-            .fullScreenCover(isPresented: $capture, onDismiss: { dismiss() }) {
-                CaptureFlow(transactionId: nil, opensCamera: false, onClose: { dismiss() })
+            .fullScreenCover(item: $capture, onDismiss: { dismiss() }) { entry in
+                CaptureFlow(transactionId: nil, opensCamera: entry == .camera, title: entry == .file ? "Lisää tiedosto" : "Uusi kuitti",
+                            onClose: { dismiss() })
             }
+            // The form closes through this sheet too, in one movement: the form going down first showed
+            // these actions again before the sheet followed (X139). A swipe down still lands here.
             .sheet(isPresented: $newInvoice, onDismiss: openCreatedInvoice) {
-                InvoiceFormView(existing: nil, preview: app.invoiceFormPreview(), onCreated: { id in createdInvoiceId = id })
+                InvoiceFormView(existing: nil, preview: app.invoiceFormPreview(), onCreated: { id in createdInvoiceId = id },
+                                onClose: { openCreatedInvoice() })
             }
             // A swipe down during an upload would lose its result.
             .interactiveDismissDisabled(busy)
@@ -90,13 +101,36 @@ struct AddSheet: View {
                 if case .success(let url) = result { Task { await upload(url) } }
             }
         }
-        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDetents([.medium, .large])
     }
 
-    /// The mailbox screen needs room: the sheet grows to full height for it.
-    private func openEmailImport() {
-        detent = .large
-        showEmailImport = true
+    /// The imports. While one runs, its spinner takes the button's place in the same slot, so the
+    /// bar keeps its shape; the mailbox item's words follow once it is known whether one is connected.
+    private var moreMenu: some View {
+        Menu {
+            Button { importing = true } label: { Label("Tuo tiliote", systemImage: "square.and.arrow.down") }
+            if hasMailbox == false {
+                Button { showEmailImport = true } label: { Label("Yhdistä sähköposti", systemImage: "envelope.badge") }
+            } else {
+                Button { Task { await fetchEmail() } } label: { Label("Hae sähköpostista", systemImage: "envelope") }
+            }
+            // UI tests only (Debug + `-LKUITest`): a test cannot pick a file in the system's picker.
+            if UITestHooks.active {
+                Button {
+                    Task { await importStatement(UITestHooks.fixtureStatement(day: APIDate.dayString(Date())), name: UITestHooks.statementFixtureName) }
+                } label: { Label("Testitiliote", systemImage: "testtube.2") }
+            }
+        } label: {
+            ZStack {
+                Image(systemName: "ellipsis.circle").opacity(busy ? 0 : 1)
+                // Not a hidden spinner: one spinning unseen keeps the app from going idle.
+                if busy { ProgressView().transition(.opacity) }
+            }
+            .tapTarget()
+            .motion(.easeOut(duration: 0.15), value: busy)
+        }
+        .disabled(busy)
+        .accessibilityLabel("Toiminnot")
     }
 
     /// As on the web, a new invoice opens once made: the Myynti tab, then the invoice.
@@ -110,23 +144,42 @@ struct AddSheet: View {
         dismiss()
     }
 
+    /// "Näytä tapahtumat ›": the rows the statement brought, in Kirjanpito > Pankki, placed behind
+    /// this sheet as a new invoice is.
+    private func openBankRows() {
+        app.pendingRoute = PendingRoute(tab: .kirjanpito, route: .bankFeed, animated: false)
+        dismiss()
+    }
+
     private func upload(_ url: URL) async {
         guard !busy else { return }
         guard url.startAccessingSecurityScopedResource() else { return }
         defer { url.stopAccessingSecurityScopedResource() }
-        guard let data = try? Data(contentsOf: url) else { notice = "Tiedostoa ei voitu lukea."; return }
+        guard let data = try? Data(contentsOf: url) else {
+            notice = "Tiedostoa ei voitu lukea."
+            noticeOpensRows = false
+            return
+        }
+        await importStatement(data, name: url.lastPathComponent)
+    }
+
+    private func importStatement(_ data: Data, name: String) async {
+        guard !busy else { return }
         var form = Multipart()
-        form.addFile("file", filename: url.lastPathComponent.replacingOccurrences(of: "\"", with: ""), mimeType: "application/octet-stream", data: data)
+        form.addFile("file", filename: name.replacingOccurrences(of: "\"", with: ""), mimeType: "application/octet-stream", data: data)
         busy = true
         mailboxMissing = false
         defer { busy = false }
         do {
             struct Result: Decodable { let count: Int? }
             let response = try await app.api.raw("POST", "/api/statements", body: form.finalize(), contentType: form.contentType)
-            notice = "Tuotiin \((try? JSONDecoder().decode(Result.self, from: response.body))?.count ?? 0) tapahtumaa."
+            let count = (try? JSONDecoder().decode(Result.self, from: response.body))?.count ?? 0
+            notice = "Tuotiin \(count) tapahtumaa."
+            noticeOpensRows = count > 0
             Haptics.success()
         } catch {
             notice = error.userMessage
+            noticeOpensRows = false
         }
     }
 
@@ -138,12 +191,14 @@ struct AddSheet: View {
         do {
             let r: Result = try await app.api.send("POST", "/api/integrations/imap/sync", body: EmptyBody())
             notice = "Haettiin \(r.count ?? 0) kuittia sähköpostista."
+            noticeOpensRows = false
             Haptics.success()
         } catch let error as LKError where error.status == 404 {
             hasMailbox = false
             mailboxMissing = true
         } catch {
             notice = error.userMessage
+            noticeOpensRows = false
         }
     }
 }

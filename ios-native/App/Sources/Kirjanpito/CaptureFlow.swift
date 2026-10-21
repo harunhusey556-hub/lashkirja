@@ -23,6 +23,7 @@ import LashKirjaCore
 struct CaptureFlow: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     let transactionId: String?
     /// Called after each receipt is saved (and matched). Not called when the flow is cancelled.
     var onSaved: (() -> Void)? = nil
@@ -34,26 +35,35 @@ struct CaptureFlow: View {
     /// Kuitit under the cover: takes the review queue "Näytä tarkistettavat" asked for, before the cover goes.
     let onReviewQueue: ((ReceiptList) -> Void)?
 
-    /// `opensCamera`: a missing-receipt action goes straight to the camera; "+" → "Lisää tiedosto"
-    /// opens this page so the owner picks camera, photos or files. Kuitit's "Jatka" opens on the
-    /// unfinished files instead.
-    init(transactionId: String?, onSaved: (() -> Void)? = nil, opensCamera: Bool = true, onClose: (() -> Void)? = nil,
-         onReviewQueue: ((ReceiptList) -> Void)? = nil) {
+    /// The page's title: the entry that opened it ("+" → "Lisää tiedosto" names it so), else "Uusi kuitti" (X140).
+    let title: String
+
+    /// `opensCamera`: "+" → "Kuvaa kuitti" and a missing-receipt action go straight to the camera;
+    /// "+" → "Lisää tiedosto" opens this page so the owner picks camera, photos or files. Kuitit's
+    /// "Jatka" opens on the unfinished files instead.
+    init(transactionId: String?, onSaved: (() -> Void)? = nil, opensCamera: Bool = true, title: String = "Uusi kuitti",
+         onClose: (() -> Void)? = nil, onReviewQueue: ((ReceiptList) -> Void)? = nil) {
         self.transactionId = transactionId
         self.onSaved = onSaved
+        self.title = title
         self.onClose = onClose
         self.onReviewQueue = onReviewQueue
         let model = transactionId == nil ? CaptureQueueModel.shared : CaptureQueueModel(transactionId: transactionId)
         _model = State(initialValue: model)
-        _showCamera = State(initialValue: opensCamera && CaptureFlow.cameraAvailable && !model.resuming)
+        let asksCamera = opensCamera && !model.resuming
+        _showCamera = State(initialValue: asksCamera && CaptureFlow.cameraAvailable)
+        _askedCamera = State(initialValue: asksCamera)
     }
 
     @State private var model: CaptureQueueModel
     /// The model is opened once per presentation, not again when the camera cover closes.
     @State private var opened = false
     @State private var showCamera: Bool
+    /// UI tests only (`-LKUITest`): this opening asked for the camera. The simulator has none, so
+    /// the page opens on its picker either way, and this says which entry it was (P1Tests.test16).
+    @State private var askedCamera: Bool
     @State private var showFiles = false
-    /// The photo library, opened from the queue's "Lisää tiedostoja" menu.
+    /// The photo library, opened from the queue's ⋯ menu.
     @State private var showPhotos = false
     @State private var photos: [PhotosPickerItem] = []
     /// Set by `close`: the queue is let go only once the cover is gone, so it never turns into the
@@ -108,7 +118,7 @@ struct CaptureFlow: View {
                         ScrollView { picker.padding(24) }.transition(.opacity)
                     }
                 case .queue:
-                    queueList.transition(.opacity)
+                    queueList.motionProbe("capture-queue").transition(.opacity)
                 case .edit(let rowId, let draft):
                     ReceiptEditor(model: model, rowId: rowId, draft: draft, preview: model.previews[rowId], dirty: $formDirty) { outcome in
                         model.saved(rowId, autoApproved: outcome.approved, invoiceNote: outcome.invoiceNote,
@@ -132,8 +142,14 @@ struct CaptureFlow: View {
                 }
             }
             .motion(.snappy, value: model.notice)
+            .overlay(alignment: .topLeading) {
+                if UITestHooks.active && askedCamera {
+                    Text("kamera").font(.caption2).opacity(0.01).allowsHitTesting(false)
+                        .accessibilityIdentifier("capture-camera-asked")
+                }
+            }
             .formKeyboard()
-            .navigationTitle("Uusi kuitti")
+            .navigationTitle(title)
             .onAppear {
                 EventLog.shared.log(.screen(transactionId.map { "capture.forBankRow(\($0))" } ?? "capture"))
                 model.onSaved = onSaved
@@ -148,7 +164,9 @@ struct CaptureFlow: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { leadingButton }
                 if showsMoreMenu {
-                    ToolbarItem(placement: .topBarTrailing) { moreMenu }
+                    // The motion gate holds this mark against the queue's SCREEN line: the menu
+                    // must arrive with the page's fade, not a beat after it (M002).
+                    ToolbarItem(placement: .topBarTrailing) { moreMenu.onAppear { MotionProbe.shared.mark("capture-toolbar") } }
                 }
             }
             .discardGuard(dirty: guarded, busy: false, asking: $confirmDiscard) { discard() }
@@ -239,6 +257,8 @@ struct CaptureFlow: View {
             } label: {
                 Label("Takaisin", systemImage: "chevron.backward").labelStyle(.titleAndIcon)
             }
+            // In ink, as a system back button (U003).
+            .tint(Theme.ink)
         } else {
             Button(queue.rows.isEmpty ? "Peruuta" : "Sulje") { close() }
         }
@@ -305,7 +325,8 @@ struct CaptureFlow: View {
     /// and went away the moment the last file finished, pulling every row up by its height, and
     /// "Peruuta lähetys" left the section at the same time. The notices now live in the footer under
     /// the rows, the occasional actions in the "…" menu, and the one action section below is there
-    /// from the start: when the queue settles only its title changes.
+    /// from the start: when the queue settles only its title changes. Adding more files is in the
+    /// "…" menu too: one button under the rows, nothing else in the foreground (owner, 2026-10-18).
     private var queueList: some View {
         List {
             Section {
@@ -330,12 +351,6 @@ struct CaptureFlow: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
-                // Matching a bank row: another pick only once the first one is out of the way.
-                if !single || !queue.holdsWork {
-                    addMoreMenu
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
                 // UI tests only (Debug + `-LKUITest`): the simulator has no camera to take a picture with.
                 if UITestHooks.active {
                     fixtureButton.listRowBackground(Color.clear).listRowSeparator(.hidden)
@@ -353,10 +368,9 @@ struct CaptureFlow: View {
             }
         }
         .scrollContentBackground(.hidden)
-        // The bank-row match's primary button, "Lisää tiedostoja" and an import failure come and
-        // go as the queue works: faded, with the rows around them easing into place.
+        // The bank-row match's primary button and an import failure come and go as the queue
+        // works: faded, with the rows around them easing into place.
         .motion(.snappy, value: queue.isFinished)
-        .motion(.snappy, value: queue.holdsWork)
         .motion(.snappy, value: importFailure)
         .motion(.snappy, value: showsQueued)
     }
@@ -365,10 +379,11 @@ struct CaptureFlow: View {
 
     /// Under the rows: the offline notice, then "Lähetys jatkuu…" while files go and the web's upload
     /// summary once they are through. Both lines are always laid out and only one is shown, so the
-    /// swap is a fade and the footer keeps its height.
+    /// swap is a fade and the footer keeps its height. A lone row says its own outcome: the summary
+    /// under it said it a second time, as a count with no noun (X052).
     private var queueFooter: some View {
         let working = !single && queue.isWorking
-        let summary = queue.summaryLine
+        let summary = queue.rows.count > 1 ? queue.summaryLine : nil
         return VStack(alignment: .leading, spacing: 6) {
             if queue.offlineCount > 0 {
                 Text(OfflineReceiptRules.offlineNotice).foregroundStyle(Theme.ink).transition(.opacity)
@@ -386,20 +401,8 @@ struct CaptureFlow: View {
         .motion(.snappy, value: queue.offlineCount > 0)
     }
 
-    /// "Lisää tiedostoja": camera, photos or files in one compact row instead of three big buttons.
-    private var addMoreMenu: some View {
-        Menu {
-            if Self.cameraAvailable {
-                Button { showCamera = true } label: { Label("Kuvaa", systemImage: "camera") }
-            }
-            Button { showPhotos = true } label: { Label("Valitse kuvista", systemImage: "photo.on.rectangle") }
-            Button { showFiles = true } label: { Label("Valitse tiedosto", systemImage: "doc") }
-        } label: {
-            Label("Lisää tiedostoja", systemImage: "plus.circle")
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .foregroundStyle(Theme.accent)
-        }
-    }
+    /// Matching a bank row takes another pick only once the first one is out of the way.
+    private var canAdd: Bool { !single || !queue.holdsWork }
 
     /// The occasional actions of the queue, out of the list so that none of them comes or goes
     /// between the rows and the primary action.
@@ -409,71 +412,117 @@ struct CaptureFlow: View {
 
     private var showsMoreMenu: Bool {
         guard case .queue = model.step else { return false }
-        return hasMoreActions
+        return canAdd || hasMoreActions
     }
 
+    /// Adding more files first, then the occasional actions. The camera, photos and files were a
+    /// "⊕ Lisää tiedostoja" row under "Valmis": a second foreground action (owner, 2026-10-18).
     private var moreMenu: some View {
         Menu {
-            if !single && queue.savedCount > 0 {
-                Button { openReceipts() } label: { Label(ReceiptUploadQueue.receiptsButtonTitle, systemImage: "doc.text.magnifyingglass") }
+            if canAdd {
+                Section {
+                    if Self.cameraAvailable {
+                        Button { showCamera = true } label: { Label("Kuvaa lisää", systemImage: "camera") }
+                    }
+                    Button { showPhotos = true } label: { Label("Valitse kuvista", systemImage: "photo.on.rectangle") }
+                    Button { showFiles = true } label: { Label("Valitse tiedosto", systemImage: "doc") }
+                }
             }
-            if queue.hasFailed {
-                Button { model.retryFailed() } label: { Label("Yritä epäonnistuneet", systemImage: "arrow.clockwise") }
-            }
-            if queue.isWorking {
-                Button { cancelUploads() } label: { Label("Peruuta lähetys", systemImage: "stop.circle") }
-            }
-            if !single && droppable > 0 {
-                Button(role: .destructive) { confirmDropUnsaved = true } label: { Label("Hylkää tallentamattomat", systemImage: "trash") }
+            Section {
+                if !single && queue.savedCount > 0 {
+                    Button { openReceipts() } label: { Label(ReceiptUploadQueue.receiptsButtonTitle, systemImage: "doc.text.magnifyingglass") }
+                }
+                if queue.hasFailed {
+                    Button { model.retryFailed() } label: { Label("Yritä epäonnistuneet", systemImage: "arrow.clockwise") }
+                }
+                if queue.isWorking {
+                    Button { cancelUploads() } label: { Label("Peruuta lähetys", systemImage: "stop.circle") }
+                }
+                if !single && droppable > 0 {
+                    Button(role: .destructive) { confirmDropUnsaved = true } label: { Label("Hylkää tallentamattomat", systemImage: "trash") }
+                }
             }
         } label: { Image(systemName: "ellipsis.circle") }
         .accessibilityLabel("Toiminnot")
     }
 
-    private func queueRow(_ row: UploadQueueRow) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+    /// A saved document's kind is changed from the row's own menu, opened by a tap on the row: an
+    /// accent "⇄ Ostolasku" on every row put a choice few rows need in the foreground (owner,
+    /// 2026-10-18). The row names the kind in its grey line under the name.
+    @ViewBuilder private func queueRow(_ row: UploadQueueRow) -> some View {
+        if row.canSwitchKind, let kind = row.kind {
+            Menu {
+                Button(kind.switchTitle) {
+                    Haptics.selection()
+                    Task { await model.switchKind(row.id) }
+                }
+                .disabled(model.switchingKind.contains(row.id))
+            } label: {
+                rowLines(row).contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .accessibilityLabel([row.name, row.slotText, row.detailText].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityHint(kind.switchTitle)
+            .accessibilityIdentifier("capture-queue-row")
+        } else {
+            rowLines(row)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("capture-queue-row")
+        }
+    }
+
+    private func rowLines(_ row: UploadQueueRow) -> some View {
+        let switching = model.switchingKind.contains(row.id)
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Text(row.name).lineLimitUnlessLarge().truncationMode(.middle)
                 Spacer(minLength: 8)
                 // A fixed slot the spinner fades into: the name keeps its width when a file starts or
                 // finishes. Not a hidden spinner: one spinning unseen keeps the app from going idle.
                 ZStack {
-                    if row.status == .uploading || row.status == .processing || row.status == .saving {
+                    if row.status == .uploading || row.status == .processing || row.status == .saving || switching {
                         ProgressView().controlSize(.small).transition(.opacity)
                     }
                 }
                 .frame(width: 20, height: 20)
-                // A saved document says what the AI made of it, on the line the status had, so the
-                // row keeps its height; one tap turns it around (`CaptureQueueModel.switchKind`).
-                if row.canSwitchKind, let kind = row.kind {
-                    kindSwitch(row, kind: kind)
-                } else {
-                    statusLabel(row)
-                }
+                .motion(.easeOut(duration: 0.15), value: switching)
+                statusLabel(row)
             }
             // One line under the name from the start, its words swapped by a fade: "Jonossa" gaining
             // "Lähetetään" under it moved every row below, and the buttons under the queue, by a line.
-            let detail = (row.status != .ready ? row.progress : nil) ?? row.outcomeText
-            Text(detail ?? row.error ?? " ")
-                .font(.caption)
-                .foregroundStyle(detail == nil && row.error != nil && row.status == .failed ? Theme.danger : Theme.ink2)
-                .contentTransition(.opacity)
-                .accessibilityHidden(detail == nil && row.error == nil)
-            if detail != nil, let error = row.error {
+            // And one line only: a saved bill's outcome wrapped to two and moved "Valmis" down by
+            // 16 pt (X051). A failure's reason is never cut, nor any line at the largest text sizes.
+            // The row's action stands at the end of that line, never on a line of its own: under the
+            // rest, "Käytä lomakkeessa" made a read row 18 pt taller and moved the rows and "Valmis"
+            // below it (motion gate 39374914516). A read row has no words of its own there.
+            let detail = row.detailText
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(detail ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
+                    .lineLimit(row.status == .failed || typeSize.isAccessibilitySize ? nil : 1)
+                    .contentTransition(.opacity)
+                    .accessibilityHidden(detail == nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                // A save the server refused: the form takes the reading from there (web "Käytä lomakkeessa").
+                if row.canOpenForm {
+                    Button("Avaa lomake") { openForm(row) }
+                        .font(.caption.bold())
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.accent)
+                        .layoutPriority(1)
+                }
+                if row.status == .ready && row.draft != nil {
+                    Button("Käytä lomakkeessa") { openForm(row) }
+                        .font(.caption.bold())
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.accent)
+                        .layoutPriority(1)
+                }
+            }
+            if let error = row.error, error != detail {
                 Text(error).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2).transition(.opacity)
-            }
-            // A save the server refused: the form takes the reading from there (web "Käytä lomakkeessa").
-            if row.canOpenForm {
-                Button("Avaa lomake") { openForm(row) }
-                    .font(.caption.bold())
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.accent)
-            }
-            if row.status == .ready && row.draft != nil {
-                Button("Käytä lomakkeessa") { openForm(row) }
-                    .font(.caption.bold())
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.accent)
             }
         }
         // A row's own lines change as its file goes through: the row eases to its new height.
@@ -483,47 +532,29 @@ struct CaptureFlow: View {
     /// The steps a file goes through on its way share one slot, each word faded in over the others:
     /// as one Text swapping its words, "Lähetetään" → "Käsitellään" moved the word's left edge 3–9 pt
     /// after the screen had settled (motion audit bad-capture-upload, shift_probe, run 39067168826).
-    @ViewBuilder private func statusLabel(_ row: UploadQueueRow) -> some View {
-        if Self.onTheWay.contains(row.status) {
-            ZStack(alignment: .trailing) {
+    /// The outcome's word ("Odottaa tarkistusta") fades in over them in the same slot, on one line,
+    /// and the name gives way to it. As a view of its own beside the slot, it crossed the last
+    /// step's word one above the other while the row grew (motion gate 39374914516).
+    private func statusLabel(_ row: UploadQueueRow) -> some View {
+        ZStack(alignment: .trailing) {
+            if Self.onTheWay.contains(row.status) {
                 ForEach(Self.onTheWay, id: \.rawValue) { status in
                     Text(status.label)
                         .opacity(status == row.status ? 1 : 0)
                         .accessibilityHidden(status != row.status)
                 }
+            } else {
+                Text(row.slotText).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
             }
-            .font(.caption)
-            .foregroundStyle(Theme.ink2)
-        } else {
-            Text(row.status.label).font(.caption).foregroundStyle(row.status == .failed ? Theme.danger : Theme.ink2)
         }
+        .font(.caption)
+        .foregroundStyle(Theme.ink2)
+        .lineLimitUnlessLarge()
+        .layoutPriority(typeSize.isAccessibilitySize ? 0 : 1)
     }
 
     /// Short words only: the slot is as wide as the longest of them.
     private static let onTheWay: [UploadQueueStatus] = [.pending, .uploading, .processing, .saving]
-
-    /// "Kuitti ⇄ Ostolasku": the decided kind, and the tap that changes it. While the server works the
-    /// switch only fades; nothing is swapped in or out of the row.
-    private func kindSwitch(_ row: UploadQueueRow, kind: ReceiptDocumentKind) -> some View {
-        let busy = model.switchingKind.contains(row.id)
-        return Button {
-            Haptics.selection()
-            Task { await model.switchKind(row.id) }
-        } label: {
-            Label(kind.title, systemImage: "arrow.left.arrow.right")
-                .labelStyle(.titleAndIcon)
-                .contentTransition(.opacity)
-        }
-        .font(.caption.bold())
-        .buttonStyle(.borderless)
-        .foregroundStyle(Theme.accent)
-        .disabled(busy)
-        .opacity(busy ? 0.5 : 1)
-        .motion(.snappy, value: kind)
-        .motion(.easeOut(duration: 0.15), value: busy)
-        .accessibilityLabel(kind.title)
-        .accessibilityHint(kind.switchTitle)
-    }
 
     // MARK: Picking
 
@@ -676,6 +707,11 @@ struct ReceiptEditor: View {
     /// reports the approval.
     @State private var savedOutcome: ReceiptSaving.Outcome?
     @State private var customCategory: Bool
+    /// The field being typed into. Meanwhile the keyboard's own "Valmis" bar is the only bar over
+    /// it: the pinned save stood there too and covered the row being typed (as on Uusi lasku).
+    @FocusState private var focus: CaptureFormField?
+
+    private enum CaptureFormField: Hashable { case vendor, total, originalAmount, vat(Int), reference, invoiceNumber, notes }
 
     init(model: CaptureQueueModel, rowId: String, draft: ReceiptDraft, preview: URL?, dirty: Binding<Bool>, done: @escaping (ReceiptSaving.Outcome) -> Void) {
         let form = ReceiptForm(draft: draft)
@@ -692,6 +728,30 @@ struct ReceiptEditor: View {
     }
 
     var body: some View {
+        // The save is pinned under the form, so what a failed save points at can sit below it, out
+        // of sight (the category on the first screen, UI suite 39285931841): the form scrolls to the
+        // first field it found wrong, to the failure, or to the duplicate question.
+        ScrollViewReader { proxy in
+            formBody
+                .onChange(of: errors) { _, found in
+                    if let key = form.firstErrorKey(in: found) { bringIntoView("error-\(key)", proxy) }
+                }
+                .onChange(of: failure) { _, now in
+                    if now != nil { bringIntoView("save-failure", proxy) }
+                }
+                .onChange(of: duplicate) { _, now in
+                    if now { bringIntoView("save-duplicate", proxy) }
+                }
+        }
+    }
+
+    /// The row is inserted by the same update that asks for it, so it is scrolled to on the main
+    /// actor's next turn, once the form has it.
+    private func bringIntoView(_ id: String, _ proxy: ScrollViewProxy) {
+        Task { @MainActor in withMotion(.snappy) { proxy.scrollTo(id, anchor: .center) } }
+    }
+
+    private var formBody: some View {
         Form {
             // The document first, the reading below it: a wrong reading shows against the receipt.
             if let preview {
@@ -711,12 +771,31 @@ struct ReceiptEditor: View {
                 .listRowInsets(EdgeInsets())
             }
             Section {
-                TextField("Myyjä", text: $form.vendor).textContentType(.organizationName)
+                // Labels beside the fields, not placeholders: once filled, the rows read only
+                // "Testikauppa Oy" and "12,40", with nothing to say which was the amount (U095).
+                // A name is not a word to correct (U009).
+                LabeledContent("Myyjä") {
+                    TextField("", text: $form.vendor)
+                        .textContentType(.organizationName)
+                        .autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing)
+                        .focused($focus, equals: .vendor)
+                }
                 fieldError("vendor")
                 DatePicker("Päivä", selection: dateBinding, displayedComponents: .date)
                 fieldError("date")
-                TextField("Summa €", text: Binding(get: { form.totalText }, set: { form.setTotal($0) }))
-                    .moneyInput()
+                // The euro sign stays beside the figure, as in Muokkaa kuittia. The name is on the
+                // field itself, so the field stays one element that can be typed into.
+                LabeledContent("Summa") {
+                    HStack(spacing: 4) {
+                        TextField("0,00", text: Binding(get: { form.totalText }, set: { form.setTotal($0) }))
+                            .moneyInput()
+                            .multilineTextAlignment(.trailing)
+                            .accessibilityLabel("Summa euroina")
+                            .focused($focus, equals: .total)
+                        Text("€").foregroundStyle(Theme.ink2).accessibilityHidden(true)
+                    }
+                }
                 fieldError("totalAmount")
                 // Which rate priced the euro total of a foreign document (web `fxNote`).
                 if let rate = form.fxNote {
@@ -733,47 +812,49 @@ struct ReceiptEditor: View {
                     if form.isForeign {
                         TextField(ReceiptCurrency.originalAmountLabel(form.currency), text: $form.originalAmountText)
                             .moneyInput()
+                            .focused($focus, equals: .originalAmount)
                         fieldError("originalAmount")
                     }
                 }
             }
+            // No "Kategoria" header: the picker names itself, and the word stood twice (M009).
             Section {
                 ReceiptCategoryField(category: $form.category, custom: $customCategory)
                 fieldError("category")
-            } header: {
-                Text("Kategoria")
             }
             vatSection
             Section {
-                TextField("Viitenumero", text: $form.reference)
+                LabeledContent("Viitenumero") {
+                    TextField("", text: $form.reference).multilineTextAlignment(.trailing).focused($focus, equals: .reference)
+                }
                 fieldError("reference")
-                TextField("Laskun numero", text: $form.invoiceNumber)
+                LabeledContent("Laskun numero") {
+                    TextField("", text: $form.invoiceNumber).multilineTextAlignment(.trailing).focused($focus, equals: .invoiceNumber)
+                }
                 fieldError("invoiceNumber")
-                TextField("Muistiinpano", text: $form.notes, axis: .vertical)
+                LabeledContent("Muistiinpano") {
+                    TextField("", text: $form.notes, axis: .vertical).multilineTextAlignment(.trailing).focused($focus, equals: .notes)
+                }
                 fieldError("notes")
             } header: {
                 Text("Lisätiedot")
             }
-            if let failure { Section { Text(failure).foregroundStyle(Theme.danger) }.transition(.opacity) }
+            if let failure { Section { Text(failure).foregroundStyle(Theme.danger).id("save-failure") }.transition(.opacity) }
             if duplicate {
                 // Both answers to the look-alike question; before W27 "no" had no button and the
                 // file waited under "Kesken" for good.
                 Section {
                     Button("Tallenna silti") { Task { await save(forceDuplicate: true) } }
                         .disabled(busy)
+                        .id("save-duplicate")
                     Button(ReceiptSaving.skipDuplicateTitle, role: .destructive) { Task { await skipDuplicate() } }
                         .disabled(busy)
                 } footer: { Text("Sama kuitti on jo tallennettu. \"\(ReceiptSaving.skipDuplicateTitle)\" poistaa tämän tiedoston.") }
             }
-            Section {
-                Button { Task { await save(forceDuplicate: false) } } label: {
-                    Text("Tallenna kuitti").frame(maxWidth: .infinity, minHeight: 44).font(.headline)
-                }
-                .buttonStyle(.primary)
-                .disabled(busy)
-                .listRowBackground(Color.clear)
-            }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.canvas)
+        .safeAreaInset(edge: .bottom, spacing: 0) { if focus == nil { saveBar } }
         // Field errors, the duplicate question, a currency or VAT row coming or going: the rows
         // below ease to their new place.
         .motion(.snappy, value: errors)
@@ -795,9 +876,30 @@ struct ReceiptEditor: View {
         Binding(get: { APIDate.pickerDate(form.date) ?? Date() }, set: { form.setDate(APIDate.pickerDay($0)) })
     }
 
+    /// "Tallenna kuitti" under the form from its first frame, on the canvas: as the form's last row
+    /// it sat under the picture, the fields and the VAT rows, out of sight (M009). While the save
+    /// runs it keeps its size; the words give way to a spinner that exists only then (a spinner
+    /// hidden but spinning keeps the app from going idle).
+    private var saveBar: some View {
+        Button { Task { await save(forceDuplicate: false) } } label: {
+            Text("Tallenna kuitti")
+                .font(.headline)
+                .opacity(busy ? 0 : 1)
+                .overlay { if busy { ProgressView().tint(Theme.onInk).transition(.opacity) } }
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.primary)
+        .disabled(busy)
+        .accessibilityLabel("Tallenna kuitti")
+        .motion(.easeOut(duration: 0.15), value: busy)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Theme.canvas.ignoresSafeArea(edges: .bottom))
+    }
+
     @ViewBuilder private func fieldError(_ key: String) -> some View {
         if let message = errors[key] {
-            Text(message).font(.caption).foregroundStyle(Theme.danger)
+            Text(message).font(.caption).foregroundStyle(Theme.danger).id("error-\(key)")
         }
     }
 
@@ -819,6 +921,7 @@ struct ReceiptEditor: View {
                     TextField("ALV €", text: Binding(get: { row.amountText }, set: { form.setVatAmount($0, at: index) }))
                         .moneyInput()
                         .multilineTextAlignment(.trailing)
+                        .focused($focus, equals: .vat(index))
                     Button(role: .destructive) { form.removeVatRow(at: index) } label: { Image(systemName: "minus.circle").tapTarget() }
                         .buttonStyle(.borderless)
                         .accessibilityLabel("Poista ALV-rivi")

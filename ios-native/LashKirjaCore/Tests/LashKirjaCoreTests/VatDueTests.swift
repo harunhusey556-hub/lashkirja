@@ -94,6 +94,13 @@ import Foundation
     #expect(VatFiling.stateLabel(.paid, nothingToPay: false) == "Maksettu")
 }
 
+@Test func theChooseStepNamesAMonthInLowerCaseMidSentence() {
+    // U017: "kaudelle Syyskuu 2026" capitalised the month inside the sentence.
+    #expect(VatFiling.chooseStepText(period: "2026-09") == "Valitse Arvonlisävero ja kausiveroilmoitus kaudelle syyskuu 2026.")
+    #expect(VatFiling.chooseStepText(period: "2026-Q3") == "Valitse Arvonlisävero ja kausiveroilmoitus kaudelle Q3/2026.")
+    #expect(VatFiling.chooseStepText(period: "2026") == "Valitse Arvonlisävero ja kausiveroilmoitus kaudelle 2026.")
+}
+
 @Test func filingStepsEndInOneFullStop() {
     #expect(VatFiling.fileStepText(dueIso: "2026-10-12", periodYear: 2026)
             == "Kirjoita kentät tältä sivulta ja lähetä ilmoitus viimeistään 12.10.")

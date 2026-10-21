@@ -102,3 +102,26 @@ private func extracted(_ json: String) throws -> Extracted {
     guard case .draft(let noVat) = none.makeDraft(uploadId: "u1") else { Issue.record("expected a draft"); return }
     #expect(noVat.vatDetails.isEmpty)
 }
+
+/// A failed save scrolls the capture form to the error highest on it: the category, below the
+/// first screen, when it is the only one; a field above it when that is wrong too.
+@Test func aFailedSaveGoesToTheHighestFieldItFoundWrong() throws {
+    var form = ReceiptForm(draft: ReceiptDraft(uploadId: "u1", extracted: try extracted(#"{"vendor":"K-Market","date":"2026-10-03","totalAmount":12.55,"type":"meno","category":""}"#)))
+    guard case .invalid(let category) = form.makeDraft(uploadId: "u1") else { Issue.record("expected invalid"); return }
+    #expect(form.firstErrorKey(in: category) == "category")
+
+    form.addVatRow()
+    form.notes = String(repeating: "x", count: ReceiptForm.limits.notes + 1)
+    guard case .invalid(let below) = form.makeDraft(uploadId: "u1") else { Issue.record("expected invalid"); return }
+    #expect(below["vat-1"] != nil && below["notes"] != nil)
+    #expect(form.firstErrorKey(in: below) == "category")
+
+    form.category = "tarvikkeet"
+    guard case .invalid(let vat) = form.makeDraft(uploadId: "u1") else { Issue.record("expected invalid"); return }
+    #expect(form.firstErrorKey(in: vat) == "vat-1")
+
+    form.vendor = ""
+    guard case .invalid(let vendor) = form.makeDraft(uploadId: "u1") else { Issue.record("expected invalid"); return }
+    #expect(form.firstErrorKey(in: vendor) == "vendor")
+    #expect(form.firstErrorKey(in: [:]) == nil)
+}

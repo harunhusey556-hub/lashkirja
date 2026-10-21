@@ -13,6 +13,7 @@ import {
   vatAmountToPay,
   vatChangedNote,
   vatChangedSinceFiling,
+  vatChooseStepText,
   vatFileStepText,
   vatFiledNote,
   vatFilingState,
@@ -110,7 +111,7 @@ export function VatFilingCard({
         {state === "open" ? (
           <ol className="list-decimal space-y-1 pl-5 text-caption text-ink-2">
             <li>Kirjaudu OmaVeroon (vero.fi/omavero).</li>
-            <li>Valitse Arvonlisävero ja kausiveroilmoitus kaudelle {periodLabel}.</li>
+            <li>{vatChooseStepText(periodLabel)}</li>
             <li>{vatFileStepText(dueIso, periodYear)}</li>
             {payStep ? (
               <li>{payStep} Viitenumero ja tilinumero ovat OmaVerossa kohdassa Maksut.</li>
