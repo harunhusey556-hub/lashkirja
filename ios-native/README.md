@@ -11,8 +11,9 @@ SwiftUI app that talks to the LashKirja server API (`app/`) with a bearer token.
 
 CI (`.github/workflows/ios-native.yml`) on every push to `native`:
 Linux core tests → macOS simulator build + tests → unsigned IPA artifact
-`LashKirja-native-unsigned-ipa`. Run it by hand from the Actions tab with
-another `api_base_url` when the server moves.
+`LashKirja-native-unsigned-ipa`, with the build's dSYMs as `LashKirja-native-dsyms`
+(they symbolicate MetricKit crash reports from that IPA). Run it by hand from the
+Actions tab with another `api_base_url` when the server moves.
 
 On a Mac with Xcode 26: `brew install xcodegen && cd App && xcodegen generate &&
 open LashKirja.xcodeproj`, set your team for signing, run on a device.
