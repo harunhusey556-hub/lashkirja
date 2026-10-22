@@ -171,7 +171,7 @@ describe("GET /api/reports/profit-loss - sales invoices are income", () => {
     expect(body.total.invoiceCount).toBe(2);
     expect(body.total.receiptCount).toBe(1);
     expect(body.total.incomeByCategory).toEqual([
-      { category: "Myyntilaskut", gross: 376.5, vat: 76.5, net: 300, count: 2 },
+      { category: "Myyntilaskut", gross: 376.5, vat: 76.5, net: 300, count: 2, purchaseInvoiceCount: 0 },
     ]);
     expect(body.basis).toBe("laskutusperuste");
     // Paid in April, but income belongs to the invoice month.

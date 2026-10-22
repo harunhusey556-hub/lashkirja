@@ -166,6 +166,31 @@ describe("S1: the profit and loss equals the ledger", () => {
   });
 });
 
+describe("a figure opens the lists it is made of", () => {
+  it("counts the purchase invoices in each category row, so a row can open Ostolaskut", async () => {
+    const profitLoss: Json = await readJson(
+      await profitLossRoute(buildRequest("GET", "/api/reports/profit-loss?from=2026-03&to=2026-04", undefined, { cookie }))
+    );
+    const rows = Object.fromEntries(
+      profitLoss.total.expenseByCategory.map((row: Json) => [row.category, [row.count, row.purchaseInvoiceCount]])
+    );
+    // Rent is a purchase invoice alone; the supplies mix two receipts with a bill and a supplier credit note.
+    expect(rows).toEqual({ vuokra: [1, 1], tarvikkeet: [4, 2], ohjelmistot: [1, 1], Luokittelematon: [2, 1] });
+    const sum = (index: number) => Object.values<number[]>(rows).reduce((total, row) => total + row[index], 0);
+    expect(sum(1)).toBe(profitLoss.total.purchaseInvoiceCount);
+    // Income rows hold no purchase invoice.
+    expect(profitLoss.total.incomeByCategory.every((row: Json) => row.purchaseInvoiceCount === 0)).toBe(true);
+  });
+
+  it("tells Koti how many of the month's costs are purchase invoices and how many are receipts", async () => {
+    const march: Json = await readJson(await dashboard(buildRequest("GET", "/api/dashboard?month=2026-03", undefined, { cookie })));
+    // March: the rent and the typed-in bill; three expense receipts (the linked invoice is that receipt's).
+    expect(march).toMatchObject({ purchaseInvoiceCount: 2, expenseReceiptCount: 3 });
+    const april: Json = await readJson(await dashboard(buildRequest("GET", "/api/dashboard?month=2026-04", undefined, { cookie })));
+    expect(april).toMatchObject({ purchaseInvoiceCount: 3, expenseReceiptCount: 0 });
+  });
+});
+
 async function booksOfWindow() {
   const sources = await loadAlvPeriodSources(user.id, WINDOW.start, WINDOW.end);
   const entries = await loadLedger(user.id, WINDOW.end);
@@ -211,6 +236,72 @@ describe("S1: a purchase invoice filed from an approved receipt counts once", ()
       expect(after.books.expensesCents - before.books.expensesCents).toBe(30_000);
       expect(after.report.total.expenseNetCents).toBe(after.books.expensesCents);
       expect(after.report.total.profitNetCents).toBe(after.books.resultCents);
+    });
+  }
+});
+
+describe("S1: a receipt is booked the way the ledger posts it", () => {
+  // The ledger takes a receipt's own VAT off the cost under `domestic` only. Reverse charge nets out in
+  // the VAT accounts and foreign VAT is not deductible, so the whole amount is the expense.
+  const foreign = ["eu_service", "eu_goods", "non_eu_service", "non_eu_goods", "foreign_vat_charged"];
+
+  for (const vatTreatment of foreign) {
+    it(`books the whole amount of a ${vatTreatment} receipt that has VAT lines`, async () => {
+      const before = await booksOfWindow();
+      await createReceipt(user.id, {
+        date: "2026-04-21",
+        totalAmountCents: 10_000,
+        vatDetails: '[{"rate":25.5,"amount":20.32}]',
+        category: "ohjelmistot",
+        vatTreatment,
+      });
+      const after = await booksOfWindow();
+
+      expect(after.report.total.expenseGrossCents - before.report.total.expenseGrossCents).toBe(10_000);
+      expect(after.report.total.expenseVatCents - before.report.total.expenseVatCents).toBe(0);
+      expect(after.report.total.expenseNetCents - before.report.total.expenseNetCents).toBe(10_000);
+      expect(after.books.expensesCents - before.books.expensesCents).toBe(10_000);
+      expect(after.report.total.expenseNetCents).toBe(after.books.expensesCents);
+      expect(after.report.total.profitNetCents).toBe(after.books.resultCents);
+    });
+  }
+
+  it("still takes the VAT of a domestic receipt off its cost", async () => {
+    const before = await booksOfWindow();
+    await createReceipt(user.id, { date: "2026-04-21", totalAmountCents: 10_000, vatDetails: '[{"rate":25.5,"amount":20.32}]', vatTreatment: "domestic" });
+    const after = await booksOfWindow();
+    expect(after.report.total.expenseNetCents - before.report.total.expenseNetCents).toBe(7_968);
+    expect(after.books.expensesCents - before.books.expensesCents).toBe(7_968);
+  });
+
+  // A refund or a supplier's credit note is stored negative on every intake path; the ledger posts the
+  // mirror of a purchase, so the expense goes down. The profit and loss took its magnitude and added it.
+  const refunds = [
+    { name: "a refund receipt with negative VAT lines", type: "meno", total: -5_020, vat: '[{"rate":25.5,"amount":-10.2}]', expense: -4_000, income: 0 },
+    { name: "a refund receipt without VAT lines", type: "meno", total: -3_000, vat: null, expense: -3_000, income: 0 },
+    { name: "a refund of income with negative VAT lines", type: "tulo", total: -2_510, vat: '[{"rate":25.5,"amount":-5.1}]', expense: 0, income: -2_000 },
+  ];
+
+  for (const { name, type, total, vat, expense, income } of refunds) {
+    it(`takes ${name} off the figures, as the ledger does`, async () => {
+      const before = await booksOfWindow();
+      await createReceipt(user.id, { type, date: "2026-04-22", totalAmountCents: total, vatDetails: vat, category: type === "tulo" ? "muut_tulot" : "tarvikkeet" });
+      const after = await booksOfWindow();
+
+      expect(after.report.total.expenseNetCents - before.report.total.expenseNetCents).toBe(expense);
+      expect(after.report.total.incomeNetCents - before.report.total.incomeNetCents).toBe(income);
+      expect(after.books.expensesCents - before.books.expensesCents).toBe(expense);
+      expect(after.books.revenueCents - before.books.revenueCents).toBe(income);
+      expect(after.report.total.incomeNetCents).toBe(after.books.revenueCents);
+      expect(after.report.total.expenseNetCents).toBe(after.books.expensesCents);
+      expect(after.report.total.profitNetCents).toBe(after.books.resultCents);
+
+      // The month it is dated in agrees too.
+      const entries = await loadLedger(user.id, WINDOW.end);
+      const april = incomeStatement(entriesBetween(entries, "2026-04-01", "2026-05-01"));
+      const period = after.report.months.find((candidate) => candidate.month === "2026-04")!;
+      expect(period.expenseNetCents).toBe(april.expensesCents);
+      expect(period.incomeNetCents).toBe(april.revenueCents);
     });
   }
 });

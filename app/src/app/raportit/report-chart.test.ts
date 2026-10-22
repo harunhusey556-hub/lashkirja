@@ -93,4 +93,20 @@ describe("expenseRankedItems", () => {
     expect(items[0]).toMatchObject({ label: "Tarvikkeet", valueCents: 12050, href: "/kuitit?month=2026&type=meno&category=tarvikkeet&drill=1" });
     expect(items[1].href).toBeUndefined();
   });
+
+  it("opens a category made of purchase invoices alone in Ostolaskut", () => {
+    const { items } = expenseRankedItems(
+      [
+        { category: "vuokra", net: 800, count: 2, purchaseInvoiceCount: 2 },
+        { category: "tarvikkeet", net: 120.5, count: 4, purchaseInvoiceCount: 2 },
+        { category: "Luokittelematon", net: 10, count: 1, purchaseInvoiceCount: 1 },
+      ],
+      2026,
+    );
+    expect(items.map((item) => item.href)).toEqual([
+      "/kirjanpito/ostolaskut",
+      "/kuitit?month=2026&type=meno&category=tarvikkeet&drill=1",
+      "/kirjanpito/ostolaskut",
+    ]);
+  });
 });

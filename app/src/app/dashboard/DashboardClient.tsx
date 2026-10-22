@@ -53,7 +53,7 @@ import { detailHref } from "@/lib/routes";
 import { showToast } from "@/lib/toast";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { ReminderSheet } from "@/components/invoices/ReminderSheet";
-import { receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
+import { kotiExpenseHref, receiptDrillHref, statementDrillHref } from "@/lib/report-drill";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { MONTHS } from "@/lib/finnish-months";
 import { pageCacheFetchedAt, readPageCache, writePageCache } from "@/lib/page-cache";
@@ -113,6 +113,9 @@ interface DashboardData {
   txCount: number;
   receiptCount: number;
   invoiceCount?: number;
+  /** Purchase invoices and expense receipts the month's Kulut is made of; absent from an older server. */
+  purchaseInvoiceCount?: number;
+  expenseReceiptCount?: number;
   estimatedVat: number;
   isRefund: boolean;
   matching: { matchable: number; matched: number; suggested: number };
@@ -775,8 +778,7 @@ export default function DashboardClient() {
       : (data.invoiceCount ?? 0) > 0
         ? `/laskut?month=${month}`
         : receiptDrillHref({ month, type: "tulo" });
-  const menotHref =
-    data?.source === "tiliote" ? statementDrillHref(month) : receiptDrillHref({ month, type: "meno" });
+  const menotHref = kotiExpenseHref(data, month);
   // FP-4 / TF-01: the current month shows the next return actually due (the
   // same row as Kirjanpito); a past month shows the return that month closes.
   const vatPastPeriod = atCurrent ? null : vatPeriodEndingIn(month, vatPeriodKindOf(profile?.vatPeriod));

@@ -67,6 +67,8 @@ interface CategoryRow {
   vat: number;
   net: number;
   count: number;
+  /** How many of `count` are purchase invoices; absent from an older cached report. */
+  purchaseInvoiceCount?: number;
 }
 
 interface Period {
