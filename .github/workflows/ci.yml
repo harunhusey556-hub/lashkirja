@@ -100,6 +100,14 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_swipe_roles.py'
           python3 scripts/swipe-roles.py ios-native/App/Sources
 
+      # A write's failure put in the list as a Section or a row pushes what lies under it down
+      # (U045, G003); the screen says it with .failureToast or .noticeToast instead.
+      - name: Failures are toasts, not list rows
+        working-directory: .
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_inline_failures.py'
+          python3 scripts/inline-failures.py ios-native/App/Sources
+
       # The iOS native workflow reads its build logs with this script: its reading of them is tested here.
       - name: Compiler warning gate
         working-directory: .

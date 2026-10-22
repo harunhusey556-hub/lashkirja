@@ -24,7 +24,15 @@ struct RecurringPurchasesView: View {
             if unavailable {
                 Section {
                     ContentUnavailableView {
-                        Label("Tulossa pian", systemImage: "clock")
+                        // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                        Label {
+                            Text("Tulossa pian")
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "clock")
+                        }
                     } description: {
                         Text(RecurringPurchaseText.unavailable)
                     }
@@ -44,6 +52,9 @@ struct RecurringPurchasesView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .noticeToast($notice, action: createdInvoiceId.map { id in
+            ToastAction("Avaa ostolasku", run: { pushed = Route.purchaseInvoice(id) })
+        })
         .navigationTitle(RecurringPurchaseText.title)
         .toolbar {
             if !unavailable {
@@ -84,19 +95,18 @@ struct RecurringPurchasesView: View {
     @ViewBuilder
     private func content(_ list: RecurringPurchaseList) -> some View {
         let rows = list.ordered.filter { !app.removedIds.contains($0.id) }
-        if let notice {
-            Section {
-                Text(notice).font(.subheadline)
-                if let createdInvoiceId {
-                    NavigationLink(value: Route.purchaseInvoice(createdInvoiceId)) { Text("Avaa ostolasku") }
-                }
-            }
-            .listRowBackground(Theme.accentSoft)
-        }
         if rows.isEmpty {
             Section {
                 ContentUnavailableView {
-                    Label("Ei toistuvia ostolaskuja", systemImage: "repeat")
+                    // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                    Label {
+                        Text("Ei toistuvia ostolaskuja")
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "repeat")
+                    }
                 } description: {
                     Text("Vuokra ja muut säännölliset kulut tulevat ostolaskuiksi itsestään joka kerta.")
                 } actions: {
@@ -254,6 +264,7 @@ struct RecurringPausedBadge: View {
 struct RecurringPurchaseDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openRoute) private var openRoute
     let recurringId: String
     var initial: RecurringPurchase?
 
@@ -279,6 +290,7 @@ struct RecurringPurchaseDetailView: View {
             } else if missing {
                 Section { Text("Toistuva ostolasku on poistettu. Jo luodut ostolaskut säilyvät.").foregroundStyle(Theme.ink2) }
             } else if let failure {
+                // inline failure kept: the screen itself, a load that failed with nothing to show
                 Section { Text(failure).foregroundStyle(Theme.danger) }
             } else {
                 ProgressView().frame(maxWidth: .infinity, minHeight: 200).listRowBackground(Color.clear)
@@ -286,6 +298,11 @@ struct RecurringPurchaseDetailView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        // With nothing to show the failure is the screen itself (above), not a toast over a spinner.
+        .failureToast(current == nil ? Binding<String?>.constant(nil) : $failure)
+        .noticeToast($notice, action: createdInvoiceId.map { id in
+            ToastAction("Avaa ostolasku", run: { openRoute(Route.purchaseInvoice(id)) })
+        })
         .navigationTitle(current?.supplierName ?? "Toistuva ostolasku")
         .navigationBarTitleDisplayMode(.inline)
         .disabled(busy)
@@ -308,18 +325,6 @@ struct RecurringPurchaseDetailView: View {
 
     @ViewBuilder
     private func content(_ entry: RecurringPurchase) -> some View {
-        if let notice {
-            Section {
-                Text(notice).font(.subheadline)
-                if let createdInvoiceId {
-                    NavigationLink(value: Route.purchaseInvoice(createdInvoiceId)) { Text("Avaa ostolasku") }
-                }
-            }
-            .listRowBackground(Theme.accentSoft)
-        }
-        if let failure {
-            Section { Text(failure).font(.footnote).foregroundStyle(Theme.danger) }
-        }
         Section {
             LabeledContent("Toisto", value: entry.scheduleText)
             LabeledContent("Seuraava", value: entry.nextRunDate.map(APIDate.displayDay) ?? "Päättynyt")
@@ -522,13 +527,10 @@ struct RecurringPurchaseFormSheet: View {
                         .lineLimit(2...5)
                     fieldError(.notes)
                 }
-
-                if let failure {
-                    Section { Text(failure).foregroundStyle(Theme.danger) }
-                }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi toistuva ostolasku" : "Muokkaa toistuvaa")
             .navigationBarTitleDisplayMode(.inline)

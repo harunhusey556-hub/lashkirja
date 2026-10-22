@@ -269,8 +269,8 @@ struct CaptureFlow: View {
             Image(systemName: "doc.viewfinder").scaledFont(size: 54, relativeTo: .largeTitle).foregroundStyle(Theme.accent).accessibilityHidden(true)
             Text("Lisää kuva tai PDF kuitista tai laskusta").font(.headline).multilineTextAlignment(.center)
             pickButtons
+            // inline failure kept: under the buttons, so they never move when it comes or goes
             if let importFailure { Text(importFailure).font(.footnote).foregroundStyle(Theme.danger).transition(.opacity) }
-            // Under the buttons, so they never move when it comes or goes.
             if showsQueued {
                 QueuedReceiptsStatus().padding(.top, 8).transition(.opacity)
             }
@@ -356,6 +356,7 @@ struct CaptureFlow: View {
                     fixtureButton.listRowBackground(Color.clear).listRowSeparator(.hidden)
                     queueFixtureButton.listRowBackground(Color.clear).listRowSeparator(.hidden)
                 }
+                // inline failure kept: under the actions, so nothing above it moves
                 if let importFailure {
                     Text(importFailure).font(.footnote).foregroundStyle(Theme.danger).listRowSeparator(.hidden)
                         .transition(.opacity)
@@ -730,14 +731,12 @@ struct ReceiptEditor: View {
     var body: some View {
         // The save is pinned under the form, so what a failed save points at can sit below it, out
         // of sight (the category on the first screen, UI suite 39285931841): the form scrolls to the
-        // first field it found wrong, to the failure, or to the duplicate question.
+        // first field it found wrong, or to the duplicate question. The failure is the toast, over
+        // the form and above the save.
         ScrollViewReader { proxy in
             formBody
                 .onChange(of: errors) { _, found in
                     if let key = form.firstErrorKey(in: found) { bringIntoView("error-\(key)", proxy) }
-                }
-                .onChange(of: failure) { _, now in
-                    if now != nil { bringIntoView("save-failure", proxy) }
                 }
                 .onChange(of: duplicate) { _, now in
                     if now { bringIntoView("save-duplicate", proxy) }
@@ -839,7 +838,6 @@ struct ReceiptEditor: View {
             } header: {
                 Text("Lisätiedot")
             }
-            if let failure { Section { Text(failure).foregroundStyle(Theme.danger).id("save-failure") }.transition(.opacity) }
             if duplicate {
                 // Both answers to the look-alike question; before W27 "no" had no button and the
                 // file waited under "Kesken" for good.
@@ -854,11 +852,12 @@ struct ReceiptEditor: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        // Before the save's inset, so the toast stands above the save and not behind it.
+        .failureToast($failure)
         .safeAreaInset(edge: .bottom, spacing: 0) { if focus == nil { saveBar } }
         // Field errors, the duplicate question, a currency or VAT row coming or going: the rows
         // below ease to their new place.
         .motion(.snappy, value: errors)
-        .motion(.snappy, value: failure)
         .motion(.snappy, value: duplicate)
         .motion(.snappy, value: form.type)
         .motion(.snappy, value: form.isForeign)

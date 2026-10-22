@@ -94,6 +94,45 @@ final class P2Tests: WalkTestCase {
         XCTAssertTrue(alert.waitForNonExistence(timeout: 5), "Peruuta left Summarajaus up")
     }
 
+    /// G003: a failure is said without moving the screen. Summarajaus with the lower limit above the
+    /// upper one is refused on the phone, and the refusal stood as a row above Kuitit's chips and pushed
+    /// them down, as U045's card did above the invoice's tabs.
+    func testP_AFailureDoesNotMoveKuitit() {
+        guard openKuitit() else { XCTFail("Kuitit did not open"); return }
+        let chips = app.descendants(matching: .any).matching(identifier: "receipt-chips").firstMatch
+        guard chips.waitForExistence(timeout: 20) else { dump(app, "p2p-no-chips"); XCTFail("Kuitit has no chip row"); return }
+        waitStill(chips)
+        let before = chips.frame.minY
+        let actions = app.navigationBars["Kuitit"].buttons["Toiminnot"].firstMatch
+        guard actions.waitForExistence(timeout: 10) else { XCTFail("no Toiminnot on Kuitit"); return }
+        actions.tap(); taps += 1
+        let filter = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Suodata")).firstMatch
+        guard filter.waitForExistence(timeout: 5) else { dump(app, "p2p-menu"); XCTFail("Toiminnot has no Suodata"); return }
+        filter.tap(); taps += 1
+        let amount = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Summa\u{2026}")).firstMatch
+        guard amount.waitForExistence(timeout: 5) else { dump(app, "p2p-filter"); XCTFail("Suodata has no Summa\u{2026}"); return }
+        amount.tap(); taps += 1
+        let alert = app.alerts["Summarajaus"]
+        guard alert.waitForExistence(timeout: 5), alert.textFields.count == 2 else {
+            dump(app, "p2p-no-alert"); XCTFail("Summa\u{2026} did not ask for the two limits"); return
+        }
+        let lower = alert.textFields.element(boundBy: 0)
+        lower.tap(); lower.typeText("100")
+        let upper = alert.textFields.element(boundBy: 1)
+        upper.tap(); upper.typeText("5")
+        alert.buttons["Käytä"].tap(); taps += 1
+        let failure = app.staticTexts["Summarajaus on virheellinen"].firstMatch
+        let said = failure.waitForExistence(timeout: 10)
+        if said { waitStill(failure) }
+        shot("p2p-kuitit-failure"); dump(app, "p2p-kuitit-failure")
+        check("P2 P the refused limits are said", said)
+        if said {
+            let moved = chips.frame.minY - before
+            note("INFO P2 P chips at \(before), after the failure \(chips.frame.minY)")
+            XCTAssertLessThanOrEqual(abs(moved), 1, "the failure moved Kuitit's chips \(moved) pt")
+        }
+    }
+
     /// X043 (P4): a chip alone is not a search. Tulot (0) said "Ei hakua vastaavia kuitteja." with
     /// nothing narrowed. The demo account has an income receipt (Korttimaksut, in the finished month),
     /// so this signs in as the seed's second account, which has none. That account's sessions end with

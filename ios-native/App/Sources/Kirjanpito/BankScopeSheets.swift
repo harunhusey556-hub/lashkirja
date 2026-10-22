@@ -90,7 +90,6 @@ struct BankScopeSheet: View {
                     if let problem, !done {
                         Text(problem).font(.caption).foregroundStyle(Theme.warning)
                     }
-                    if let failure { Text(failure).foregroundStyle(Theme.danger) }
                     FetchProgress(phase: phase)
                     if done {
                         Button("Valmis") { finish() }
@@ -107,6 +106,7 @@ struct BankScopeSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .navigationTitle("Kirjanpitoon kuuluvat tilit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -251,7 +251,6 @@ struct BankHistorySheet: View {
                 }
                 .disabled(phase.busy || done)
                 Section {
-                    if let failure { Text(failure).foregroundStyle(Theme.danger) }
                     FetchProgress(phase: phase)
                     if done {
                         Button("Valmis") { finish() }.buttonStyle(.primary).frame(maxWidth: .infinity)
@@ -266,6 +265,7 @@ struct BankHistorySheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .navigationTitle("Hae vanhempia tapahtumia")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

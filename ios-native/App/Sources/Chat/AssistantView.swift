@@ -482,6 +482,7 @@ private struct ConversationsSheet: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
+                // inline failure kept: a line in the bar under the list, which no row gives way to
                 if let failure {
                     Text(failure)
                         .font(.footnote)
