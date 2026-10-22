@@ -43,4 +43,13 @@ extension View {
     func phoneInput() -> some View {
         keyboardType(.phonePad).textContentType(.telephoneNumber)
     }
+
+    /// A tap anywhere in a named field's row, the name included, puts the cursor in the field. In a
+    /// LabeledContent the name is its own text drawn over the left of the field's frame, and a tap on
+    /// it reached nothing; a long name covered the row's middle too (F004). Put it on the row, with
+    /// the same `focused(_:equals:)` value on the field; for a name above its field, on the
+    /// name alone, so a multi-line text view keeps its own touches.
+    func tapFocuses<Value: Hashable>(_ focus: FocusState<Value?>.Binding, equals value: Value) -> some View {
+        contentShape(Rectangle()).onTapGesture { focus.wrappedValue = value }
+    }
 }
