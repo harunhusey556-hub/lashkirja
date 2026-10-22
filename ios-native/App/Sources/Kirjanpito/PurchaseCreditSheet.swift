@@ -60,10 +60,10 @@ struct PurchaseCreditSheet: View {
                     TextField("Hyvityslaskun numero (valinnainen)", text: $form.number)
                     TextField("Syy, esim. palautus tai hinnanalennus", text: $form.reason)
                 }
-                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle("Hyvitä ostolasku")
             .navigationBarTitleDisplayMode(.inline)

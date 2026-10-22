@@ -109,13 +109,10 @@ struct PurchaseInvoiceFormView: View {
                 } header: {
                     Text("Lisätiedot")
                 }
-
-                if let failure {
-                    Section { Text(failure).foregroundStyle(Theme.danger) }
-                }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             // "Muu kategoria…" adds its text row: the rows below ease to their new place.
             .motion(.snappy, value: customCategory)
@@ -236,12 +233,10 @@ struct PurchasePaymentSheet: View {
                 } footer: {
                     Text("Avoinna \(Money.format(invoice.open))")
                 }
-                if let failure {
-                    Section { Text(failure).foregroundStyle(Theme.danger) }
-                }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle("Kirjaa maksu")
             .navigationBarTitleDisplayMode(.inline)
@@ -317,12 +312,10 @@ struct PurchaseMarkPaidSheet: View {
                 } footer: {
                     Text("Laskulle ei ole kirjattu maksuja koko summalle (avoinna \(Money.format(invoice.open))). Kirjoita vähintään kolmen merkin perustelu, esim. maksettu käteisellä.")
                 }
-                if let failure {
-                    Section { Text(failure).foregroundStyle(Theme.danger) }
-                }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle("Merkitse maksetuksi")
             .navigationBarTitleDisplayMode(.inline)

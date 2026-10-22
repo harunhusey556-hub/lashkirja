@@ -172,6 +172,9 @@ struct BankAccountsView: View {
                 Text("Tuo tiliote tiedostona ja selaa tuotuja tiedostoja.")
             }
             if let notice { Text(notice).foregroundStyle(Theme.success) }
+            // It is also the first load's failure, which the placeholder above waits on: a toast, once
+            // closed, would bring the placeholder back.
+            // inline failure kept: the list's last row, and the screen's load state
             if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
         .scrollContentBackground(.hidden)
@@ -528,10 +531,10 @@ struct BankAccountFormSheet: View {
                     fieldError(errors.openingBalance)
                     DatePicker("Avauspäivä", selection: $date, displayedComponents: .date)
                 }
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle(account == nil ? "Uusi pankkitili" : "Muokkaa tiliä")
             .navigationBarTitleDisplayMode(.inline)
@@ -635,7 +638,6 @@ struct BankAccountDetailSheet: View {
                         LabeledContent("Saldo") { MoneyText(amount: balance).fontWeight(.semibold) }
                     }
                 }
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
                 Section {
                     switch rollforward.display {
                     case .loading:
@@ -670,6 +672,7 @@ struct BankAccountDetailSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle(account.name)
             .navigationBarTitleDisplayMode(.inline)
@@ -865,7 +868,6 @@ struct BankPickerSheet: View {
                 }
                 .pickerStyle(.segmented)
                 .listRowBackground(Color.clear)
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
                 if let list = banks.value {
                     if let banner = banks.banner {
                         Section { RefreshFailureBanner(failure: banner, retry: load) }
@@ -894,6 +896,7 @@ struct BankPickerSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .searchable(text: $search, prompt: "Hae pankkia")
             .navigationTitle("Yhdistä pankki")
             .navigationBarTitleDisplayMode(.inline)
@@ -943,7 +946,6 @@ struct BankPickerSheet: View {
             }
             .disabled(connecting != nil)
             Section {
-                if let connectFailure { Text(connectFailure).foregroundStyle(Theme.danger) }
                 Button { Task { await connect(bank) } } label: {
                     HStack(spacing: 8) {
                         if connecting != nil { ProgressView().tint(Theme.onInk) }
@@ -958,6 +960,7 @@ struct BankPickerSheet: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($connectFailure)
         .navigationTitle(bank.name)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(connecting != nil)

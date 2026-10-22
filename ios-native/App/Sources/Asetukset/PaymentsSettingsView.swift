@@ -36,14 +36,14 @@ struct PaymentsSettingsView: View {
                 deviceSection
                 // Only a server with a Stripe test key offers it; with a live key it is hidden and ignored.
                 if status.enabled && status.testMode { testModeSection }
-                if let failure { Section { Text(failure).foregroundStyle(Theme.danger).font(.footnote) } }
-                if let notice { Section { Text(notice).foregroundStyle(Theme.success).font(.footnote) } }
             } else {
                 ScreenStateView(state: state, retry: load) { (_: POSStatus) in EmptyView() }.listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
+        .noticeToast($notice)
         .navigationTitle("Maksut")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }

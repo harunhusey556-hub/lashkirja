@@ -102,7 +102,6 @@ struct BankFeedView: View {
                 HStack(spacing: 8) { ProgressView(); Text(syncWaiting ? "Päivitetään…" : "Haetaan tapahtumia pankista…").foregroundStyle(Theme.ink2) }
                     .font(.footnote)
             }
-            if let notice { Text(notice).font(.footnote).foregroundStyle(noticeFailed ? Theme.danger : Theme.success) }
             if confirmable > 0 {
                 Section {
                     VStack(alignment: .leading, spacing: 10) {
@@ -125,7 +124,15 @@ struct BankFeedView: View {
                 }
                 if months.isEmpty {
                     ContentUnavailableView {
-                        Label(month == nil ? "Ei pankkitapahtumia vielä" : "Ei tapahtumia tässä kuussa", systemImage: "building.columns")
+                        // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                        Label {
+                            Text(month == nil ? "Ei pankkitapahtumia vielä" : "Ei tapahtumia tässä kuussa")
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "building.columns")
+                        }
                     } description: { Text("Tuo tiliote tai yhdistä pankki.") } actions: {
                         // Borderless: two buttons in one list row each keep their own tap.
                         Button("Tuo tiliote") { importing = true }.buttonStyle(.borderless)
@@ -194,6 +201,8 @@ struct BankFeedView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast(Binding(get: { noticeFailed ? notice : nil }, set: { if $0 == nil { notice = nil } }))
+        .noticeToast(Binding(get: { noticeFailed ? nil : notice }, set: { if $0 == nil { notice = nil } }))
         .searchable(text: Binding(get: { search }, set: { search = $0; limit.reset() }), prompt: "Hae…")
         .navigationTitle("Pankki")
         .toolbar {
@@ -854,12 +863,12 @@ struct BankRowSheet: View {
                     }
                     .listRowBackground(Color.clear)
                 }
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
                 details
                 if searchable { candidateSection }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .appDestinations()
             // A confirmed link closes the sheet like the other actions.
             .navigationDestination(isPresented: $linkingPurchase) {
