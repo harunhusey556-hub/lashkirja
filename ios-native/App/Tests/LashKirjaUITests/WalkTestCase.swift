@@ -217,11 +217,11 @@ class WalkTestCase: XCTestCase {
         _ = q.firstMatch.waitForExistence(timeout: 12)
         for _ in 0...maxScrolls {
             let e = q.firstMatch
-            if e.exists && e.frame.minY > 30 && e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 {
+            if e.exists && e.frame.minY > 30 && e.frame.maxY < foot(of: e) {
                 // A list still gliding after a swipe takes the tap as a stop, not a choice: the row was
                 // tapped mid-glide and nothing opened (OwnerScreens testJ and testM, run 39528413225).
                 waitStill(e)
-                guard e.frame.minY > 30, e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 else { continue }
+                guard e.frame.minY > 30, e.frame.maxY < foot(of: e) else { continue }
                 e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); taps += 1; return true
             }
             app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1
@@ -270,6 +270,16 @@ class WalkTestCase: XCTestCase {
         }
         return tapLabel("label CONTAINS %@", "· myöhässä", scrolls: maxScrolls ?? 6)
     }
+    /// The lowest a tap target may reach: above what covers the window's foot (`bottomBar`) and above
+    /// a list's own pinned bar. Kuitit's "Kohdista varmat" sits over the last rows; a row under it
+    /// still reads hittable, and the tap linked the sure pairs instead of opening the row (testJ,
+    /// runs 39525838486 and 39796084791: same-day rows come in random order, so only some runs).
+    func foot(of element: XCUIElement, bottomBar: CGFloat = 60) -> CGFloat {
+        let edge = app.windows.firstMatch.frame.maxY - bottomBar
+        let sure = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kohdista varmat")).firstMatch
+        guard sure.exists, !element.label.hasPrefix("Kohdista varmat") else { return edge }
+        return min(edge, sure.frame.minY - 8)
+    }
     /// Scrolls the screen (each swipe counted) until `element` sits inside the window, as tapLabel
     /// does before it taps, and taps nothing: a task can end on the button that does it.
     /// `bottomBar` is what covers the window's foot: the tab bar on a tab, only the home
@@ -278,7 +288,7 @@ class WalkTestCase: XCTestCase {
         let window = app.windows.firstMatch
         for attempt in 0...maxScrolls {
             if element.waitForExistence(timeout: attempt == 0 ? 3 : 1), element.isHittable,
-               element.frame.minY > 30, element.frame.maxY < window.frame.maxY - bottomBar { return true }
+               element.frame.minY > 30, element.frame.maxY < foot(of: element, bottomBar: bottomBar) { return true }
             if attempt < maxScrolls { window.swipeUp(velocity: .slow); scrolls += 1 }
         }
         return false
