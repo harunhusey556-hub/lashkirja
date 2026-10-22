@@ -4,8 +4,8 @@ import { revalidatedJson } from "@/lib/etag-json";
 import { cachedForStamp, readBooksStamp } from "@/lib/books-cache";
 import { UnauthorizedError, ValidationError, withErrorHandler } from "@/lib/api-errors";
 import { monthSchema } from "@/lib/validation";
-import { buildProfitLoss, periodToEuros } from "@/lib/reports";
-import { loadAlvPeriodSources } from "@/lib/alv-period";
+import { periodToEuros } from "@/lib/reports";
+import { loadAlvPeriodSources, profitLossOf } from "@/lib/alv-period";
 
 /** Inclusive month range; defaults to the current calendar year. */
 function resolveRange(from: string | null, to: string | null) {
@@ -33,11 +33,12 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const range = resolveRange(params.get("from"), params.get("to"));
 
   // Same sources as the VAT return: approved receipts plus booked sales
-  // invoices and credit notes, with bank-settled income receipts deduplicated.
+  // invoices and credit notes and the purchase invoices no receipt documents,
+  // with bank-settled income receipts deduplicated.
   // W24: reused while nothing it reads has changed (lib/books-cache.ts), the same rule as Koti.
   const load = async () => {
     const sources = await loadAlvPeriodSources(session.userId, range.gte, range.lt);
-    const report = buildProfitLoss(sources.reportReceipts, sources.reportInvoices);
+    const report = profitLossOf(sources);
     return {
       from: range.start,
       to: range.end,

@@ -181,10 +181,11 @@ final class AppModel {
         // /api/observe above all: an event upload that marked the screens stale made them
         // reload, the reloads logged new events, and the next upload reloaded them again.
         await api.setOnWrite { [weak model] path in
-            guard !path.hasPrefix("/api/auth"), !path.hasPrefix("/api/ai/"), !path.hasPrefix("/api/observe") else { return }
+            guard !path.hasPrefix("/api/auth"), !path.hasPrefix("/api/ai/"), !path.hasPrefix("/api/observe"), let model else { return }
+            // Bound strongly first: the hop below is concurrently-executing code, which may not capture the weak var.
             await MainActor.run {
-                model?.dataVersion += 1
-                model?.settleVersionSoon()
+                model.dataVersion += 1
+                model.settleVersionSoon()
             }
         }
         await api.setOnUnauthorized { [weak model] sentToken in
@@ -656,7 +657,7 @@ final class AppModel {
     /// Asks `/api/sync/version` now and then every 30 s, while signed in and in the foreground.
     private func startVersionPolling() {
         versionPoll?.cancel()
-        guard case .signedIn = phase else { return }
+        guard case .signedIn = phase, !UITestHooks.versionPollOff else { return }
         versionPoll = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }

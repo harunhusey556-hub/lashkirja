@@ -92,6 +92,28 @@ describe("POST /api/auth/token", () => {
     const response = await issue();
     expect(response.status).toBe(403);
   });
+
+  it("does not let a stranger's wrong guesses lock the owner out of the app's sign-in", async () => {
+    process.env.TRUST_PROXY = "true";
+    try {
+      const from = (client: string, password: string) =>
+        issueToken(
+          buildRequest(
+            "POST",
+            "/api/auth/token",
+            { email: user.email, password },
+            { headers: { "x-forwarded-for": client } }
+          )
+        );
+      let last: Response | undefined;
+      for (let attempt = 0; attempt < 6; attempt += 1) last = await from("203.0.113.9", "guess");
+      expect(last?.status).toBe(429);
+
+      expect((await from("198.51.100.7", PASSWORD)).status).toBe(200);
+    } finally {
+      delete process.env.TRUST_PROXY;
+    }
+  });
 });
 
 describe("bearer token authenticates protected routes", () => {

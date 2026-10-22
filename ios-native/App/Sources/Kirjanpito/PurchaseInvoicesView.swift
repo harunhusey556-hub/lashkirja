@@ -65,6 +65,8 @@ struct PurchaseInvoicesView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
+        .noticeToast($message)
         .navigationTitle("Ostolaskut")
         .toolbar {
             if selection.isActive {
@@ -181,16 +183,6 @@ struct PurchaseInvoicesView: View {
             }
         }
 
-        if let message {
-            Section {
-                Text(message).font(.subheadline).foregroundStyle(Theme.ink)
-            }
-            .listRowBackground(Theme.accentSoft)
-        }
-        if let failure {
-            Section { Text(failure).font(.subheadline).foregroundStyle(Theme.danger) }
-        }
-
         if !noPurchases {
             Section {
                 chips.listRowBackground(Color.clear).listRowInsets(EdgeInsets())
@@ -211,7 +203,15 @@ struct PurchaseInvoicesView: View {
             Section {
                 if filter == .all {
                     ContentUnavailableView {
-                        Label("Ei ostolaskuja vielä", systemImage: "doc.text")
+                        // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                        Label {
+                            Text("Ei ostolaskuja vielä")
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "doc.text")
+                        }
                     } description: {
                         Text("Tähän ilmestyvät saamasi ostolaskut ja niiden eräpäivät.")
                     } actions: {
@@ -219,7 +219,15 @@ struct PurchaseInvoicesView: View {
                     }
                 } else {
                     ContentUnavailableView {
-                        Label("Ei ostolaskuja tällä suodattimella", systemImage: "line.3.horizontal.decrease.circle")
+                        // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                        Label {
+                            Text("Ei ostolaskuja tällä suodattimella")
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                        }
                     } description: {
                         Text("Kokeile toista suodatinta.")
                     } actions: {
@@ -698,13 +706,6 @@ struct PurchaseInvoiceDetailView: View {
                 Section {
                     header(invoice).listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                 }
-                if let failure {
-                    Section { Text(failure).font(.footnote).foregroundStyle(Theme.danger) }
-                }
-                if let notice {
-                    Section { Text(notice).font(.subheadline) }
-                        .listRowBackground(Theme.accentSoft)
-                }
                 details(invoice)
                 receiptSection(invoice)
                 if !invoice.isCreditNote { paymentsSection(invoice) }
@@ -722,6 +723,8 @@ struct PurchaseInvoiceDetailView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
+        .noticeToast($notice)
         .navigationTitle(state.value?.supplierName ?? "Ostolasku")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

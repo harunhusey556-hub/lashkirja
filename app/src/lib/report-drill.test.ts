@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   drillFromSearch,
   expenseDrillTarget,
+  expenseDrillTargets,
   incomeDrillTargets,
   invoiceDrillHref,
   receiptDrillHref,
@@ -80,6 +81,20 @@ describe("income drill targets (F71)", () => {
       "/kuitit?month=2026-09&type=meno&drill=1"
     );
     expect(expenseDrillTarget({ month: "2026-09", expenseByCategory: [] })).toBeNull();
+  });
+
+  it("sends purchase invoices to their own list, never to an empty receipts list", () => {
+    // Four expense rows, one of them a purchase invoice: the receipts list holds three.
+    const mixed = { month: "2026-09", purchaseInvoiceCount: 1, expenseByCategory: [{ category: "tarvikkeet", count: 3 }, { category: "vuokra", count: 1 }] };
+    expect(expenseDrillTargets(mixed).map((target) => target.id)).toEqual(["expense-receipts", "purchase-invoices"]);
+    expect(expenseDrillTargets(mixed).map((target) => target.href)).toEqual(["/kuitit?month=2026-09&type=meno&drill=1", "/kirjanpito/ostolaskut"]);
+    // Rent and nothing else: no receipts to open.
+    const rentOnly = { month: "2026-09", purchaseInvoiceCount: 1, expenseByCategory: [{ category: "vuokra", count: 1 }] };
+    expect(expenseDrillTarget(rentOnly)).toBeNull();
+    expect(expenseDrillTargets(rentOnly).map((target) => target.id)).toEqual(["purchase-invoices"]);
+    // An older cached report has no purchase invoice count: receipts as before.
+    expect(expenseDrillTargets({ month: "2026-09", expenseByCategory: [{ category: "vuokra", count: 1 }] }).map((target) => target.id)).toEqual(["expense-receipts"]);
+    expect(expenseDrillTargets({ month: "2026-09", expenseByCategory: [] })).toEqual([]);
   });
 
   it("lets the invoice list reset a remembered status tab", () => {

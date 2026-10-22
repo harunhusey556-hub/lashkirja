@@ -7,8 +7,7 @@ import { csvAttachmentHeaders, csvMoney, toCsv, type CsvValue } from "@/lib/csv"
 import { centsToEuros } from "@/lib/money";
 import { monthSchema } from "@/lib/validation";
 import { creditedCentsOf, displayStatus, openPosition, type InvoiceStatus } from "@/lib/invoices";
-import { loadAlvPeriodSources } from "@/lib/alv-period";
-import { buildProfitLoss } from "@/lib/reports";
+import { loadAlvPeriodSources, profitLossOf } from "@/lib/alv-period";
 
 const typeSchema = z.enum([
   "receipts",
@@ -68,10 +67,10 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       lt: new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1)),
     };
     const sources = await loadAlvPeriodSources(userId, range.gte, range.lt);
-    const report = buildProfitLoss(sources.reportReceipts, sources.reportInvoices);
+    const report = profitLossOf(sources);
     headers = [
       "Kuukausi", "Tulot veroton", "Tulojen ALV", "Menot veroton", "Menojen ALV", "Tulos veroton",
-      "Myyntilaskuja", "Hyvityslaskuja", "Kuitteja",
+      "Myyntilaskuja", "Hyvityslaskuja", "Kuitteja", "Ostolaskuja",
     ];
     rows = [...report.months, { ...report.total, month: "Yhteensä" }].map((period) => [
       period.month,
@@ -83,6 +82,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       period.invoiceCount,
       period.creditNoteCount,
       period.receiptCount,
+      period.purchaseInvoiceCount,
     ]);
     fileName = `tuloslaskelma${suffix}.csv`;
   } else if (type === "receipts") {

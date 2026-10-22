@@ -150,7 +150,7 @@ final class StabilityTests: WalkTestCase {
         for _ in 0..<4 where hubRow.exists && bar.exists && hubRow.frame.minY < bar.frame.maxY {
             app.windows.firstMatch.swipeDown(velocity: .slow)
         }
-        tap("Pankki")
+        _ = tap("Pankki")
         XCTAssertTrue(app.navigationBars["Pankki"].waitForExistence(timeout: 10), "Pankki did not open")
         // The rows' screen (N2), not a screen that is only named Pankki: the hub was one too.
         XCTAssertTrue(app.navigationBars["Pankki"].buttons["Toiminnot"].waitForExistence(timeout: 10), "Pankki opened without its rows' Toiminnot")
@@ -168,7 +168,7 @@ final class StabilityTests: WalkTestCase {
         XCTAssertTrue(app.navigationBars["Lisää tiedosto"].waitForExistence(timeout: 10), "receipt page did not open")
         XCTAssertTrue(app.buttons["Valitse kuvista"].exists || app.staticTexts["Valitse kuvista"].exists, "picker buttons missing")
         shot("stability-lisaa-kuitti")
-        tap("Peruuta"); sleep(1)
+        _ = tap("Peruuta"); sleep(1)
         assertResponsive("lisää kuitti closed")
     }
 
@@ -179,7 +179,7 @@ final class StabilityTests: WalkTestCase {
         assertWarmCanvas(app, under: app.navigationBars["Ilmoita ongelmasta"], "ilmoita ongelmasta")
         let field = app.textFields.firstMatch.exists ? app.textFields.firstMatch : app.textViews.firstMatch
         if field.waitForExistence(timeout: 10) { type(field, "Simulaattoritesti") }
-        tap("Lähetä ilmoitus")
+        _ = tap("Lähetä ilmoitus")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Ilmoitus tallennettu")).firstMatch.waitForExistence(timeout: 15),
                       "no confirmation code after sending")
         // U081: the keyboard leaves with the sent note. It stayed up over the code's line and

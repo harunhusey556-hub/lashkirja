@@ -66,11 +66,6 @@ struct MyyntiView: View {
                     }
                     .listRowBackground(Theme.surface)
                 }
-                if let notice {
-                    Section {
-                        Text(notice).font(.subheadline).foregroundStyle(Theme.ink)
-                    }
-                }
                 Section {
                     // A drilled list is about its rows; the registers stay on the Myynti tab.
                     // The section runs to the screen's edges for the chips: these rows keep the cards' margin.
@@ -127,6 +122,7 @@ struct MyyntiView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .noticeToast($notice)
         .searchable(text: $search, prompt: "Hae asiakasta tai numeroa")
         .refreshable {
             // Pull-to-refresh asks every screen again; this one's own load stands for the bump.
@@ -552,7 +548,6 @@ struct BankMatchSheet: View {
                             if let suggestions = preview.suggestionText { Text(suggestions) }
                         }
                     }
-                    if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
                     if !preview.rows.isEmpty {
                         Section {
                             Button { Task { await run() } } label: {
@@ -574,6 +569,7 @@ struct BankMatchSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .navigationTitle("Maksut pankista")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

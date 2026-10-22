@@ -1,8 +1,8 @@
-import { mkdtempSync, mkdirSync } from "node:fs";
+import fs, { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { diskHealth, healthAuthOk } from "@/lib/health";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { LOW_SPACE_BYTES, diskHealth, healthAuthOk } from "@/lib/health";
 import { pollDelay } from "@/lib/page-activity";
 import {
   allowClientReport,
@@ -70,7 +70,29 @@ describe("health gate", () => {
     expect(diskHealth(path.join(root, "missing")).ok).toBe(false);
     const uploads = path.join(root, "uploads");
     mkdirSync(uploads);
-    expect(diskHealth(uploads)).toEqual({ ok: true, detail: "writable" });
+    // Threshold 0: this asserts writability, not how much space the machine running the test has.
+    expect(diskHealth(uploads, 0)).toEqual({ ok: true, detail: "writable" });
+  });
+
+  it("warns about low space from 5 GB down, not only when the disk is nearly full", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "lashkirja-disk-"));
+    const uploads = path.join(root, "uploads");
+    mkdirSync(uploads);
+    const gib = 1024 * 1024 * 1024;
+    const statfs = vi.spyOn(fs, "statfsSync");
+    const withFree = (bytes: number) => statfs.mockImplementation(() => ({ bavail: bytes / 4096, bsize: 4096 }) as never);
+    try {
+      expect(LOW_SPACE_BYTES).toBe(5 * gib);
+      // 2.7 GB free was the prod disk on 2026-10-21: the old 50 MB limit called that fine.
+      withFree(2.7 * gib);
+      expect(diskHealth(uploads)).toEqual({ ok: false, detail: "low-space" });
+      withFree(5 * gib);
+      expect(diskHealth(uploads)).toEqual({ ok: true, detail: "writable" });
+      withFree(5 * gib - 4096);
+      expect(diskHealth(uploads)).toEqual({ ok: false, detail: "low-space" });
+    } finally {
+      statfs.mockRestore();
+    }
   });
 });
 
