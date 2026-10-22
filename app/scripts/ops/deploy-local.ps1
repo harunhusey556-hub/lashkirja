@@ -24,9 +24,20 @@
     6. prisma migrate deploy against C:\LashKirja\data\prod.db
     7. start the supervisor (the "LashKirja prod" Scheduled Task when registered)
     8. poll http://127.0.0.1:3300/api/health for up to 60 s. The app counts
-       as up when the database and disk checks pass: a 503 caused only by
-       the bank-job or mail checks (a user's failed bank sync in the last
-       24 h, say) is logged as degraded, not treated as a failed deploy.
+       as up when the database answers and the disk is writable: a 503 caused
+       only by the bank-job or mail checks (a user's failed bank sync in the
+       last 24 h, say) or by the disk's low-space is logged as degraded, not
+       treated as a failed deploy.
+
+  run\deploy.lock holds this script's PID for the whole run. watchdog-prod.ps1 reads it and neither
+  probes nor restarts anything while it is held (2026-10-21: the watchdog restarted the app in the
+  middle of a swap and the rollback failed with "file is being used by another process").
+
+  DATABASE_URL: before any npm or prisma call it is set, and only it, from the production .env.
+  prisma.config.ts loads .env through dotenv, which never overrides a variable that is already
+  set, so a DATABASE_URL inherited from the caller (2026-10-21: a test database, P1013 on migrate
+  deploy) used to win over the file. A .env without DATABASE_URL stops the deploy before anything
+  is touched. The value is never logged.
 
   Downtime is steps 3-8, about half a minute (2026-10-08: LashKirja is in
   live use). Before, install and build ran with the server stopped: 1.5 to 6
@@ -85,6 +96,10 @@ function Log([string]$Message) {
   Write-Host $line
 }
 
+# Read-DotEnv, the one parser of .env files the ops scripts share (it handles quoted values the way
+# dotenv does, which a line regex like Get-HealthToken's does not).
+. (Join-Path $OpsDir 'lk-common.ps1')
+
 # Native stderr arrives as ErrorRecords; an empty one would print its type name.
 function Format-Line($Item) {
   if ($Item -is [System.Management.Automation.ErrorRecord]) { return $Item.Exception.Message }
@@ -110,6 +125,16 @@ function Exec([string]$File, [string[]]$ArgList, [string]$Cwd = $AppDir) {
     $ErrorActionPreference = $old
   }
   if ($code -ne 0) { throw "$File $($ArgList -join ' ') exited with code $code" }
+}
+
+# The one variable pinned from the prod .env (see the header). Throws when the file has none, so the
+# caller's environment can never decide which database prisma touches.
+function Set-ProdDatabaseUrl {
+  $envFile = Join-Path $AppDir '.env'
+  $url = (Read-DotEnv $envFile)['DATABASE_URL']
+  if (-not $url) { throw "$envFile has no DATABASE_URL; refusing to run npm or prisma without it" }
+  $env:DATABASE_URL = $url
+  Log 'DATABASE_URL set from the prod .env (value not logged)'
 }
 
 function Get-HealthToken {
@@ -150,14 +175,16 @@ function Test-Health([int]$TimeoutSeconds) {
     } catch {
       $status = $_.Exception.Response.StatusCode.value__
       $last = if ($status) { "HTTP $status" } else { 'unreachable' }
-      # 503 with the database and disk fine means the app serves; only the
-      # bank-job or mail checks are red (a user's failed bank sync keeps
-      # bankJobs red for 24 h). That must not roll a good deploy back.
+      # 503 with the database answering and the disk writable means the app
+      # serves; only the bank-job or mail checks are red (a user's failed bank
+      # sync keeps bankJobs red for 24 h), or the disk is low on space (that
+      # warning is health.ts LOW_SPACE_BYTES; a rollback frees nothing). None of
+      # that must roll a good deploy back.
       if ($status -eq 503) {
         $body = Get-HealthErrorBody $_
-        if ($body -and $body.checks -and $body.checks.db.ok -and $body.checks.disk.ok) {
-          $red = @('bankJobs', 'mail') | Where-Object { -not $body.checks.$_.ok }
-          Log ("health: HTTP 503 but db and disk are ok; serving, degraded: " + ($red -join ', '))
+        if ($body -and $body.checks -and $body.checks.db.ok -and ($body.checks.disk.ok -or $body.checks.disk.detail -eq 'low-space')) {
+          $red = @('disk', 'bankJobs', 'mail') | Where-Object { -not $body.checks.$_.ok }
+          Log ("health: HTTP 503 but the database answers and the disk is writable; serving, degraded: " + ($red -join ', '))
           return $true
         }
       }
@@ -370,6 +397,7 @@ try {
   Log "deploy start remote=$Remote ref=$Ref prod=$ProdDir log=$LogFile"
   if (-not (Test-Path (Join-Path $ProdDir '.git'))) { throw "$ProdDir is not a git checkout (see ops-windows.md, first-time setup)" }
   if (-not (Test-Path (Join-Path $AppDir '.env'))) { throw "$AppDir\.env is missing (see ops-windows.md, first-time setup)" }
+  Set-ProdDatabaseUrl
 
   # 1. fetch and resolve
   $stage = 'fetch'
