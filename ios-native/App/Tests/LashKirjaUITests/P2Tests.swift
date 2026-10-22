@@ -208,7 +208,7 @@ final class P2Tests: WalkTestCase {
         launchSignedIn()
         dismissSystemPrompts()
         XCTAssertTrue(selectTab("Kirjanpito"), "Kirjanpito is not selected")
-        tap("Kuitit"); sleep(6)
+        _ = tap("Kuitit"); sleep(6)
         let pictures = app.descendants(matching: .any)
             .matching(NSPredicate(format: "identifier == %@ AND label == %@", "receipt-thumbnail", "Pienoiskuva"))
         // Each row fetches its picture once it is on screen.
@@ -274,7 +274,7 @@ final class P2Tests: WalkTestCase {
     /// drew 17.10.2026 above "Eräpäivä 1.11.2026 · 14 pv" on the UTC simulator.
     func testD_NextInvoiceNumber() {
         let next = demoJSON("/api/invoices/sequence")["nextNumber"] as? Int
-        tab("Myynti"); tap("Uusi lasku"); sleep(4)
+        tab("Myynti"); _ = tap("Uusi lasku"); sleep(4)
         let caption = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Seuraava laskunumero'")).firstMatch
         shot("p2-next-number"); check("P2 new invoice shows \(caption.exists ? caption.label : "no next number")", caption.exists)
         let expected = next.map { "Seuraava laskunumero: \($0)" } ?? "no sequence from the demo API"
@@ -291,7 +291,7 @@ final class P2Tests: WalkTestCase {
         let today = HelsinkiDay.today()
         let next = demoJSON("/api/invoices/sequence")["nextNumber"] as? Int
         XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
-        tap("Uusi lasku")
+        _ = tap("Uusi lasku")
         guard app.navigationBars["Uusi lasku"].waitForExistence(timeout: 15) else { XCTFail("Uusi lasku did not open"); return }
         waitEnabled(app.buttons["Luo lasku"].firstMatch)
         shot("p2e-new-invoice")
@@ -319,7 +319,7 @@ final class P2Tests: WalkTestCase {
 
         // The recurring editor's 'Alkaa' opens on the Helsinki day too.
         if opened { back(created) }
-        tap("Toistuvat laskut")
+        _ = tap("Toistuvat laskut")
         let newSchedule = app.buttons["Uusi toistuva lasku"].firstMatch
         if newSchedule.waitForExistence(timeout: 15) {
             newSchedule.tap(); taps += 1

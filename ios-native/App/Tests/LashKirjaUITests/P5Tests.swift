@@ -151,7 +151,7 @@ final class P5Tests: WalkTestCase {
         check("P5 invoice detail opens at AX5", tag.exists)
 
         // Uusi lasku (U071): a full-width primary under Yhteensä alone, and the form keeps the screen.
-        tab("Myynti"); tap("Uusi lasku")
+        tab("Myynti"); _ = tap("Uusi lasku")
         let create = app.buttons["Luo lasku"].firstMatch
         let totals = app.descendants(matching: .any).matching(identifier: "invoice-form-total").firstMatch
         if aim(create, "p5-invoice-form", above: nil) {

@@ -146,7 +146,7 @@ final class P1Tests: WalkTestCase {
         XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
         guard onTop("Myynti") else { return }
 
-        tap("Asiakkaat")
+        _ = tap("Asiakkaat")
         guard onTop("Asiakkaat") else { return }
         inlineTitle("Asiakkaat")
         tapLabel("label BEGINSWITH %@", "Kauneus Oy")
@@ -157,7 +157,7 @@ final class P1Tests: WalkTestCase {
         guard onTop("Myynti") else { return }
 
         // Its own screen, not the tile beside it: two NavigationLinks in one List row share one tap.
-        tap("Toistuvat laskut")
+        _ = tap("Toistuvat laskut")
         guard onTop("Toistuvat laskut") else { return }
         inlineTitle("Toistuvat laskut")
         back("Toistuvat laskut")

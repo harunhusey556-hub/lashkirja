@@ -7,6 +7,7 @@ let package = Package(
     products: [.library(name: "LashKirjaCore", targets: ["LashKirjaCore"])],
     targets: [
         .target(name: "LashKirjaCore", swiftSettings: [.swiftLanguageMode(.v5)]),
-        .testTarget(name: "LashKirjaCoreTests", dependencies: ["LashKirjaCore"], swiftSettings: [.swiftLanguageMode(.v5)]),
+        // The fixtures are read from disk by #filePath, not from a resource bundle.
+        .testTarget(name: "LashKirjaCoreTests", dependencies: ["LashKirjaCore"], exclude: ["Fixtures"], swiftSettings: [.swiftLanguageMode(.v5)]),
     ]
 )
