@@ -3,6 +3,9 @@ import type { Instrumentation } from "next";
 /** Runs once when the server starts, before it answers a request. */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  // Without this the server would come up and fail request by request.
+  const { assertStartupEnv } = await import("@/lib/startup-env");
+  assertStartupEnv();
   // API answers were never gzipped under `next start` (lib/route-compression.ts).
   const { restoreRouteCompression } = await import("@/lib/route-compression");
   restoreRouteCompression();

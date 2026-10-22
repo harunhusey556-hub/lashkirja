@@ -1,6 +1,9 @@
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from "crypto";
+import { assertStartupEnv } from "./startup-env";
 
-const isProduction = process.env.NODE_ENV === "production";
+// Throws in production without a real secret, so the fallback below can only
+// ever be the development one on a developer's machine.
+assertStartupEnv();
 const configuredSecret = process.env.SESSION_SECRET?.trim();
 const developmentSecret = "lashkirja-local-development-only-secret-32-chars";
 

@@ -170,7 +170,7 @@ The zip holds `prod.db` and `uploads\`, so it extracts straight into `data\`. Do
    - `APP_ORIGIN=https://desktop-7gu8ukj.tail42feb1.ts.net:8443`
    - `TRUST_PROXY=true`
    - `ENABLEBANKING_REDIRECT_URL=https://desktop-7gu8ukj.tail42feb1.ts.net:8443/bank/callback`
-   - new random `SESSION_SECRET`, `CRON_SECRET` and `HEALTH_TOKEN` (never the dev values)
+   - new random `SESSION_SECRET`, `CRON_SECRET` and `HEALTH_TOKEN` (never the dev values). `SESSION_SECRET` must be at least 32 characters: the web server and the worker both exit at start without it, and `run-prod.ps1` then restarts them with its back-off until it is fixed.
 4. Run `deploy-local.ps1` from the dev checkout's `app\scripts\ops` (the first time only, before prod has the scripts).
 5. Run `install-tasks.ps1` from `C:\LashKirja\prod\app\scripts\ops`.
 6. `tailscale funnel --bg --https=8443 http://127.0.0.1:3300`. This adds a port and leaves the other serve entries alone. Never run `tailscale serve reset` or `tailscale funnel reset`; the other ports belong to other projects.
