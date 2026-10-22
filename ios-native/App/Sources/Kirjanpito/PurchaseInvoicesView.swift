@@ -203,7 +203,15 @@ struct PurchaseInvoicesView: View {
             Section {
                 if filter == .all {
                     ContentUnavailableView {
-                        Label("Ei ostolaskuja vielä", systemImage: "doc.text")
+                        // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                        Label {
+                            Text("Ei ostolaskuja vielä")
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "doc.text")
+                        }
                     } description: {
                         Text("Tähän ilmestyvät saamasi ostolaskut ja niiden eräpäivät.")
                     } actions: {
@@ -211,7 +219,15 @@ struct PurchaseInvoicesView: View {
                     }
                 } else {
                     ContentUnavailableView {
-                        Label("Ei ostolaskuja tällä suodattimella", systemImage: "line.3.horizontal.decrease.circle")
+                        // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                        Label {
+                            Text("Ei ostolaskuja tällä suodattimella")
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                        }
                     } description: {
                         Text("Kokeile toista suodatinta.")
                     } actions: {

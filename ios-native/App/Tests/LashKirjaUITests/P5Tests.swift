@@ -86,6 +86,28 @@ final class P5Tests: WalkTestCase {
             XCTAssertGreaterThan(measured, 0, "no invoice row lies whole in the window")
         }
 
+        // Sähköposti (G004, M073): an empty state in a list row takes the lines its title needs. The
+        // demo seed connects no mailbox, so Sähköposti shows one. The node is the icon over the
+        // title (90 pt cut to one line, 121 pt whole at the default size, OwnerScreensTests testD).
+        // At this size the whole title is three lines or more; four title2 lines is the bound the
+        // icon over three reaches and the icon over one does not. The INFO line keeps the frame.
+        tab("Kirjanpito")
+        if tapLabel("label BEGINSWITH %@", "Sähköposti", scrolls: 10) {
+            let title = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label BEGINSWITH %@", "Sähköpostia ei ole yhdistetty")).firstMatch
+            if title.waitForExistence(timeout: 15) {
+                waitStill(title)
+                note("INFO p5-empty-state-geometry: title \(title.frame), one title2 line \(lineHeight(.title2))")
+                XCTAssertGreaterThanOrEqual(title.frame.height, 4 * lineHeight(.title2),
+                                            "the empty-state title is cut to one line: \(title.frame)")
+                shot("p5-empty-state")
+            } else {
+                dump(app, "p5-empty-state-miss"); XCTFail("Sähköposti shows no 'Sähköpostia ei ole yhdistetty': has the demo user a mailbox?")
+            }
+        } else {
+            XCTFail("Sähköposti did not open from Kirjanpito")
+        }
+
         tab("Koti"); sleep(2)
         // At AX5 one card fills the screen: the overdue row can be far down Koti. Koti shows five
         // tasks; in a full run the earlier tests add tasks, and the overdue one moves behind
