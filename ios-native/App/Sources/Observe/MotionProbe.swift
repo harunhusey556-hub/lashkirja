@@ -13,7 +13,8 @@ import os
 ///   SCREEN <t> <name>                          a tab or pushed screen appeared
 ///   ROOT <t> <name> <w>x<h>                    the screen's root changed size (GeometryReader)
 ///   MOVE <t> <screen> n=<count> max=<pt> ...   layers moved more than 2 pt since the last tick
-///   SCROLLJUMP <t> <screen> dy=<pt>            a scroll offset changed with no finger on it
+///   SCROLLJUMP <t> <screen> dy=<pt>            a scroll offset changed with no finger on it, and
+///                                              the rows on screen did not move with it
 ///   QUIET <t> <screen>                         nothing moved for 0.4 s of ticks: the layout settled
 ///   STALL <t> <screen> ms=<ms>                 the main thread held the ticks back this long
 ///   TOUCH <t> <screen>                         a finger came down in the key window (its own time)
@@ -174,12 +175,36 @@ final class MotionProbe: NSObject, UIGestureRecognizerDelegate {
             let key = ObjectIdentifier(scroll)
             let offset = scroll.contentOffset
             if let old = offsets[key], abs(offset.y - old.y) > Self.threshold,
-               !scroll.isTracking, !scroll.isDragging, !scroll.isDecelerating {
+               !scroll.isTracking, !scroll.isDragging, !scroll.isDecelerating,
+               !rebased(layer, by: offset.y - old.y) {
                 write("SCROLLJUMP \(Self.now) \(screen) dy=\(Int(offset.y - old.y))")
             }
             offsets[key] = offset
         }
         for sub in layer.sublayers ?? [] { walk(sub, space: inner, seen: &seen, moved: &moved, budget: &budget) }
+    }
+
+    /// The list moved its rows in its content by the offset's own change, so on screen nothing
+    /// moved: the content above the screen got shorter and UIKit moved the offset with it. F012's
+    /// gate (run 39659357338) read such a swap as SCROLLJUMP dy=-44 while every frame of both PR
+    /// videos showed the rows, the segment and Lataa zip in place, and the segment's own layers had
+    /// moved -44 in the content in the same tick. Told by the topmost row that kept its size: a row
+    /// reused or resized where the list changed says nothing about the screen. An offset that moves
+    /// under rows staying in the content (native's -66 jump, its top rows at dy 0) is not this, and
+    /// neither is a list with no row seen in both ticks.
+    private func rebased(_ scroll: CALayer, by dy: CGFloat) -> Bool {
+        var top: CGRect?
+        var moved: CGFloat = 0
+        for sub in scroll.sublayers ?? [] where !sub.isHidden && sub.opacity > 0.01 {
+            guard sub.delegate is UICollectionViewCell || sub.delegate is UITableViewCell,
+                  let old = frames[ObjectIdentifier(sub)] else { continue }
+            let frame = sub.convert(sub.bounds, to: scroll)
+            guard abs(frame.width - old.width) <= Self.threshold, abs(frame.height - old.height) <= Self.threshold else { continue }
+            if let top, top.minY <= frame.minY { continue }
+            top = frame
+            moved = frame.minY - old.minY
+        }
+        return top != nil && abs(moved - dy) <= Self.threshold
     }
 }
 

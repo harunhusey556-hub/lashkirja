@@ -116,13 +116,29 @@ struct CustomersView: View {
         do {
             let list: CustomerList = try await app.cachedGet("/api/customers", query: query, force: force)
             state.succeed(archived ? list.customers : list.customers.filter { !$0.isArchived })
+            // A customer opened from here paints its row in the first frame (`customerPreview`).
+            app.rememberPainted(list, "/api/customers", query: query)
             timing.dataReady()
+            warmDetails(state.value ?? [])
             app.indexForSpotlight(list.customers.filter { !$0.isArchived }.compactMap {
                 SpotlightEntry.customer(id: $0.id, name: $0.name, businessId: $0.businessId)
             })
         } catch is CancellationError {
         } catch {
             state.fail(error)
+        }
+    }
+
+    /// The first rows' details into the cache and `lastPainted`, so a customer opened from here
+    /// paints its invoices in the first frame too, not only what its row knows (F008).
+    private func warmDetails(_ customers: [Customer]) {
+        let app = self.app
+        let first = customers.filter { !app.removedIds.contains($0.id) }.prefix(5).map(\.id)
+        Task {
+            for id in first {
+                let path = CustomerDetailView.path(id)
+                if let detail: CustomerDetail = try? await app.cachedGet(path) { app.rememberPainted(detail, path) }
+            }
         }
     }
 }
@@ -144,6 +160,9 @@ struct CustomerDetailView: View {
     /// under it (G005).
     @Environment(\.openRoute) private var openRoute
     let customerId: String
+    /// The customer's row as Asiakkaat painted it (`app.customerPreview`): its name, contact rows and
+    /// totals while the invoices load.
+    private let row: Customer?
     @State private var state = ScreenLoad<CustomerDetail>()
     @State private var showEdit = false
     @State private var showNewInvoice = false
@@ -159,15 +178,34 @@ struct CustomerDetailView: View {
     @State private var createdId: String?
     @State private var invoiceLimit = ShowMore()
 
+    /// `detail` (what this screen or Asiakkaat's warm-up last painted, `app.lastPainted`) is on screen
+    /// in the first frame, else `row` with the invoices' place held. Loaded in `.task` instead, the
+    /// push showed a blank 'Asiakas' page with a spinner, then about 0.9 s later the whole page at
+    /// once, and the title changed to the name (F008, motion gate myynti-customer-open).
+    init(customerId: String, detail: CustomerDetail? = nil, row: Customer? = nil) {
+        self.customerId = customerId
+        self.row = row
+        guard let detail else { return }
+        var shown = ScreenLoad<CustomerDetail>()
+        shown.succeed(detail)
+        _state = State(initialValue: shown)
+    }
+
+    static func path(_ id: String) -> String { "/api/customers/\(id)" }
+
+    /// The loaded customer, else its row.
+    private var customer: Customer? { state.value?.customer ?? row }
+
     var body: some View {
         List {
-            if let detail = state.value {
-                if let banner = state.banner {
+            if let c = customer {
+                let detail: CustomerDetail? = state.value
+                // A failed load leaves what is shown, the detail or the row alone, under the banner.
+                if let banner = state.failure {
                     Section { RefreshFailureBanner(failure: banner, retry: load) }
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
-                let c = detail.customer
                 if c.isArchived {
                     Section {
                         HStack {
@@ -191,27 +229,34 @@ struct CustomerDetailView: View {
                     LabeledContent("Maksuaika", value: "\(c.defaultPaymentTermDays) pv")
                 }
                 Section {
-                    LabeledContent("Laskutettu yhteensä") { MoneyText(amount: detail.invoicedTotal) }
-                    LabeledContent("Avoinna") { MoneyText(amount: detail.openBalance) }
+                    // The row has the same totals as the detail (the server counts both alike).
+                    LabeledContent("Laskutettu yhteensä") { total(detail?.invoicedTotal ?? c.invoicedTotal) }
+                    LabeledContent("Avoinna") { total(detail?.openBalance ?? c.openBalance) }
                     Button { showNewInvoice = true } label: { Label("Uusi lasku asiakkaalle", systemImage: "doc.badge.plus") }
                 }
-                if !detail.invoices.isEmpty {
+                // Before the detail, the row's count holds the invoices' place: nothing moves when they come.
+                let invoiceCount: Int = detail?.invoices.count ?? (state.failure == nil ? c.invoiceCount ?? 0 : 0)
+                if invoiceCount > 0 {
                     Section("Laskut") {
-                        ForEach(detail.invoices.prefix(invoiceLimit.visible(detail.invoices.count))) { invoice in
-                            NavigationLink(value: Route.invoice(invoice.id)) {
-                                HStack {
-                                    // Myynti's line (X027): the invoice date here, unlabelled, read as
-                                    // the same day as Myynti's due date.
-                                    Text(invoice.rowSecondary)
-                                    Spacer()
-                                    VStack(alignment: .trailing) {
-                                        MoneyText(amount: invoice.gross)
-                                        StatusBadge(status: invoice.displayStatus)
+                        if let detail {
+                            ForEach(detail.invoices.prefix(invoiceLimit.visible(invoiceCount))) { invoice in
+                                NavigationLink(value: Route.invoice(invoice.id)) {
+                                    HStack {
+                                        // Myynti's line (X027): the invoice date here, unlabelled, read as
+                                        // the same day as Myynti's due date.
+                                        Text(invoice.rowSecondary)
+                                        Spacer()
+                                        VStack(alignment: .trailing) {
+                                            MoneyText(amount: invoice.gross)
+                                            StatusBadge(status: invoice.displayStatus)
+                                        }
                                     }
                                 }
                             }
+                        } else {
+                            ForEach(0..<invoiceLimit.visible(invoiceCount), id: \.self) { _ in invoicePlaceholder }
                         }
-                        ShowMoreButton(limit: $invoiceLimit, total: detail.invoices.count)
+                        ShowMoreButton(limit: $invoiceLimit, total: invoiceCount)
                         // The customer's invoices on Myynti's status chips (web "Näytä kaikki").
                         NavigationLink(value: Route.invoicesFiltered(month: "", status: "", customerId: c.id)) {
                             Text("Näytä tilan mukaan").foregroundStyle(Theme.accentDark)
@@ -225,24 +270,32 @@ struct CustomerDetailView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
-        .navigationTitle(state.value?.customer.name ?? "Asiakas")
+        // The greyed invoices give way to the rows eased, as ScreenStateView's swap does: not a cut.
+        .motion(.snappy, value: state.value == nil)
+        // The banner eases in over what is shown, so the rows under it do not jump.
+        .motion(.snappy, value: state.failure != nil)
+        .navigationTitle(customer?.name ?? "Asiakas")
         .refreshable { await load(force: true) }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if state.value != nil {
+            // With the row already: the bar does not change when the detail comes.
+            if let c = customer {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        // Muokkaa and Poista wait for the detail: a row painted earlier may be older.
                         Button { showEdit = true } label: { Label("Muokkaa", systemImage: "pencil") }
-                        if let businessId = state.value?.customer.businessId {
+                            .disabled(state.value == nil)
+                        if let businessId = c.businessId {
                             Button { UIPasteboard.general.string = businessId } label: { Label("Kopioi Y-tunnus", systemImage: "doc.on.doc") }
                         }
                         if !others.isEmpty {
                             Button { showMerge = true } label: { Label("Yhdistä kaksoiskappale", systemImage: "arrow.triangle.merge") }
                         }
-                        if state.value?.customer.isArchived == true {
+                        if c.isArchived {
                             Button { Task { await restore() } } label: { Label("Palauta arkistosta", systemImage: "arrow.uturn.backward") }
                         } else {
                             Button(role: .destructive) { confirmDelete = true } label: { Label("Poista", systemImage: "trash") }
+                                .disabled(state.value == nil)
                         }
                     } label: { Image(systemName: "ellipsis.circle") }
                     .accessibilityLabel("Toiminnot")
@@ -286,12 +339,14 @@ struct CustomerDetailView: View {
     /// The cached customer at once (opened before, nothing changed since), then the server's
     /// when stale; `force` (pull-to-refresh) always asks.
     private func load(force: Bool) async {
-        let path = "/api/customers/\(customerId)"
+        let path = Self.path(customerId)
         if state.value == nil, let cached: CustomerDetail = await app.cachedValue(path) { state.succeed(cached) }
         state.begin()
         do {
             let detail: CustomerDetail = try await app.cachedGet(path, force: force)
             state.succeed(detail)
+            // The next visit's first frame (`init`).
+            app.rememberPainted(detail, path)
             // Merge candidates: every other customer still in use.
             if let list: CustomerList = try? await app.cachedGet("/api/customers") {
                 others = list.customers.filter { $0.id != customerId && $0.archivedAt == nil }
@@ -312,6 +367,31 @@ struct CustomerDetailView: View {
         } else {
             LabeledContent(title, value: value)
         }
+    }
+
+    /// A total as the detail or the row has it; greyed while neither does.
+    @ViewBuilder
+    private func total(_ amount: Decimal?) -> some View {
+        if let amount {
+            MoneyText(amount: amount)
+        } else {
+            Text("000,00 €").redacted(reason: .placeholder).accessibilityHidden(true)
+        }
+    }
+
+    /// An invoice row's shape, greyed, until the invoices come: the line, then the sum over the state.
+    private var invoicePlaceholder: some View {
+        HStack {
+            Text("Lasku 0 · eräpäivä 0.00.0000")
+            Spacer()
+            VStack(alignment: .trailing) {
+                Text("000,00 €")
+                StatusBadge(status: .sent)
+            }
+        }
+        .redacted(reason: .placeholder)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Ladataan laskuja")
     }
 
     /// Not optimistic: the reply says whether the customer was deleted or archived (it has invoices
@@ -356,6 +436,18 @@ struct CustomerDetailView: View {
             failure = error.userMessage
             Haptics.error()
         }
+    }
+}
+
+extension AppModel {
+    /// The customer's row as Asiakkaat (or the launch's warm-up) last painted it, in the active list
+    /// or the one with the archived; nil when neither holds it.
+    func customerPreview(_ id: String) -> Customer? {
+        for archived in [false, true] {
+            let list: CustomerList? = lastPainted("/api/customers", query: CustomerArchive.listQuery(includeArchived: archived))
+            if let row = list?.customers.first(where: { $0.id == id }) { return row }
+        }
+        return nil
     }
 }
 

@@ -497,6 +497,94 @@ final class StabilityTests: WalkTestCase {
         XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Peruuta did not close the import sheet")
     }
 
+    /// F008: a customer opens on what its Asiakkaat row already says. It opened on a blank 'Asiakas'
+    /// page with a spinner, and about 0.9 s later the page came at once and the title changed to the
+    /// name (motion gates 39380209526, 39489886880, 39525842170). Opened offline, the first look is
+    /// what the push had before any answer: the name in the bar, Toiminnot, the contact rows, no
+    /// spinner or failure page. Online again, the invoices come under rows that stay put.
+    func test33_CustomerOpensOnItsRow() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        let customers = app.navigationBars["Asiakkaat"]
+        guard tapLabel("label == %@", "Asiakkaat"), customers.waitForExistence(timeout: 10) else {
+            dump(app, "stability-33-no-customers"); XCTFail("Myynti > Asiakkaat did not open"); return
+        }
+        // The seed's Kauneus Oy (demo-seed.ts): laskut@kauneus.example, two invoices.
+        let name = "Kauneus Oy"
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+        guard row.waitForExistence(timeout: 15) else {
+            dump(app, "stability-33-no-row"); XCTFail("Asiakkaat lists no \(name)"); return
+        }
+        goOffline()
+        guard tapLabel("label BEGINSWITH %@", name) else { XCTFail("\(name) could not be tapped"); return }
+        let pushed = app.navigationBars.matching(NSPredicate(format: "identifier IN %@", [name, "Asiakas"])).firstMatch
+        guard pushed.waitForExistence(timeout: 10) else {
+            dump(app, "stability-33-not-opened"); XCTFail("\(name) did not open from Asiakkaat"); return
+        }
+        let asked = Date()
+        let picture = requestShot("stability-33-first-look")
+        let title = pushed.identifier
+        let actions = pushed.buttons["Toiminnot"].exists
+        let spinner = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Ladataan")).firstMatch.exists
+        let failurePage = app.buttons["load-failure-retry"].firstMatch.exists
+        let email = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "laskut@kauneus.example")).firstMatch
+        let contact = email.exists
+        // Above the invoices and under them: where they stand once they have come.
+        let terms = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Maksuaika")).firstMatch
+        let byStatus = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Näytä tilan mukaan")).firstMatch
+        let banner = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                                                           "Ei verkkoyhteyttä", "Palvelimeen ei saada yhteyttä", "Palvelin ei vastannut ajoissa")).firstMatch
+        // The offline answer can already be in (its banner then stands above every row): the places
+        // are compared only from a first look without it.
+        let bannerAtFirst = banner.exists
+        let termsAt: CGFloat? = terms.exists ? terms.frame.minY : nil
+        let byStatusAt: CGFloat? = byStatus.exists ? byStatus.frame.minY : nil
+        awaitShot(picture, since: asked)
+        let termsText = termsAt.map { "\($0)" } ?? "none"
+        let byStatusText = byStatusAt.map { "\($0)" } ?? "none"
+        note("INFO stability 33 first look: title '\(title)', Toiminnot \(actions), spinner \(spinner), failure page \(failurePage), e-mail \(contact), banner \(bannerAtFirst), Maksuaika at \(termsText), Näytä tilan mukaan at \(byStatusText)")
+        XCTAssertEqual(title, name, "the push opened on '\(title)': the title changes to the name when the customer loads")
+        XCTAssertTrue(actions, "the bar has no Toiminnot at first: it comes with the customer and the bar changes")
+        XCTAssertFalse(spinner, "the push landed on a spinner page")
+        XCTAssertFalse(failurePage, "offline, the push landed on a failure page, not on the customer's row")
+        XCTAssertTrue(contact, "the first look has no contact row (laskut@kauneus.example)")
+
+        // Offline the invoices cannot come: the row stays under the refresh banner.
+        if !banner.waitForExistence(timeout: 20) { note("INFO stability 33: no refresh banner within 20 s (Asiakkaat had warmed the customer)") }
+        XCTAssertTrue(app.navigationBars[name].exists, "offline, the title left the name")
+        XCTAssertTrue(email.exists, "offline, the failed load took the contact rows away")
+        XCTAssertFalse(app.buttons["load-failure-retry"].firstMatch.exists, "offline, the failed load replaced the customer with a failure page")
+
+        goOnline()
+        // Back online the page reloads by itself (RetryWhenBackOnline, as Myynti in P3 A); the
+        // banner's retry only if it has not after 30 s.
+        let invoice = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Lasku ")).firstMatch
+        if !invoice.waitForExistence(timeout: 30) {
+            let retry = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Yritä uudelleen")).firstMatch
+            note("INFO stability 33: no invoices 30 s after going online (Yritä uudelleen offered: \(retry.exists))")
+            if retry.exists { retry.tap(); taps += 1 }
+        }
+        guard invoice.waitForExistence(timeout: 20) else {
+            dump(app, "stability-33-no-invoices"); XCTFail("\(name)'s invoices never came"); return
+        }
+        XCTAssertTrue(banner.waitForNonExistence(timeout: 10), "the refresh banner stayed once the invoices came")
+        waitStill(terms)
+        shot("stability-33-loaded")
+        XCTAssertTrue(app.navigationBars[name].exists, "the title changed when the customer loaded")
+        guard !bannerAtFirst else { note("INFO stability 33: the banner was up at the first look; places not compared"); return }
+        if let termsAt {
+            note("INFO stability 33: Maksuaika at \(termsAt) on opening, \(terms.frame.minY) once loaded")
+            XCTAssertEqual(terms.frame.minY, termsAt, accuracy: 1, "Maksuaika moved from \(termsAt) to \(terms.frame.minY) when the invoices came")
+        } else {
+            XCTFail("the first look had no Maksuaika row")
+        }
+        // Below the fold with a longer seed: nothing on the screen to hold still.
+        if let byStatusAt, byStatus.exists {
+            note("INFO stability 33: Näytä tilan mukaan at \(byStatusAt) on opening, \(byStatus.frame.minY) once loaded")
+            XCTAssertEqual(byStatus.frame.minY, byStatusAt, accuracy: 1,
+                           "Näytä tilan mukaan moved from \(byStatusAt) to \(byStatus.frame.minY): the greyed invoices did not hold their place")
+        }
+    }
+
     /// The seed's overdue invoice from the demo API: its number, its customer, and its due and
     /// invoice days as the app prints them. Test values from app/scripts/demo-seed.ts; only ever
     /// against the throwaway local server (the runner shares the Mac's loopback).
@@ -1005,6 +1093,116 @@ final class StabilityTests: WalkTestCase {
             if attempt < 6 { window.swipeUp(velocity: .slow); scrolls += 1 }
         }
         return nil
+    }
+
+    /// F012: a Luokittain swap at the end of Raportit holds the page still. With the page ending
+    /// under Lataa zip (X078), Menot (3 rows in the --ci seed) to Tulot (2) shrank the page under its
+    /// scroll offset: the List clamped it, and the picker with everything above the rows slid a row
+    /// down under the finger while Lataa zip, at the page's foot, stayed (motion gates 39580643433
+    /// and 39636460950: SCROLLJUMP dy=-66). Back to Menot, Lataa zip fell a row. Away from the end
+    /// nothing is held: Kirjanpitopaketti follows the shorter list up, with no blank room under it.
+    /// The end is reached as the motion walk reaches it (raportit-scroll): flung there, not scrolled
+    /// until Lataa zip shows.
+    func test33_RaportitCategorySwapHoldsThePage() {
+        XCTAssertTrue(selectTab("Raportit"), "Raportit is not selected")
+        let zip = app.buttons["Lataa zip"].firstMatch
+        guard app.staticTexts["Kuukausittain"].firstMatch.waitForExistence(timeout: 15) else {
+            dump(app, "stability-33-no-report"); XCTFail("Raportit shows no report"); return
+        }
+        let window = app.windows.firstMatch
+        for _ in 0..<4 where !(zip.exists && zip.isHittable) {
+            window.swipeUp(velocity: .fast); scrolls += 1
+            _ = zip.waitForExistence(timeout: 3)
+        }
+        guard zip.exists, zip.isHittable else {
+            dump(app, "stability-33-no-zip"); XCTFail("Lataa zip is not hittable on Raportit after 4 flings"); return
+        }
+        // To the end, where the motion walk's fling left the page: only there has the offset nowhere
+        // to go, so one more swipe must move nothing.
+        window.swipeUp(velocity: .fast); scrolls += 1
+        waitStill(zip)
+        let endY = zip.frame.minY
+        window.swipeUp(velocity: .slow); scrolls += 1
+        waitStill(zip)
+        XCTAssertEqual(zip.frame.minY, endY, accuracy: 1, "Raportit was not at its end: the swaps below would prove nothing")
+        // The swap comes after a fling, as in the walk.
+        window.swipeUp(velocity: .fast); scrolls += 1
+        waitStill(zip)
+        let picker = app.segmentedControls.firstMatch
+        guard picker.exists, picker.isHittable else {
+            dump(app, "stability-33-no-picker"); XCTFail("Luokittain has no picker on screen at the end of Raportit (the seed books Tulot and Menot)"); return
+        }
+        // Shrinking first (the seed opens on Menot, the longer list), then growing back.
+        for pass in 1...2 {
+            let other = picker.buttons.matching(NSPredicate(format: "selected == false")).firstMatch
+            guard other.exists else { dump(app, "stability-33-segment-\(pass)"); XCTFail("pass \(pass): Luokittain has no other segment"); return }
+            let name = other.label
+            let pickerY = picker.frame.minY
+            let zipY = zip.frame.minY
+            other.tap(); taps += 1
+            // Polled through the swap, not read once after it: the clamp landed with the segment's lens.
+            var pickerDrift: CGFloat = 0
+            var zipDrift: CGFloat = 0
+            let deadline = Date().addingTimeInterval(2.5)
+            repeat {
+                pickerDrift = max(pickerDrift, abs(picker.frame.minY - pickerY))
+                zipDrift = max(zipDrift, abs(zip.frame.minY - zipY))
+                usleep(100_000)
+            } while Date() < deadline
+            waitStill(zip)
+            pickerDrift = max(pickerDrift, abs(picker.frame.minY - pickerY))
+            zipDrift = max(zipDrift, abs(zip.frame.minY - zipY))
+            note("INFO stability 33 pass \(pass): to \(name) the picker moved \(pickerDrift) pt, Lataa zip \(zipDrift) pt")
+            XCTAssertTrue(picker.buttons[name].isSelected, "pass \(pass): \(name) is not selected after its tap")
+            XCTAssertLessThanOrEqual(pickerDrift, 1, "pass \(pass): to \(name) the picker moved \(pickerDrift) pt under the finger")
+            XCTAssertLessThanOrEqual(zipDrift, 1, "pass \(pass): to \(name) Lataa zip moved \(zipDrift) pt")
+            XCTAssertTrue(picker.isHittable, "pass \(pass): the picker left the screen after \(name)")
+            shot("stability-33-\(name.lowercased())")
+        }
+
+        // Away from the end, back on Menot: the page has room below to take the shorter list, so no
+        // room is held and the header after the rows sits as far under the last row as before.
+        let header = app.staticTexts["Kirjanpitopaketti"].firstMatch
+        let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", " kpl"))
+        func gapUnderRows() -> CGFloat? {
+            let top = picker.frame.maxY
+            let headerTop = header.frame.minY
+            let bottoms = rows.allElementsBoundByIndex.map(\.frame).filter { $0.minY > top && $0.maxY <= headerTop + 1 }.map(\.maxY)
+            return bottoms.max().map { headerTop - $0 }
+        }
+        guard header.exists else { dump(app, "stability-33-no-header"); XCTFail("Raportit has no Kirjanpitopaketti header"); return }
+        let headerEndY = header.frame.minY
+        // Down by less than the room under the header, so the rows and the header stay on screen.
+        let drag = min(150, window.frame.maxY - 40 - header.frame.maxY)
+        guard drag >= 100 else {
+            dump(app, "stability-33-header-low"); XCTFail("Kirjanpitopaketti sits at \(header.frame.maxY): no room to drag Raportit off its end"); return
+        }
+        // From the rows, clear of the picker, and held before the release, so the page stops where
+        // the finger does instead of gliding on.
+        let from = window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.frame.midX, dy: (picker.frame.maxY + header.frame.minY) / 2))
+        from.press(forDuration: 0.1, thenDragTo: from.withOffset(CGVector(dx: 0, dy: drag)), withVelocity: .slow, thenHoldForDuration: 0.3)
+        scrolls += 1
+        waitStill(header)
+        let away = header.frame.minY - headerEndY
+        let other = picker.buttons.matching(NSPredicate(format: "selected == false")).firstMatch
+        // More than the row Tulot is short of Menot (66 pt): the page then has room to give it back.
+        guard away >= 90, other.exists, let gap = gapUnderRows() else {
+            dump(app, "stability-33-away"); XCTFail("away from the end: Raportit moved \(away) pt, or Luokittain shows no other segment or no rows"); return
+        }
+        let name = other.label
+        let pickerY = picker.frame.minY
+        let headerBefore = header.frame.minY
+        other.tap(); taps += 1
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: picker.buttons[name])
+        XCTAssertEqual(XCTWaiter().wait(for: [selected], timeout: 5), .completed, "away: \(name) is not selected after its tap")
+        waitStill(header)
+        guard let after = gapUnderRows() else { dump(app, "stability-33-away-after"); XCTFail("away: no rows under Luokittain after \(name)"); return }
+        note("INFO stability 33 away \(away) pt: to \(name) the gap under the rows went \(gap) -> \(after) pt, the header moved \(header.frame.minY - headerBefore) pt")
+        XCTAssertLessThan(header.frame.minY, headerBefore - 30, "away: \(name) did not make the list shorter, so the gap check proves nothing")
+        XCTAssertEqual(after, gap, accuracy: 1, "away from the end, \(name) left \(after - gap) pt of blank room under its last row")
+        XCTAssertEqual(picker.frame.minY, pickerY, accuracy: 1, "away from the end, the picker moved on the swap to \(name)")
+        shot("stability-33-away-\(name.lowercased())")
     }
 
     static let monthNames = ["Tammikuu", "Helmikuu", "Maaliskuu", "Huhtikuu", "Toukokuu", "Kesäkuu",

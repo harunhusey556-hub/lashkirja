@@ -75,9 +75,12 @@ final class MotionAuditTests: WalkTestCase {
         let name = "\(shotDir)/m-\(id)"
         for leftover in ["recording", "stop"] { try? FileManager.default.removeItem(atPath: "\(name).\(leftover)") }
         FileManager.default.createFile(atPath: "\(name).rec", contents: "\(Int(Self.recordCap))".data(using: .utf8))
-        // The host writes .recording once simctl says "Recording started".
+        // The host writes .recording once simctl says "Recording started", or after its 150 looks
+        // for that line. On a loaded runner it came 20 and 38 s after the request (the first step
+        // of both PR walks in gate 39659357338), past a 20 s wait here: the step went on without
+        // counting the video the host still recorded, and read NO-MOTION.
         var started = false
-        for _ in 0..<80 { if FileManager.default.fileExists(atPath: "\(name).recording") { started = true; break }; usleep(250_000) }
+        for _ in 0..<240 { if FileManager.default.fileExists(atPath: "\(name).recording") { started = true; break }; usleep(250_000) }
         // The first frames are the settled "from" screen.
         usleep(600_000)
         let probe = ProbeTail()
@@ -394,7 +397,10 @@ final class MotionAuditTests: WalkTestCase {
 
     func test01_Koti() {
         suite = "koti"
-        tabStep("koti-from-myynti-setup", from: "launch", "Koti")
+        // From Myynti, as the step says: the app opens on Koti, so a tap on Koti right after launch
+        // moved nothing and the step was NO-MOTION (final gate 39580643433).
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        tabStep("koti-from-myynti-setup", from: "Myynti", "Koti")
         step("koti-refresh", from: "Koti", to: "Koti", kind: "load", expect: "content stays put while refreshing", seconds: 5) {
             pullToRefresh()
         }
@@ -455,7 +461,7 @@ final class MotionAuditTests: WalkTestCase {
         }
         sleep(2)
         pushAndBack("myynti-customers", from: "Myynti", to: "Asiakkaat", target: find("label == %@", "Asiakkaat"), home: myyntiHome) {
-            // The customer's screen covers the list; its title is the name once it has loaded.
+            // The customer's screen covers the list; its title is the name from the first frame (F008).
             let list = self.app.navigationBars["Asiakkaat"]
             guard let customer = self.find("label CONTAINS %@", "Oy", scrolls: 0) else { self.note("SKIP myynti/myynti-customer-open: no customer"); return }
             let opened = self.step("myynti-customer-open", from: "Asiakkaat", to: "Asiakas", seconds: 5, reached: self.gone(list),
@@ -617,7 +623,9 @@ final class MotionAuditTests: WalkTestCase {
 
     func test06_SalesInvoiceFlow() {
         suite = "lasku"
-        tab("Myynti")
+        // Selected, not only tapped: the first tap after sign-in was lost, Koti stayed up and every
+        // lasku step was skipped (final gate 39580643433).
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
         let form = app.navigationBars["Uusi lasku"]
         step("lasku-new", from: "Myynti", to: "Uusi lasku", kind: "sheet", seconds: 5, presents: true, reached: navBar("Uusi lasku")) {
             press(app.buttons["Uusi lasku"].firstMatch)

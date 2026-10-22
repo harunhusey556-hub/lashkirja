@@ -37,8 +37,10 @@ struct EmailImportView: View {
                                     Text("Aktiivinen").font(.caption).foregroundStyle(Theme.success)
                                 }
                             }
+                            // Not a destructive role: the list takes such a row off at the tap, before
+                            // the question is answered (F009). The fill is the one it had.
                             .swipeActions {
-                                Button("Katkaise", role: .destructive) { disconnecting = account }
+                                Button("Katkaise") { disconnecting = account }.tint(Theme.accentFill)
                             }
                         }
                         Button {

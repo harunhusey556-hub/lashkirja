@@ -341,13 +341,13 @@ struct InvoiceFormView: View {
             // Totals and the button side by side while they fit; stacked at large text sizes.
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
-                    totalsView(totals)
+                    InvoiceFormTotals(totals: totals, sellerRegistered: sellerRegistered)
                     Spacer(minLength: 8)
-                    saveButton
+                    saveButton(wide: false)
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    totalsView(totals)
-                    saveButton.frame(maxWidth: .infinity)
+                    InvoiceFormTotals(totals: totals, sellerRegistered: sellerRegistered)
+                    saveButton(wide: true)
                 }
             }
         }
@@ -358,29 +358,18 @@ struct InvoiceFormView: View {
         .overlay(alignment: .top) { Divider() }
     }
 
-    private func totalsView(_ totals: (net: Decimal, vat: Decimal, gross: Decimal)) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if sellerRegistered {
-                Text("Veroton \(Money.format(totals.net)) · ALV \(Money.format(totals.vat))")
-                    .font(.caption)
-                    .foregroundStyle(Theme.ink2)
-                    .monospacedDigit()
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("Yhteensä").font(.subheadline).foregroundStyle(Theme.ink2)
-                MoneyText(amount: totals.gross).font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private var saveButton: some View {
+    /// `wide` in the stacked bar: the label itself takes the width, inside the button style. A frame
+    /// outside it centred a capsule only as wide as its words (U071).
+    private func saveButton(wide: Bool) -> some View {
         Button { Task { await save() } } label: {
-            if busy {
-                ProgressView().tint(Theme.onInk)
-            } else {
-                Text(existing == nil ? "Luo lasku" : "Tallenna").font(.body.weight(.semibold))
+            Group {
+                if busy {
+                    ProgressView().tint(Theme.onInk)
+                } else {
+                    Text(existing == nil ? "Luo lasku" : "Tallenna").font(.body.weight(.semibold))
+                }
             }
+            .frame(maxWidth: wide ? .infinity : nil)
         }
         .buttonStyle(.primary)
         .disabled(busy || baseline == nil)
@@ -716,6 +705,38 @@ struct InvoiceFormView: View {
             failure = error.userMessage
             Haptics.error()
         }
+    }
+}
+
+/// The bar's totals. A view of its own: the text size is read here, so the form's body depends on
+/// nothing new (SheetDismissTests holds it to one build while its sheet comes in).
+private struct InvoiceFormTotals: View {
+    let totals: (net: Decimal, vat: Decimal, gross: Decimal)
+    let sellerRegistered: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let large = typeSize.isAccessibilitySize
+        // At accessibility sizes the figure goes under its word: at the largest the two are wider
+        // than the bar. Chosen by the size, not by the fit, so a stepper tap that lengthens the sum
+        // does not change the bar's height under the finger.
+        let total = large ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 6))
+        VStack(alignment: .leading, spacing: 2) {
+            // Only Yhteensä at accessibility sizes: with the net and the VAT over it the bar took a
+            // third of the screen and covered the lines (U071).
+            if sellerRegistered && !large {
+                Text("Veroton \(Money.format(totals.net)) · ALV \(Money.format(totals.vat))")
+                    .font(.caption)
+                    .foregroundStyle(Theme.ink2)
+                    .monospacedDigit()
+            }
+            total {
+                Text("Yhteensä").font(.subheadline).foregroundStyle(Theme.ink2)
+                MoneyText(amount: totals.gross).font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("invoice-form-total")
     }
 }
 
