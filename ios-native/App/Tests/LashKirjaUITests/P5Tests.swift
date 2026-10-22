@@ -86,21 +86,19 @@ final class P5Tests: WalkTestCase {
             XCTAssertGreaterThan(measured, 0, "no invoice row lies whole in the window")
         }
 
-        tab("Koti"); sleep(2)
+        tab("Koti")
         // At AX5 one card fills the screen: the overdue row can be far down Koti. Koti shows five
         // tasks; in a full run the earlier tests add tasks, and the overdue one moves behind
-        // "Näytä enemmän".
-        var opened = tapLabel("label CONTAINS %@", "· myöhässä", scrolls: 20)
-        if !opened, tapLabel("label BEGINSWITH %@", "Näytä enemmän", scrolls: 20) {
-            sleep(1)
-            opened = tapLabel("label CONTAINS %@", "· myöhässä", scrolls: 20)
-        }
+        // "Näytä enemmän". That button is looked for first: 20 swipes for the row alone went past it,
+        // and it was then above the window (F005, run 39682519839).
+        var opened = openOverdueFromKoti(scrolls: 20)
+        XCTAssertTrue(opened, "Koti did not open the overdue invoice")
         if !opened {
-            // Twenty slow swipes through Koti at AX5 now and then end elsewhere; the invoice itself
-            // is what this checks, so the overdue row is opened from Myynti instead (noted above), by
-            // the status its label ends with. 'Myöhäs' matched the receivables bar's 10 pt segment,
-            // left under the navigation bar by the scrolled list: the bar took the tap, the list
-            // stayed on Kaikki, and the next 'Lasku ' row was the paid Lasku 1 (run 39538176287).
+            // The invoice itself is what the rest checks, so a Koti that missed is failed above and
+            // the overdue row is opened from Myynti instead, by the status its label ends with.
+            // 'Myöhäs' matched the receivables bar's 10 pt segment, left under the navigation bar by
+            // the scrolled list: the bar took the tap, the list stayed on Kaikki, and the next
+            // 'Lasku ' row was the paid Lasku 1 (run 39538176287).
             shot("p5-koti-miss"); dump(app, "p5-koti-miss")
             tab("Myynti"); sleep(3)
             opened = tapLabel("label CONTAINS 'Lasku ' AND label ENDSWITH %@", ", Myöhässä", scrolls: 10)

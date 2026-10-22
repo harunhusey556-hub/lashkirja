@@ -237,24 +237,38 @@ class WalkTestCase: XCTestCase {
     /// (the CI seed puts documents and matches before it) the overdue row is behind "Näytä enemmän",
     /// which is then tapped first, as the owner would. The tasks lead Koti (N5), so the button is
     /// looked for before any scroll: a row behind it is not drawn, and searching for it first
-    /// scrolled the whole screen in vain.
-    func openOverdueFromKoti() -> Bool {
+    /// scrolled the whole screen in vain. `scrolls` is how far each of the two searches may go; at
+    /// the largest text size a task is a screen tall (P5, F005: 20 swipes for the row went past the
+    /// button, which then lay above the window), so the default stays the reach of an ordinary size.
+    func openOverdueFromKoti(scrolls maxScrolls: Int? = nil) -> Bool {
         let overdue = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "· myöhässä")).firstMatch
         let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä enemmän")).firstMatch
         let deadline = Date().addingTimeInterval(20)
         while !overdue.exists && !more.exists && Date() < deadline { usleep(250_000) }
         if !overdue.exists && more.exists {
             // Its centre, where the tap lands, clear of the floating tab bar, which took a tap meant
-            // for the button (N1 run 39187969883).
+            // for the button (N1 run 39187969883), and of the navigation bar over the list's top.
             let bar = app.tabBars.firstMatch
-            for _ in 0..<4 where !(more.isHittable && (!bar.exists || more.frame.midY < bar.frame.minY)) {
-                app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1
+            let title = app.navigationBars.firstMatch
+            let window = app.windows.firstMatch
+            func placed() -> Bool {
+                guard more.exists, more.isHittable else { return false }
+                return (!bar.exists || more.frame.midY < bar.frame.minY) && (!title.exists || more.frame.midY > title.frame.maxY)
             }
-            guard more.isHittable else { note("MISS Näytä enemmän on Koti"); return false }
+            for _ in 0..<(maxScrolls ?? 4) where !placed() {
+                // Koti keeps where it was left: a button above the window is reached by scrolling back.
+                if more.exists, title.exists, more.frame.midY <= title.frame.maxY {
+                    window.swipeDown(velocity: .slow)
+                } else {
+                    window.swipeUp(velocity: .slow)
+                }
+                scrolls += 1
+            }
+            guard placed() else { note("MISS Näytä enemmän on Koti"); return false }
             more.tap(); taps += 1
             _ = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä vähemmän")).firstMatch.waitForExistence(timeout: 5)
         }
-        return tapLabel("label CONTAINS %@", "· myöhässä")
+        return tapLabel("label CONTAINS %@", "· myöhässä", scrolls: maxScrolls ?? 6)
     }
     /// Scrolls the screen (each swipe counted) until `element` sits inside the window, as tapLabel
     /// does before it taps, and taps nothing: a task can end on the button that does it.

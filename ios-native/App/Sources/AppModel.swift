@@ -656,7 +656,7 @@ final class AppModel {
     /// Asks `/api/sync/version` now and then every 30 s, while signed in and in the foreground.
     private func startVersionPolling() {
         versionPoll?.cancel()
-        guard case .signedIn = phase else { return }
+        guard case .signedIn = phase, !UITestHooks.versionPollOff else { return }
         versionPoll = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
