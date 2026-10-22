@@ -69,12 +69,31 @@ jobs:
           print(ids[0] if ids else "")')
           echo "Simulator: $DEST"
           echo "SIM_UDID=$DEST" >> "$GITHUB_ENV"
-          xcodebuild test -project LashKirja.xcodeproj -scheme LashKirja \
+          # Ad-hoc signed, as the UI tests below: an unsigned simulator host has no Keychain, and
+          # KeychainTokenStoreTests skipped on every run (N001). LK_REQUIRE_KEYCHAIN makes the test
+          # fail instead of skip when the host still has none.
+          TEST_RUNNER_LK_REQUIRE_KEYCHAIN=1 xcodebuild test -project LashKirja.xcodeproj -scheme LashKirja \
             -destination "id=$DEST" -derivedDataPath build -resultBundlePath TestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO | tee xcodebuild.log | xcbeautify --renderer github-actions
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO | tee xcodebuild.log | xcbeautify --renderer github-actions
       # xcbeautify drops the file and line of a warning; the raw log names them (N002).
       - name: No compiler warnings
         run: python3 scripts/compiler-warnings.py ios-native/App/xcodebuild.log
+      # N001: the only unit test that skipped here was the Keychain round trip, so any skip means
+      # the Keychain tests did not run. The test's own skip stays for a host that has no Keychain.
+      - name: Unit tests ran, none skipped
+        working-directory: ios-native/App
+        run: |
+          set -euo pipefail
+          xcrun xcresulttool get test-results summary --path TestResults.xcresult --compact > unit-summary.json
+          python3 - unit-summary.json <<'PY'
+          import json, sys
+          s = json.load(open(sys.argv[1]))
+          skipped = s.get("skippedTests", 0)
+          print(f"Unit tests: {s.get('totalTestCount', 0)} total, {s.get('passedTests', 0)} passed, {s.get('failedTests', 0)} failed, {skipped} skipped")
+          if s.get("totalTestCount", 0) == 0 or skipped:
+              print(f"::error::{skipped} unit test(s) skipped, or none ran: KeychainTokenStoreTests must run on the ad-hoc signed host (N001)")
+              sys.exit(1)
+          PY
       # The owner's screens (OwnerScreensTests) are driven against a throwaway demo API on this
       # runner's loopback, as docs/quality/SIMULATOR.md does by hand: a fresh SQLite file, the demo
       # seed, no cloud AI, no mail. Nothing here reaches a real server.

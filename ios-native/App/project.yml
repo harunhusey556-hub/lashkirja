@@ -165,7 +165,8 @@ schemes:
   LashKirja-UITests:
     build: { targets: { LashKirja: all, LashKirjaUITests: [test] } }
     test: { config: Debug, targets: [LashKirjaUITests] }
-  # Unsigned, as CI and the IPA build it.
+  # Unsigned, as the IPA is built. CI's unit run signs it ad hoc on the command line (ios-native.yml)
+  # so the Keychain tests run.
   LashKirja:
     build: { targets: { LashKirja: all } }
     run: { config: Debug }
