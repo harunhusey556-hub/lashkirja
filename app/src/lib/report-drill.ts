@@ -46,7 +46,7 @@ export function invoiceDrillHref(filter: { month?: string | null; status?: strin
 const INVOICE_CATEGORIES = new Set(["Myyntilaskut", "Hyvityslaskut"]);
 
 export interface DrillTarget {
-  id: "invoices" | "income-receipts" | "expense-receipts";
+  id: "invoices" | "income-receipts" | "expense-receipts" | "purchase-invoices";
   /** Short visible label of the destination. */
   label: string;
   href: string;
@@ -58,6 +58,8 @@ interface DrillPeriod {
   month?: string | null;
   invoiceCount?: number;
   creditNoteCount?: number;
+  /** Purchase invoices counted in the expenses; they are not receipts, so Kuitit does not list them. */
+  purchaseInvoiceCount?: number;
   incomeByCategory?: Array<{ category: string; count: number }>;
   expenseByCategory?: Array<{ category: string; count: number }>;
 }
@@ -98,15 +100,31 @@ export function incomeDrillTargets(period: DrillPeriod): DrillTarget[] {
   return targets;
 }
 
-/** Expenses are receipts only. */
+/** The expense receipts: every expense row that is not a purchase invoice. */
 export function expenseDrillTarget(period: DrillPeriod): DrillTarget | null {
-  if (sumCounts(period.expenseByCategory ?? []) === 0) return null;
+  if (sumCounts(period.expenseByCategory ?? []) - (period.purchaseInvoiceCount ?? 0) <= 0) return null;
   return {
     id: "expense-receipts",
     label: "Menokuitit",
     href: receiptDrillHref({ month: period.month, type: "meno" }),
     ariaLabel: "Avaa menokuitit",
   };
+}
+
+/** Purchase invoices no receipt documents (rent, a typed-in bill) have their own list. */
+export function purchaseInvoiceDrillTarget(period: DrillPeriod): DrillTarget | null {
+  if ((period.purchaseInvoiceCount ?? 0) <= 0) return null;
+  return {
+    id: "purchase-invoices",
+    label: "Ostolaskut",
+    href: "/kirjanpito/ostolaskut",
+    ariaLabel: "Avaa ostolaskut",
+  };
+}
+
+/** Where a report expense figure lives: the receipts and the purchase invoices, whichever hold rows for it. */
+export function expenseDrillTargets(period: DrillPeriod): DrillTarget[] {
+  return [expenseDrillTarget(period), purchaseInvoiceDrillTarget(period)].filter((target): target is DrillTarget => target !== null);
 }
 
 export function alvDrillHref(period: string): string {
