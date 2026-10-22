@@ -20,9 +20,21 @@ describe("checkCronAuth with a configured secret", () => {
     expect(checkCronAuth(request({ authorization: "Bearer s3cret" })).ok).toBe(true);
   });
 
-  it("accepts the query parameter, which is what most schedulers can send", () => {
+  it("refuses the right secret in the query string: URLs end up in access logs", () => {
     vi.stubEnv("CRON_SECRET", "s3cret");
-    expect(checkCronAuth(request({}, "?secret=s3cret")).ok).toBe(true);
+    const result = checkCronAuth(request({}, "?secret=s3cret"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(401);
+  });
+
+  it("answers 401, not an exception, for a token of another length than the secret", () => {
+    // timingSafeEqual throws on buffers of different length; the check must not reach it with raw input.
+    vi.stubEnv("CRON_SECRET", "s3cret");
+    for (const token of ["s3cre", "s3crets", "x".repeat(4096)]) {
+      const result = checkCronAuth(request({ authorization: `Bearer ${token}` }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.response.status).toBe(401);
+    }
   });
 
   it("rejects a wrong, missing or malformed token", async () => {
@@ -30,6 +42,7 @@ describe("checkCronAuth with a configured secret", () => {
     for (const attempt of [
       request(),
       request({ authorization: "Bearer wrong" }),
+      request({ authorization: "Bearer " }),
       request({ authorization: "s3cret" }),
       request({}, "?secret=wrong"),
     ]) {

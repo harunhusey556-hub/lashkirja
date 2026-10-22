@@ -9,6 +9,7 @@ import { prisma } from "./db";
 import { AppError, NotFoundError, ValidationError } from "./api-errors";
 import { centsToEuros } from "./money";
 import { buildReminderTotals, daysLate } from "./late-interest";
+import { helsinkiDayUtc } from "./validation";
 import { addDaysUtc, creditedCentsOf, openPosition } from "./invoices";
 import { buildInvoicePdfData, getInvoice, type PublicInvoice } from "./sales-invoices";
 import { renderReminderPdf, type ReminderPdfData } from "./invoice-pdf";
@@ -74,7 +75,10 @@ export async function previewReminder(
     throw new AppError("Lasku on jo maksettu.", "INVOICE_SETTLED", 409);
   }
 
-  const late = daysLate(invoice.dueDate, now);
+  // Due dates are Helsinki calendar days. The UTC day lags Helsinki by 2-3 hours,
+  // and read in it an invoice due yesterday stayed "not overdue" until about 03:00.
+  const today = helsinkiDayUtc(now);
+  const late = daysLate(invoice.dueDate, today);
   if (late === 0) {
     throw new AppError(
       "Laskun eräpäivä ei ole vielä mennyt.",
@@ -93,7 +97,7 @@ export async function previewReminder(
   const totals = buildReminderTotals({
     openCents: Math.round(invoice.open * 100),
     dueDate: invoice.dueDate,
-    on: now,
+    on: today,
     annualRatePercent: settings.lateInterestPercent,
     feeCents: settings.reminderFeeCents,
   });
@@ -111,7 +115,7 @@ export async function previewReminder(
     fee: centsToEuros(totals.feeCents),
     total: centsToEuros(totals.totalCents),
     annualRatePercent: settings.lateInterestPercent,
-    dueDate: addDaysUtc(now, REMINDER_TERM_DAYS).toISOString().slice(0, 10),
+    dueDate: addDaysUtc(today, REMINDER_TERM_DAYS).toISOString().slice(0, 10),
     recipient: invoice.customer.email,
     previousReminders: reminders.map((reminder) => ({
       level: reminder.level,
@@ -282,6 +286,7 @@ export async function listOverdueInvoices(
     orderBy: { dueDate: "asc" },
   });
 
+  const today = helsinkiDayUtc(now);
   return invoices
     .map((invoice) => {
       const paid = invoice.payments.reduce((sum, payment) => sum + payment.amountCents, 0);
@@ -298,7 +303,7 @@ export async function listOverdueInvoices(
         customerName: invoice.customer.name,
         customerEmail: invoice.customer.email,
         dueDate: invoice.dueDate.toISOString().slice(0, 10),
-        daysLate: daysLate(invoice.dueDate, now),
+        daysLate: daysLate(invoice.dueDate, today),
         open: centsToEuros(position.collectible ? position.openCents : 0),
         reminderCount: invoice._count.reminders,
         lastReminderAt: invoice.reminders[0]?.sentAt.toISOString() ?? null,

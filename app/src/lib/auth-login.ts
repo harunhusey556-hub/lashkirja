@@ -28,6 +28,25 @@ export type CredentialsCheck =
   | { ok: true; user: AuthenticatedUser }
   | { ok: false; status: 400 | 401 | 403 | 429; error: string; retryAfter?: number };
 
+const LOGIN_WINDOW_MS = 15 * 60_000;
+/** One client's guesses at one account. */
+const ATTEMPTS_PER_ACCOUNT_AND_CLIENT = 5;
+/** One client's sign-in attempts at any accounts; the passkey sign-in spends the same budget. */
+const ATTEMPTS_PER_CLIENT = 20;
+/** Wrong guesses at one account, from anywhere, that are still answered at once. */
+export const SLOWDOWN_FREE_FAILURES = 10;
+export const SLOWDOWN_STEP_MS = 250;
+export const SLOWDOWN_MAX_MS = 5_000;
+
+/**
+ * How long a wrong answer is held back once an account has been guessed at
+ * from several places. It slows a guesser and never refuses anyone: a hard
+ * limit on the account itself would let any stranger lock the owner out.
+ */
+export function accountSlowDownMs(failures: number): number {
+  return Math.min(SLOWDOWN_MAX_MS, Math.max(0, failures - SLOWDOWN_FREE_FAILURES) * SLOWDOWN_STEP_MS);
+}
+
 async function authenticate(email: string, password: string) {
   const user = await prisma.user.findUnique({ where: { email } });
   const valid = await bcrypt.compare(password, user?.passwordHash || DUMMY_PASSWORD_HASH);
@@ -38,6 +57,10 @@ async function authenticate(email: string, password: string) {
 /**
  * Shared by /api/auth/login and /api/auth/token: same schema, same rate-limit
  * buckets, same dummy-hash timing for an unknown email, same messages.
+ *
+ * The counters live in this process and start over with it. Persisting them
+ * would take a table; what a restart buys a guesser is one more window of the
+ * per-client limits, and nobody but the owner can restart the server.
  */
 export async function checkCredentials(
   req: NextRequest,
@@ -50,9 +73,13 @@ export async function checkCredentials(
   }
   const { email, password } = credentials.data;
 
-  const accountRateKey = `login:account:${opaqueRateKey(email)}`;
-  const ipRate = consumeRateLimit(`login:ip:${requestClientKey(req)}`, 20, 15 * 60_000);
-  const accountRate = consumeRateLimit(accountRateKey, 5, 15 * 60_000);
+  // The account's guesses are counted per client: a stranger who uses up the
+  // guesses of an email address from their own address cannot lock out the
+  // owner, whose guesses come from another one.
+  const client = requestClientKey(req);
+  const accountRateKey = `login:account:${opaqueRateKey(`${email}\n${client}`)}`;
+  const ipRate = consumeRateLimit(`login:ip:${client}`, ATTEMPTS_PER_CLIENT, LOGIN_WINDOW_MS);
+  const accountRate = consumeRateLimit(accountRateKey, ATTEMPTS_PER_ACCOUNT_AND_CLIENT, LOGIN_WINDOW_MS);
   if (!ipRate.allowed || !accountRate.allowed) {
     const retryAfter = Math.max(ipRate.retryAfterSeconds, accountRate.retryAfterSeconds);
     return {
@@ -65,6 +92,15 @@ export async function checkCredentials(
 
   const user = await authenticate(email, password);
   if (!user) {
+    // Counted only after the per-client limits let the attempt through, so one
+    // client can add no more than its own few guesses to the account's tally.
+    const failures = consumeRateLimit(
+      `login:failures:${opaqueRateKey(email)}`,
+      SLOWDOWN_FREE_FAILURES,
+      LOGIN_WINDOW_MS
+    );
+    const wait = accountSlowDownMs(failures.count);
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     return {
       ok: false,
       status: 401,
