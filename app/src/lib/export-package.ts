@@ -3,9 +3,9 @@
  * the user already stored. No bank session secrets and no server paths.
  */
 import { prisma } from "./db";
-import { alvReportOf, loadAlvPeriodSources, type PurchaseVatTreatment } from "./alv-period";
+import { alvReportOf, loadAlvPeriodSources, profitLossOf, type PurchaseVatTreatment } from "./alv-period";
 import { PURCHASE_STATUS } from "./status-labels";
-import { buildProfitLoss, periodToEuros } from "./reports";
+import { periodToEuros } from "./reports";
 import { centsToEuros } from "./money";
 import { csvMoney, toCsv, type CsvValue } from "./csv";
 import { monthBoundsUtc } from "./validation";
@@ -114,7 +114,7 @@ export async function buildPeriodPackage(
   ]);
 
   // The same sources as the VAT return and /api/reports/profit-loss.
-  const profit = buildProfitLoss(sources.reportReceipts, sources.reportInvoices);
+  const profit = profitLossOf(sources);
   const alv = alvReportOf(sources);
 
   const receiptCsv = toCsv(
@@ -204,7 +204,7 @@ export async function buildPeriodPackage(
           `Kirjanpitopaketti ${month}`,
           "",
           "Tuloslaskelma ja ALV perustuvat hyväksyttyihin kuitteihin ja myyntilaskuihin laskun päivän mukaan (laskutusperuste). Luonnokset eivät ole mukana.",
-          "Ostolaskun ALV on mukana vähennettävässä verossa laskun päivän mukaan. Jos sama osto on jo kuittina, ostolaskun ALV jätetään pois (csv/ostolaskut.csv kertoo jokaisesta laskusta, onko se mukana).",
+          "Ostolasku on kulu tuloslaskelmassa ja sen ALV on mukana vähennettävässä verossa laskun päivän mukaan. Jos sama osto on jo kuittina, ostolasku jätetään pois (csv/ostolaskut.csv kertoo jokaisesta laskusta, onko se mukana).",
           "Hyvityslasku vähentää myyntiä sillä kaudella, jolla se on annettu. Hyvitetty lasku pysyy omalla kaudellaan.",
           "Tuloa ei lasketa kahteen kertaan: kuitti, joka on tehty laskun maksaneesta pankkitapahtumasta, jätetään pois.",
           "Käteisnäkymä (kohdistukset.json) käyttää tiliotteen kohdekuukautta, ei kuitin päivää.",

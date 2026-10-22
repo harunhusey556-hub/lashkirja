@@ -1,6 +1,6 @@
 import { prisma } from "../db";
 import { parseVatDetails } from "../alv";
-import { bookedSalesWhere, classifyPurchaseInvoices, loadCountedReceipts } from "../alv-period";
+import { bookedSalesWhere, classifyPurchaseInvoices, loadCountedReceipts, purchaseInBooks } from "../alv-period";
 import { computeInvoiceTotals } from "../invoices";
 import { postAll, type JournalEntry, type SourceDocument } from "./posting";
 
@@ -76,9 +76,7 @@ export async function loadLedgerDocuments(userId: string, end: Date): Promise<So
 
   // Purchase invoices the return counts on their own. One documented by a receipt is already
   // in the books through that receipt (paid from the bank): neither it nor its payments post again.
-  const countedIds = purchaseRows
-    .filter((row) => row.treatment === "counted" || row.treatment === "no_vat")
-    .map((row) => row.id);
+  const countedIds = purchaseRows.filter(purchaseInBooks).map((row) => row.id);
   if (countedIds.length > 0) {
     const purchases = await prisma.purchaseInvoice.findMany({
       where: { id: { in: countedIds } },
