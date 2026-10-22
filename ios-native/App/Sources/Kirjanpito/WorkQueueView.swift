@@ -21,6 +21,20 @@ struct WorkQueueView: View {
     }
     @State private var dismissing: String?
 
+    /// Where the last answer is kept in `app.lastPainted`; Koti's warm-up fills it while its "Tuonnit ja
+    /// virheet" row is on screen.
+    static let path = "/api/work-queue"
+
+    /// `opening` (`app.lastPainted(path)`, what this screen or Koti last got) is on screen in the first
+    /// frame. Loaded in `.task` instead, the push showed a spinner page and the rows came in a moment
+    /// later (motion koti-workqueue-open, F011).
+    init(opening: Snapshot? = nil) {
+        guard let opening else { return }
+        var shown = ScreenLoad<Snapshot>()
+        shown.succeed(opening)
+        _state = State(initialValue: shown)
+    }
+
     var body: some View {
         List {
             if let data = state.value {
@@ -32,13 +46,19 @@ struct WorkQueueView: View {
                 failuresSection(JobsQueue.listedFailures(data.jobs, connections: data.connections, dismissedLocally: JobDismissals.ids))
                 jobsSection(JobsQueue.visibleJobs(data.jobs))
                 itemsSections(data.items)
-            } else {
+            } else if state.failure != nil {
                 ScreenStateView(state: state, retry: load) { (_: Snapshot) in EmptyView() }
                     .listRowBackground(Color.clear)
+            } else {
+                placeholder
             }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        // The greyed rows give way to the real ones eased, as ScreenStateView's swap does: not a cut.
+        .motion(.snappy, value: state.value == nil)
+        // The banner eases in over the rows, so they do not jump.
+        .motion(.snappy, value: state.failure != nil)
         .navigationTitle("Tuonnit ja virheet")
         .refreshable { await load() }
         .task(id: app.dataVersion) {
@@ -60,6 +80,44 @@ struct WorkQueueView: View {
     }
 
     private var hasActiveJob: Bool { state.value?.jobs.contains(where: \.isActive) ?? false }
+
+    /// The page's shape until the first answer (cached or the server's): its two sections with grey
+    /// rows, so the list fills the space it already had instead of growing out of a spinner.
+    @ViewBuilder private var placeholder: some View {
+        Section {
+            ForEach(0..<2, id: \.self) { _ in
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Kuitin lukeminen").foregroundStyle(Theme.ink)
+                        Text("Luotu 22.10.2026 klo 12.00").font(.caption).foregroundStyle(Theme.ink2)
+                    }
+                    Spacer(minLength: 8)
+                    Text("Valmis").font(.caption.weight(.semibold))
+                }
+                .redacted(reason: .placeholder)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Ladataan")
+            }
+        } header: {
+            Text("Tuonnit ja haut")
+        } footer: {
+            Text("Tuonnit, haut ja niiden virheet.")
+        }
+        Section {
+            ForEach(0..<3, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Kuitti 22.10.")
+                    Text("Kuitti · Kuitin tulkinta epäonnistui")
+                        .font(.caption)
+                }
+                .redacted(reason: .placeholder)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Ladataan")
+            }
+        } header: {
+            Text("Korjattavat")
+        }
+    }
 
     /// Bank and mail runs that failed and are still wrong, first, each with what happened and the
     /// way to fix it; Koti's "Tuonnit ja virheet" count leads here.
@@ -262,6 +320,8 @@ struct WorkQueueView: View {
             async let connections = JobDismissals.connections(api: api)
             let snapshot = Snapshot(jobs: try await jobs.jobs, items: try await queue.items, connections: await connections)
             state.succeed(snapshot)
+            // The next visit's first frame (`init`).
+            app.rememberPainted(snapshot, Self.path)
         } catch is CancellationError {
         } catch {
             // "Not loaded" is not "empty" (BOOKS-16): a loaded list stays, with the banner above it.

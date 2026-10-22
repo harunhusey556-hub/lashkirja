@@ -585,6 +585,143 @@ final class StabilityTests: WalkTestCase {
         }
     }
 
+    /// F011 (motion lasku-copy): Toiminnot > Kopioi luonnokseksi opens the copy on its own rows. It
+    /// opened on a bare 'Lasku' page with a spinner, and the number in the bar and the rows came about
+    /// 0.4 s later, when the page fetched the invoice that the copy's answer had already given (motion
+    /// gate 39793743379). The bar is read at the push: the copy has its number then, not a beat after
+    /// its rows. The picture of the first look goes to the shots.
+    func test34_CopyOpensOnItsRows() {
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        // Myynti's overdue row: its badge says "Myöhässä", its line the due date (P3 testB).
+        guard tapLabel("label CONTAINS 'Myöhässä' AND label CONTAINS %@", "· eräpäivä") else {
+            dump(app, "stability-34-no-invoice"); XCTFail("Myynti lists no overdue invoice to copy"); return
+        }
+        let source = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Lasku ")).firstMatch
+        guard source.waitForExistence(timeout: 30) else {
+            dump(app, "stability-34-not-opened"); XCTFail("the overdue invoice did not open"); return
+        }
+        let sourceTitle = source.identifier
+        guard invoiceAction("Kopioi luonnokseksi") else {
+            dump(app, "stability-34-no-copy"); XCTFail("the overdue invoice offers no Kopioi luonnokseksi"); return
+        }
+        let asked = Date()
+        // Neither the invoice it was made from nor any other screen: the bar of the pushed copy.
+        let copied = app.navigationBars.matching(NSPredicate(format: "(identifier == %@ OR identifier BEGINSWITH %@) AND identifier != %@",
+                                                           "Lasku", "Lasku ", sourceTitle)).firstMatch
+        guard copied.waitForExistence(timeout: 30) else {
+            dump(app, "stability-34-not-pushed"); XCTFail("Kopioi luonnokseksi opened no copy"); return
+        }
+        let picture = requestShot("stability-34-first-look")
+        let title = copied.identifier
+        let actions = copied.buttons["Toiminnot"].exists
+        let spinner = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Ladataan")).firstMatch.exists
+        // The draft's one primary, which the invoice it was made from (overdue) does not have: the
+        // copy's own page is in, not only the one under it.
+        let send = app.buttons["Lähetä lasku"].firstMatch
+        let sendAt: CGFloat? = send.exists ? send.frame.minY : nil
+        awaitShot(picture, since: asked)
+        let sendText = sendAt.map { "\($0)" } ?? "none"
+        note("INFO stability 34 first look: title '\(title)', Toiminnot \(actions), spinner \(spinner), Lähetä lasku at \(sendText)")
+        XCTAssertNotEqual(title, "Lasku", "the copy opened on a bare 'Lasku' page: its number came with the load")
+        XCTAssertTrue(actions, "the bar has no Toiminnot at first: it comes with the invoice and the bar changes")
+        XCTAssertFalse(spinner, "the push landed on a spinner page")
+        XCTAssertNotNil(sendAt, "the first look has no Lähetä lasku: the copy's page came after the push")
+
+        // The page's own load comes in under the rows it already has: nothing moves.
+        guard sendAt != nil else { dump(app, "stability-34-no-send"); return }
+        waitStill(send)
+        shot("stability-34-loaded")
+        XCTAssertTrue(app.navigationBars[title].exists, "the title changed when the copy loaded")
+        if let sendAt, send.exists {
+            XCTAssertEqual(send.frame.minY, sendAt, accuracy: 1, "Lähetä lasku moved from \(sendAt) to \(send.frame.minY) when the copy loaded")
+        }
+    }
+
+    /// F011 (motion kirjanpito-match-open): Kohdista ostolaskujen maksut opens on its rows. It opened on
+    /// a spinner page and the rows came 0.5 s later (motion gate 39793743379). The first visit paints
+    /// the rows and keeps them; the second is made offline, so its first look is what the push had before
+    /// any answer: the rows, no spinner page and no failure page, and they stay.
+    func test35_MatchOpensOnItsRows() {
+        let title = "Kohdista ostolaskujen maksut"
+        // A proposal's section ("Ehdotetut maksut · N"), the others' ("Ei maksuehdotusta · N") or the footer that
+        // stays under the rows: the rows are in.
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@ OR label == %@",
+                                                                       "Ehdotetut maksut", "Ei maksuehdotusta", "Pankin maksut avoimille ostolaskuille.")).firstMatch
+        openHubRow(title)
+        guard rows.waitForExistence(timeout: 30) else {
+            dump(app, "stability-35-no-rows"); XCTFail("the first visit showed no rows (is there an open ostolasku in the seed?)"); return
+        }
+        backToBooks(title)
+
+        goOffline()
+        let pushed = app.navigationBars[title]
+        guard tapLabel("label BEGINSWITH %@", title), pushed.waitForExistence(timeout: 10) else {
+            dump(app, "stability-35-not-opened"); XCTFail("\(title) did not open the second time"); return
+        }
+        let asked = Date()
+        let picture = requestShot("stability-35-first-look")
+        let spinner = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Ladataan")).firstMatch.exists
+        let failurePage = app.buttons["load-failure-retry"].firstMatch.exists
+        let shown = rows.exists
+        awaitShot(picture, since: asked)
+        note("INFO stability 35 first look: rows \(shown), spinner \(spinner), failure page \(failurePage)")
+        XCTAssertFalse(spinner, "the push landed on a spinner page, or on its greyed rows, not on the rows")
+        XCTAssertFalse(failurePage, "offline, the push landed on a failure page, not on the rows")
+        XCTAssertTrue(shown, "the first look has no rows")
+
+        // Offline the refresh cannot come: the rows stay, under the banner when the screen asked at all.
+        let banner = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                                                           "Ei verkkoyhteyttä", "Palvelimeen ei saada yhteyttä", "Palvelin ei vastannut ajoissa")).firstMatch
+        if !banner.waitForExistence(timeout: 20) { note("INFO stability 35: no refresh banner within 20 s (the cache was fresh)") }
+        shot("stability-35-offline")
+        XCTAssertTrue(rows.exists, "offline, the failed refresh took the rows away")
+        XCTAssertFalse(app.buttons["load-failure-retry"].firstMatch.exists, "offline, the failed refresh replaced the rows with a failure page")
+    }
+
+    /// F011 (motion koti-workqueue-open): Tuonnit ja virheet opens on its rows. It opened on a spinner
+    /// page and the rows came a moment later (motion gate 39793743379). Koti's row leads here while an
+    /// import has failed (the --ci seed has one); the first visit paints the rows and keeps them, and the
+    /// second, made offline, is what the push had before any answer: the rows, no spinner page and no
+    /// failure page, and they stay.
+    func test36_WorkQueueOpensOnItsRows() {
+        let title = "Tuonnit ja virheet"
+        XCTAssertTrue(selectTab("Koti"), "Koti is not selected")
+        // The failed import's own row: its button says what failed and offers to clear it.
+        let failure = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kuittaa virhe")).firstMatch
+        guard tapLabel("label BEGINSWITH %@", title), app.navigationBars[title].waitForExistence(timeout: 10) else {
+            dump(app, "stability-36-no-row"); XCTFail("Koti has no Tuonnit ja virheet row to open (does the seed hold a failed import?)"); return
+        }
+        guard failure.waitForExistence(timeout: 30) else {
+            dump(app, "stability-36-no-failure"); XCTFail("the first visit showed no failed import"); return
+        }
+        app.navigationBars[title].buttons["BackButton"].firstMatch.tap(); taps += 1
+        XCTAssertTrue(app.navigationBars[title].waitForNonExistence(timeout: 10), "Back from \(title) did not reach Koti")
+
+        goOffline()
+        let pushed = app.navigationBars[title]
+        guard tapLabel("label BEGINSWITH %@", title), pushed.waitForExistence(timeout: 10) else {
+            dump(app, "stability-36-not-opened"); XCTFail("\(title) did not open the second time"); return
+        }
+        let asked = Date()
+        let picture = requestShot("stability-36-first-look")
+        let spinner = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Ladataan")).firstMatch.exists
+        let failurePage = app.buttons["load-failure-retry"].firstMatch.exists
+        let shown = failure.exists
+        awaitShot(picture, since: asked)
+        note("INFO stability 36 first look: failed import \(shown), spinner \(spinner), failure page \(failurePage)")
+        XCTAssertFalse(spinner, "the push landed on a spinner page, or on its greyed rows, not on the rows")
+        XCTAssertFalse(failurePage, "offline, the push landed on a failure page, not on the rows")
+        XCTAssertTrue(shown, "the first look has no failed import")
+
+        // Offline the refresh cannot come: the rows stay, under the banner.
+        let banner = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                                                           "Ei verkkoyhteyttä", "Palvelimeen ei saada yhteyttä", "Palvelin ei vastannut ajoissa")).firstMatch
+        if !banner.waitForExistence(timeout: 20) { note("INFO stability 36: no refresh banner within 20 s") }
+        shot("stability-36-offline")
+        XCTAssertTrue(failure.exists, "offline, the failed refresh took the rows away")
+        XCTAssertFalse(app.buttons["load-failure-retry"].firstMatch.exists, "offline, the failed refresh replaced the rows with a failure page")
+    }
+
     /// The seed's overdue invoice from the demo API: its number, its customer, and its due and
     /// invoice days as the app prints them. Test values from app/scripts/demo-seed.ts; only ever
     /// against the throwaway local server (the runner shares the Mac's loopback).

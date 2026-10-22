@@ -178,6 +178,13 @@ public struct InvoiceList: Decodable, Sendable {
 public struct InvoiceDetailResponse: Decodable, Sendable {
     public let invoice: Invoice
     public let paymentDuplicates: [PaymentDuplicate]?
+
+    /// An invoice the app already holds as the detail the screen opens on: a copy's answer
+    /// (`POST /api/invoices/{id}/duplicate`) is the invoice as this route would give it.
+    public init(invoice: Invoice, paymentDuplicates: [PaymentDuplicate]? = nil) {
+        self.invoice = invoice
+        self.paymentDuplicates = paymentDuplicates
+    }
 }
 public struct InvoiceResponse: Decodable, Sendable { public let invoice: Invoice }
 public struct InvoiceCounts: Decodable, Sendable { public let counts: [String: Int] }
