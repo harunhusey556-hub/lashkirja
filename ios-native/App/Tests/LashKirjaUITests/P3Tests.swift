@@ -78,6 +78,12 @@ final class P3Tests: WalkTestCase {
     func testA_OfflineBannerAndRecovery() {
         guard let bearer = demoToken() else { XCTFail("the demo API gave no token"); return }
         defer { _ = call("/api/auth/logout", [:], bearer) }
+        // F006: the app's 30 s version poll reloads Myynti within the wait below on its own, so a
+        // screen that never reloads when the connection returns still passed. This launch holds the
+        // poll back; what the chip shows after going online is then the recovery's own reload.
+        app.terminate()
+        app.launchArguments.append("-LKNoVersionPoll")
+        launchSignedIn()
         tab("Myynti")
         let drafts = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Luonnokset'")).firstMatch
         let before = drafts.waitForExistence(timeout: 15) ? drafts.label : "?"
@@ -137,14 +143,17 @@ final class P3Tests: WalkTestCase {
         let reloaded = Self.count(drafts) == expected
         shot("p3a-reloaded")
         note("INFO P3 drafts before: \(before), server after the offline draft: \(expected), shown \(Int(Date().timeIntervalSince(back))) s after going online: \(drafts.exists ? drafts.label : "no chip")")
-        // Which request came first once online: the version poll (every 30 s) reloads the list
-        // too, so a reload that only followed its answer may not be the recovery's own.
+        // The launch holds the version poll back, so the reload above is the recovery's own: no
+        // request for the version may have gone out since the proxy came back, or the argument did
+        // not reach the app and the 30 s poll could have reloaded the list again.
         if let handle = FileHandle(forReadingAtPath: proxyLog) {
             try? handle.seek(toOffset: logged)
             let lines = String(decoding: (try? handle.readToEnd()) ?? Data(), as: UTF8.self).split(separator: "\n")
             try? handle.close()
             let first = lines.first { $0.contains(" GET /api/sync/version 200") || $0.contains(" GET /api/invoices/counts 200") }
             note("INFO P3 first answer online of the version poll or the counts: \(first.map { String($0) } ?? "none")")
+            let polls = lines.filter { $0.contains(" GET /api/sync/version") }
+            XCTAssertTrue(polls.isEmpty, "the version poll asked while the launch held it back: \(polls.first.map { String($0) } ?? "")")
         }
         check("P3 failed screen reloads by itself when back online (Luonnokset \(expected))", reloaded)
         check("P3 the stale note leaves with the reload", !stale.exists)

@@ -32,9 +32,6 @@ struct RecurringInvoicesView: View {
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 }
-                if let notice {
-                    Section { Text(notice).font(.subheadline) }
-                }
                 if list.dueNow > 0 {
                     // The message and its button in one card. As two rows, the button's on the bare
                     // canvas, the card had flat bottom corners and the button floated under it (M034).
@@ -89,6 +86,7 @@ struct RecurringInvoicesView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .noticeToast($notice)
         .navigationTitle("Toistuvat laskut")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -299,7 +297,6 @@ struct RecurringDetailView: View {
                     }
                 }
             }
-            if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             Section {
                 if current.isDue(today: APIDate.dayString(Date())) {
                     Button {
@@ -319,6 +316,7 @@ struct RecurringDetailView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
         .navigationTitle(current.title)
         .navigationBarTitleDisplayMode(.inline)
         // After an edit the screen stays: the refresh below shows the saved schedule.
@@ -451,10 +449,10 @@ struct RecurringFormSheet: View {
                     }
                     Button { withMotion { draft.lines.append(.new(sellerRegistered: sellerRegistered)) } } label: { Label("Lisää rivi", systemImage: "plus") }
                 }
-                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi toistuva lasku" : "Muokkaa toistuvaa laskua")
             .navigationBarTitleDisplayMode(.inline)

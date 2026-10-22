@@ -47,8 +47,6 @@ struct EmailInboxView: View {
     var body: some View {
         List {
             mailboxSection
-            if let failure { Text(failure).foregroundStyle(Theme.danger) }
-            if let notice { Text(notice).foregroundStyle(Theme.ink2) }
             if showsFolders {
                 Section { chips }
                     .listRowBackground(Color.clear)
@@ -83,6 +81,8 @@ struct EmailInboxView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
+        .noticeToast($notice)
         .navigationTitle("Sähköposti")
         .navigationDestination(isPresented: $openSettings) { RouteScreen(route: .emailImport) }
         .overlay(alignment: .bottom) {

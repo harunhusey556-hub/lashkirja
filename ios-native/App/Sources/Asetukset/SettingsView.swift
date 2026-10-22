@@ -48,9 +48,6 @@ struct SettingsView: View {
                         SettingRow(title: "Kohdista varmat automaattisesti", subtitle: "Kun viite ja summa täsmäävät, kuitti kohdistetaan pankkitapahtumaan heti.", symbol: "link")
                     }
                     .disabled(profile.autoLinkSureMatches == nil || savingAutoLink)
-                    if let settingFailure {
-                        Text(settingFailure).font(.footnote).foregroundStyle(Theme.danger)
-                    }
                 }
             } else if let profileFailure {
                 Section {
@@ -85,6 +82,7 @@ struct SettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($settingFailure)
         .navigationTitle("Asetukset")
         // The lock lives outside SwiftUI state; read it again when coming back from its screen.
         .onAppear { lockSubtitle = Self.lockRowSubtitle(AppLock.shared) }
@@ -199,6 +197,10 @@ struct ProfileForm: View {
     @State private var busy = false
     @State private var failure: String?
     @State private var confirmDiscard = false
+    private enum Field: Hashable {
+        case firstName, lastName, businessName, businessId, phone, street, postalCode, city, iban, bic, terms, interest, fee
+    }
+    @FocusState private var focus: Field?
 
     /// What Tallenna would send: the same diff `save()` builds, so "dirty" never disagrees with it.
     private var dirty: Bool {
@@ -219,12 +221,16 @@ struct ProfileForm: View {
                             TextField("", text: binding.firstName.orEmpty)
                                 .textContentType(.givenName).textInputAutocapitalization(.words).autocorrectionDisabled()
                                 .multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .firstName)
                         }
+                        .tapFocuses($focus, equals: .firstName)
                         LabeledContent("Sukunimi") {
                             TextField("", text: binding.lastName.orEmpty)
                                 .textContentType(.familyName).textInputAutocapitalization(.words).autocorrectionDisabled()
                                 .multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .lastName)
                         }
+                        .tapFocuses($focus, equals: .lastName)
                     } footer: { Text("Sähköposti: \(original.email)") }
                 case .company:
                     Section {
@@ -250,50 +256,70 @@ struct ProfileForm: View {
                             TextField("", text: binding.businessName.orEmpty)
                                 .textContentType(.organizationName).textInputAutocapitalization(.words).autocorrectionDisabled()
                                 .multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .businessName)
                         }
+                        .tapFocuses($focus, equals: .businessName)
                         LabeledContent("Y-tunnus") {
                             TextField("1234567-8", text: binding.businessId.orEmpty).codeInput(.never).multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .businessId)
                         }
+                        .tapFocuses($focus, equals: .businessId)
                         LabeledContent("Puhelin") {
                             TextField("", text: binding.phone.orEmpty).phoneInput().multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .phone)
                         }
+                        .tapFocuses($focus, equals: .phone)
                     }
                     Section("Osoite") {
                         LabeledContent("Katuosoite") {
                             TextField("", text: binding.addressStreet.orEmpty)
                                 .textContentType(.streetAddressLine1).textInputAutocapitalization(.words)
                                 .multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .street)
                         }
+                        .tapFocuses($focus, equals: .street)
                         LabeledContent("Postinumero") {
                             TextField("", text: binding.addressPostalCode.orEmpty).keyboardType(.numberPad).textContentType(.postalCode)
                                 .multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .postalCode)
                         }
+                        .tapFocuses($focus, equals: .postalCode)
                         LabeledContent("Kaupunki") {
                             TextField("", text: binding.addressCity.orEmpty)
                                 .textContentType(.addressCity).textInputAutocapitalization(.words)
                                 .multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .city)
                         }
+                        .tapFocuses($focus, equals: .city)
                     }
                     Section("Maksutiedot") {
                         LabeledContent("IBAN") {
                             TextField("FI…", text: binding.invoiceIban.orEmpty).codeInput().multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .iban)
                         }
+                        .tapFocuses($focus, equals: .iban)
                         LabeledContent("BIC") {
                             TextField("", text: binding.invoiceBic.orEmpty).codeInput().multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .bic)
                         }
-                        // Several lines: the name over the text, which then has the row's width.
+                        .tapFocuses($focus, equals: .bic)
+                        // Several lines: the name over the text, which then has the row's width. The name
+                        // takes the tap alone: the text view keeps its own touches.
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Maksuehdot laskulla").font(.caption).foregroundStyle(Theme.ink2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .tapFocuses($focus, equals: .terms)
                             TextField("", text: binding.invoiceTerms.orEmpty, axis: .vertical).accessibilityLabel("Maksuehdot laskulla")
+                                .focused($focus, equals: .terms)
                         }
                     }
                     if let fields = Binding($collection) { collectionSection(fields) }
                 }
             }
-            if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
         .formKeyboard()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -310,13 +336,17 @@ struct ProfileForm: View {
         Section {
             LabeledContent("Viivästyskorko % / v") {
                 TextField("11,5", text: fields.interest).moneyInput().multilineTextAlignment(.trailing)
+                    .focused($focus, equals: .interest)
             }
+            .tapFocuses($focus, equals: .interest)
             if showCollectionErrors, let problem = fields.wrappedValue.interestError {
                 Text(problem).font(.footnote).foregroundStyle(Theme.danger)
             }
             LabeledContent("Muistutusmaksu (€)") {
                 TextField("5,00", text: fields.fee).moneyInput().multilineTextAlignment(.trailing)
+                    .focused($focus, equals: .fee)
             }
+            .tapFocuses($focus, equals: .fee)
             if showCollectionErrors, let problem = fields.wrappedValue.feeError {
                 Text(problem).font(.footnote).foregroundStyle(Theme.danger)
             }
@@ -383,32 +413,28 @@ struct PasswordView: View {
     var body: some View {
         Form {
             // Named in their rows: three rows of dots read alike once typed into (X146). A tap on a row's
-            // name opens its field too: the field starts after the name, and 'Uusi salasana uudelleen'
-            // covered the row's middle, where a tap went nowhere (P0 K, run 39374559226).
+            // name opens its field too (tapFocuses; P0 K, run 39374559226).
             Section {
                 LabeledContent("Nykyinen salasana") {
                     SecureField("", text: $current).textContentType(.password).multilineTextAlignment(.trailing)
                         .focused($focus, equals: .current).submitLabel(.next).onSubmit { focus = .new }
                 }
-                .contentShape(Rectangle())
-                .onTapGesture { focus = .current }
+                .tapFocuses($focus, equals: .current)
                 LabeledContent("Uusi salasana") {
                     SecureField("", text: $next).textContentType(.newPassword).multilineTextAlignment(.trailing)
                         .focused($focus, equals: .new).submitLabel(.next).onSubmit { focus = .again }
                 }
-                .contentShape(Rectangle())
-                .onTapGesture { focus = .new }
+                .tapFocuses($focus, equals: .new)
                 LabeledContent("Uusi salasana uudelleen") {
                     SecureField("", text: $again).textContentType(.newPassword).multilineTextAlignment(.trailing)
                         .focused($focus, equals: .again).submitLabel(.done).onSubmit { focus = nil }
                 }
-                .contentShape(Rectangle())
-                .onTapGesture { focus = .again }
+                .tapFocuses($focus, equals: .again)
             } footer: { Text("Vähintään 8 merkkiä.") }
-            if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
         .formKeyboard()
         .navigationTitle("Vaihda salasana")
         .navigationBarTitleDisplayMode(.inline)
@@ -484,10 +510,10 @@ struct DevicesView: View {
             } else {
                 ScreenStateView(state: sessions, retry: load) { (_: [DeviceSession]) in EmptyView() }
             }
-            if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
         .navigationTitle("Laitteet")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }

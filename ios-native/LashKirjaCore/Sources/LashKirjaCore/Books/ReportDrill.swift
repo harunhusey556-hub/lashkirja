@@ -64,16 +64,28 @@ public enum ReportDrill: Hashable, Sendable {
         return targets
     }
 
-    /// Expenses are receipts only: the Kuitit list, the bills filed as ostolaskut included, as the
-    /// figure counts them (`ReceiptListQuery.drill`).
+    /// The expense rows that are receipts: the Kuitit list, the bills filed as ostolaskut included, as
+    /// the figure counts them (`ReceiptListQuery.drill`). Purchase invoices no receipt documents are
+    /// expense rows too, but Kuitit does not list them (`purchaseInvoiceTarget`).
     public static func expenseTarget(_ period: ProfitLoss.Period, key: String) -> ReportDrill? {
-        period.expenseByCategory.reduce(0) { $0 + $1.count } == 0 ? nil : .receipts(period: key, tab: "meno", category: "")
+        let receiptRows = period.expenseByCategory.reduce(0) { $0 + $1.count } - (period.purchaseInvoiceCount ?? 0)
+        return receiptRows <= 0 ? nil : .receipts(period: key, tab: "meno", category: "")
     }
 
-    /// Every list a month's result is made of: its income lists, then its expense receipts.
+    /// Purchase invoices no receipt documents (rent, a typed-in bill): the Ostolaskut list.
+    public static func purchaseInvoiceTarget(_ period: ProfitLoss.Period) -> ReportDrill? {
+        (period.purchaseInvoiceCount ?? 0) > 0 ? .purchaseInvoices : nil
+    }
+
+    /// Every list an expense figure is made of: its receipts, then its purchase invoices.
+    public static func expenseTargets(_ period: ProfitLoss.Period, key: String) -> [ReportDrill] {
+        [expenseTarget(period, key: key), purchaseInvoiceTarget(period)].compactMap { $0 }
+    }
+
+    /// Every list a month's result is made of: its income lists, then its expense lists.
     public static func monthTargets(_ period: ProfitLoss.Period) -> [ReportDrill] {
         guard let key = period.month else { return [] }
-        return incomeTargets(period, key: key) + [expenseTarget(period, key: key)].compactMap { $0 }
+        return incomeTargets(period, key: key) + expenseTargets(period, key: key)
     }
 
     /// The month the Raportit chart selects first: the latest one with figures, else the last.

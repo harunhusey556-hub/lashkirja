@@ -11,13 +11,19 @@ import LashKirjaCore
 actor DeviceKey: DeviceKeySigner {
     private static let tag = Data("fi.tiyouba.lashkirja.device-key".utf8)
 
+    /// Asked through a getter: a `let secureEnclave = false` in the simulator build made the compiler
+    /// report the Secure Enclave branches below as never executed.
+    private static var hasSecureEnclave: Bool {
+        #if targetEnvironment(simulator)
+        return false
+        #else
+        return SecureEnclave.isAvailable
+        #endif
+    }
+
     func newPublicKey() -> String? {
         remove()
-        #if targetEnvironment(simulator)
-        let secureEnclave = false
-        #else
-        let secureEnclave = SecureEnclave.isAvailable
-        #endif
+        let secureEnclave = Self.hasSecureEnclave
         // Usable after the first unlock: a refresh may run in the background (Background App Refresh).
         guard let access = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
                                                            secureEnclave ? .privateKeyUsage : [], nil) else { return nil }

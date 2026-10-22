@@ -331,7 +331,7 @@ public enum ChatEvent: Equatable, Sendable {
     }
 
     /// One decoder for every event of every stream (decoding is thread-safe; building one is not free).
-    nonisolated(unsafe) private static let decoder = JSONDecoder()
+    private static let decoder = JSONDecoder()
 
     public static func parse(_ json: String) throws -> ChatEvent? {
         let data = Data(json.utf8)

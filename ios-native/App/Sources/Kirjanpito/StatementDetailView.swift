@@ -39,6 +39,8 @@ struct StatementDetailView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure, action: locked ? ToastAction("Kuukauden sulku", run: { openRoute(Route.periods) }) : nil)
+        .noticeToast($status)
         .navigationTitle(state.value.map(StatementText.title) ?? "Tiliote")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -163,18 +165,6 @@ struct StatementDetailView: View {
             }
         } footer: {
             Text("Valitse, minkä kuukauden luvuissa tämä tiliote näkyy Kodissa.")
-        }
-
-        if let failure {
-            Section {
-                Text(failure).foregroundStyle(Theme.danger)
-                if locked {
-                    NavigationLink(value: Route.periods) { Label("Kuukauden sulku", systemImage: "lock") }
-                }
-            }
-        }
-        if let status {
-            Text(status).font(.footnote).foregroundStyle(Theme.success)
         }
 
         if !sales.isEmpty {
@@ -410,10 +400,10 @@ struct StatementRowEditSheet: View {
                     }
                     TextField("Viesti", text: $message, axis: .vertical).lineLimit(1...4)
                 }
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle("Muokkaa tapahtumaa")
             .navigationBarTitleDisplayMode(.inline)

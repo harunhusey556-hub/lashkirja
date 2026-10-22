@@ -19,6 +19,15 @@ enum UITestHooks {
     static let launchPhase = false
     #endif
 
+    /// `-LKNoVersionPoll` keeps the 30 s version poll off (`AppModel.startVersionPolling`), so a
+    /// screen that reloads when the connection returns can be told from one the poll reloaded
+    /// anyway (P3 testA, F006). Its own argument, so every other walk keeps the poll.
+    #if DEBUG || LK_UITEST_HOOKS
+    static let versionPollOff = ProcessInfo.processInfo.arguments.contains("-LKNoVersionPoll")
+    #else
+    static let versionPollOff = false
+    #endif
+
     #if DEBUG || LK_UITEST_HOOKS
     /// Milliseconds since this process was started (by the kernel's clock), for launch timings
     /// that include what happens before `main`.

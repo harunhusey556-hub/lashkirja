@@ -203,6 +203,7 @@ struct OnboardingView: View {
                     .buttonStyle(.primary)
                 }
             } else {
+                // inline failure kept: in the stack pinned under the page, above its button, which stays put
                 if let failure {
                     Text(failure)
                         .font(.footnote)
