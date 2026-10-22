@@ -18,6 +18,8 @@ export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
   retryAfterSeconds: number;
+  /** Calls in the current window, this one included; goes past the limit while refused. */
+  count: number;
 }
 
 export function consumeRateLimit(
@@ -47,6 +49,7 @@ export function consumeRateLimit(
     allowed: bucket.count <= limit,
     remaining: Math.max(0, limit - bucket.count),
     retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+    count: bucket.count,
   };
 }
 
