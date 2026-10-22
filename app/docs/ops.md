@@ -21,7 +21,7 @@ A background job that fails calls the same reporter with the job kind and a shor
 `GET /api/health` separates four checks:
 
 - `db` — `SELECT 1` and how long it took
-- `disk` — `data/uploads` exists, is writable, and has at least 50 MB free
+- `disk` — `data/uploads` exists, is writable, and has at least 5 GB free (`LOW_SPACE_BYTES` in `src/lib/health.ts`). Below that the detail is `low-space`: a warning that arrives while a backup still fits, not a failure the app needs a restart for. On the Windows host the watchdog and `deploy-local.ps1` treat a 503 whose only red disk detail is `low-space` as serving
 - `mail` — whether `SMTP_HOST` or a stored mailbox host is set. A machine with no mailbox is `configured: false` and still ok
 - `bankJobs` — `bank_sync` jobs that failed in the last 24 hours
 

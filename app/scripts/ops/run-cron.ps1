@@ -26,25 +26,57 @@
   call fails or returns a non-2xx status, but always attempts both calls
   regardless of the other's outcome.
 
+  A failing run also sends the owner a Telegram line (Notify from lk-common.ps1, the path the
+  watchdog uses). The task runs hourly, so while a failure lasts the line goes out at most once per
+  AlertGapHours; a run that succeeds resets that, and the next failure alerts at once.
+
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File run-cron.ps1
 #>
 [CmdletBinding()]
 param(
   [string]$Root = 'C:\LashKirja',
-  [int]$Port = 3300
+  [int]$Port = 3300,
+  [int]$AlertGapHours = 12
 )
 
 $ErrorActionPreference = 'Stop'
 $AppDir = Join-Path $Root 'prod\app'
 $LogDir = Join-Path $Root 'logs'
-if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
+$RunDir = Join-Path $Root 'run'
+foreach ($dir in @($LogDir, $RunDir)) {
+  if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+}
 $LogFile = Join-Path $LogDir ("cron-{0}.log" -f (Get-Date -Format 'yyyy-MM-dd'))
+$AlertStamp = Join-Path $RunDir 'cron-alert.txt'
 
 function Log([string]$Message) {
   $line = "{0} {1}" -f (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss'), $Message
   Add-Content -LiteralPath $LogFile -Value $line -Encoding UTF8
-  Write-Output $line
+  # Not Write-Output: Invoke-CronRoute logs and then returns its verdict, and anything it writes to the
+  # output stream becomes part of that return value. The array was always truthy, so the exit code
+  # was 0 even when both routes answered 500.
+  Write-Host $line
+}
+
+# An alert that cannot be sent must never change what this script does or its exit code, so a
+# missing or broken helper only costs the alert.
+try { . (Join-Path $PSScriptRoot 'lk-common.ps1') }
+catch {
+  Log ('alerting unavailable: ' + $_.Exception.Message)
+  function Notify([string]$Text) { Log ('notify unavailable: ' + $Text) }
+}
+
+# True when no alert went out in the last AlertGapHours.
+function Test-AlertDue {
+  if (-not (Test-Path -LiteralPath $AlertStamp)) { return $true }
+  try {
+    $last = [datetime](Get-Content -LiteralPath $AlertStamp -ErrorAction Stop | Select-Object -First 1)
+    return (((Get-Date) - $last).TotalHours -ge $AlertGapHours)
+  } catch {
+    Log ('cron-alert.txt is unreadable (' + $_.Exception.Message + '); alerting again')
+    return $true
+  }
 }
 
 function Get-CronSecret {
@@ -80,4 +112,19 @@ if (-not $secret) {
 $okInvoices = Invoke-CronRoute 'recurring-invoices' $secret
 $okCleanup = Invoke-CronRoute 'cleanup' $secret
 
-if ($okInvoices -and $okCleanup) { exit 0 } else { exit 1 }
+if ($okInvoices -and $okCleanup) {
+  Remove-Item -LiteralPath $AlertStamp -Force -ErrorAction SilentlyContinue
+  exit 0
+}
+
+$failed = @()
+if (-not $okInvoices) { $failed += 'recurring-invoices' }
+if (-not $okCleanup) { $failed += 'cleanup' }
+Log ('failed: ' + ($failed -join ', '))
+if (Test-AlertDue) {
+  # Route names and the log path only: the secret and the response bodies stay out of Telegram.
+  Notify ("LashKirja HATA: ajastettu ajo epaonnistui ({0}). Loki: {1}" -f ($failed -join ', '), $LogFile)
+  try { Set-Content -LiteralPath $AlertStamp -Value (Get-Date).ToString('o') -Encoding ASCII }
+  catch { Log ('could not record the alert time in cron-alert.txt: ' + $_.Exception.Message) }
+}
+exit 1

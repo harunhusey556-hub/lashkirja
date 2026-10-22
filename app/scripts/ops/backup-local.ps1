@@ -22,6 +22,9 @@
   stored mailbox and bank secrets, so keep a copy of that file in a
   password manager (see app/docs/ops-windows.md).
 
+  A failed run also sends the owner a Telegram line (Notify from lk-common.ps1, the same path the
+  watchdog uses); watchdog-prod.ps1 alerts as well when the newest zip is over 36 h old.
+
   -RestoreTest restores the newest zip into a temp directory, checks every
   manifest hash, runs PRAGMA integrity_check and counts the User rows.
 
@@ -60,6 +63,14 @@ function Log([string]$Message) {
   $line = "{0} {1}" -f (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss'), $Message
   Add-Content -LiteralPath $LogFile -Value $line -Encoding UTF8
   Write-Output $line
+}
+
+# Notify, the Telegram line watchdog-prod.ps1 also uses. An alert that cannot be sent must never be
+# the reason a backup does not run, so a missing or broken helper only costs the alert.
+try { . (Join-Path $PSScriptRoot 'lk-common.ps1') }
+catch {
+  Log ('alerting unavailable: ' + $_.Exception.Message)
+  function Notify([string]$Text) { Log ('notify unavailable: ' + $Text) }
 }
 
 # One small Node helper, run with the production checkout's @libsql/client.
@@ -161,7 +172,11 @@ if ($RestoreTest) {
 }
 
 # ------------------------------------------------------------------ backup
-if (-not (Test-Path $DbPath)) { Log "backup FAILED: $DbPath does not exist"; exit 1 }
+if (-not (Test-Path $DbPath)) {
+  Log "backup FAILED: $DbPath does not exist"
+  Notify "LashKirja HATA: varmuuskopio epaonnistui, tietokantaa ei loydy: $DbPath. Loki: $LogFile"
+  exit 1
+}
 $stamp = Get-Date
 $day = $stamp.ToString('yyyy-MM-dd')
 $name = "lashkirja-$day.zip"
@@ -222,7 +237,9 @@ try {
     Log 'no OneDrive folder; off-machine copy skipped'
   }
 } catch {
-  Log "backup FAILED: $($_.Exception.Message)"
+  # Kept before the inner try/catch blocks below can replace $_ with their own error.
+  $failure = $_
+  Log "backup FAILED: $($failure.Exception.Message)"
   $exitCode = 1
   # A failed 03:00 run only ever wrote to backup-*.log, which nobody looks
   # at (final review M9). Surface it two more ways, best-effort -- neither
@@ -247,6 +264,8 @@ try {
     # above is the guaranteed signal.
     Log "could not write to the Windows Application event log: $($_.Exception.Message)"
   }
+  # The owner reads Telegram, not logs\ or the event log (S4). Last, so a slow send delays nothing above.
+  Notify "LashKirja HATA: varmuuskopio epaonnistui: $($failure.Exception.Message). Loki: $LogFile"
 } finally {
   Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
 }
