@@ -861,8 +861,10 @@ class PrebuildFreed(unittest.TestCase):
 class GatePrebuild(unittest.TestCase):
     @staticmethod
     def walk(verdict=None):
-        """A walk's report: one step that passed, and the launch row when the walk logged the marks."""
-        launch = [] if verdict is None else [{"suite": "s", "id": "prebuild-freed", "crashed": False, "checks": {"prebuild": verdict}}]
+        """A walk's report: one step that passed, and the launch row when the walk logged the marks.
+        The launch row carries the step checks as 'n/a', as motion-audit.py's prebuild_row writes it."""
+        checks = {**dict.fromkeys(["intermediate", "flash", "shift_video", "shift_probe", "stall"], "n/a"), "prebuild": verdict}
+        launch = [] if verdict is None else [{"suite": "s", "id": "prebuild-freed", "crashed": False, "checks": checks}]
         return [row("a"), *launch]
 
     def test_copies_released_in_both_pr_walks_are_fixed(self):

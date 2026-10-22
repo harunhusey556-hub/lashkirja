@@ -38,8 +38,9 @@ def rows(path):
     return out, stall_ms
 
 def judged(d):
-    """The steps a walk judged: its launch row says nothing of whether the walk ran."""
-    return {x[:2] for x in d if x[2] in KS}
+    """The steps a walk judged: its launch row says nothing of whether the walk ran (it carries the
+    step checks too, as 'n/a')."""
+    return {x[:2] for x in d if x[2] in KS and x[1] != 'prebuild-freed'}
 
 def stalls(k, stall_ms):
     """The step's app_stall_ms in the baseline, pr-run1 and pr-run2 (None: the report has none)."""
