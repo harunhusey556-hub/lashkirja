@@ -1895,6 +1895,34 @@ final class StabilityTests: WalkTestCase {
         shot("stability-25-pankki")
     }
 
+    /// Lisää > Tuo tiliote with a file the app cannot open (the scope refused, or the file gone) did
+    /// nothing and said nothing: the import returned silently. It now says "Tiedostoa ei voitu lukea."
+    /// as any failed import does. A test cannot pick a file in the system's picker, so ⋯ has a fixture
+    /// under `-LKUITest` that hands the import a statement file that is not there. It brings no row,
+    /// so it can run anywhere in the class.
+    func test34_UnreadableStatementSaysSo() {
+        app.terminate()
+        app.launchArguments += ["-LKUITest", "-notifications.asked.v1", "YES"]
+        launchSignedIn()
+        dismissSystemPrompts()
+        tab("Lisää")
+        let bar = app.navigationBars["Lisää"]
+        guard bar.waitForExistence(timeout: 10) else { dump(app, "stability-34-no-lisaa"); XCTFail("Lisää did not open"); return }
+        guard pickFromAddMenu(bar, "Testitiliote (ei luettavissa)") else {
+            XCTFail("Lisää's ⋯ has no Testitiliote (ei luettavissa): is the app a Debug build launched with -LKUITest?"); return
+        }
+        let notice = app.staticTexts["Tiedostoa ei voitu lukea."]
+        guard notice.waitForExistence(timeout: 10) else {
+            dump(app, "stability-34-no-notice"); XCTFail("an unreadable statement left Lisää without a word"); return
+        }
+        shot("stability-34-unreadable")
+        // A failure, not an import: no link to rows. The spinner is gone and ⋯ answers again.
+        let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Näytä tapahtumat ›")).firstMatch
+        XCTAssertFalse(rows.exists, "an unreadable statement offered Näytä tapahtumat")
+        let free = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: bar.buttons["Toiminnot"].firstMatch)
+        XCTAssertEqual(XCTWaiter().wait(for: [free], timeout: 10), .completed, "⋯ stayed busy after the failed read")
+    }
+
     /// Taps `item` in Lisää's ⋯. The mailbox item reads "Hae sähköpostista" until the sheet has read
     /// that none is connected, so the menu is looked into up to three times.
     private func pickFromAddMenu(_ bar: XCUIElement, _ item: String) -> Bool {
