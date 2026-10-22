@@ -27,6 +27,9 @@
       is a Telegram line, at most one per AlertGapHours;
     * a 503 whose only red check is the disk's low-space is a warning, not a restart: freeing space
       is not something a restart does. The owner gets one Telegram line per AlertGapHours.
+    * a 503 whose red check is the background worker's heartbeat (health.ts workerHealth: stale, never
+      started) is a warning too: the web server answers, and restarting it does not bring the worker
+      back. Only db and disk decide a restart. One Telegram line per AlertGapHours.
 
   ASCII only on purpose: Windows PowerShell 5.1 reads a .ps1 without a BOM as Windows-1252, and
   non-ASCII characters in this file would break its string terminators.
@@ -78,10 +81,15 @@ $appEnv = Read-DotEnv $EnvFile
 
 # Set by Probe-Health when the 503 it saw was the disk's low-space.
 $script:LowSpace = $false
+# Set by Probe-Health when the 503 it saw had a red worker check, with that check's detail.
+$script:WorkerStale = $false
+$script:WorkerDetail = ''
 
 # 'ok' | 'degraded' | 'down_<status>' | 'unreachable'
 function Probe-Health {
   $script:LowSpace = $false
+  $script:WorkerStale = $false
+  $script:WorkerDetail = ''
   $headers = @{}
   if ($appEnv.Contains('HEALTH_TOKEN') -and $appEnv['HEALTH_TOKEN']) {
     $headers['Authorization'] = 'Bearer ' + $appEnv['HEALTH_TOKEN']
@@ -106,6 +114,11 @@ function Probe-Health {
         $lowSpace = (-not $json.checks.disk.ok) -and $json.checks.disk.detail -eq 'low-space'
         if ($json.checks.db.ok -and ($json.checks.disk.ok -or $lowSpace)) {
           $script:LowSpace = $lowSpace
+          # The worker is its own process (an older server has no such check, hence the null test).
+          if (($null -ne $json.checks.worker) -and (-not $json.checks.worker.ok)) {
+            $script:WorkerStale = $true
+            $script:WorkerDetail = [string]$json.checks.worker.detail
+          }
           return 'degraded'
         }
       } catch { }
@@ -245,6 +258,13 @@ function Warn-LowSpace($State) {
   }
 }
 
+function Warn-WorkerStale($State) {
+  Log ("worker: heartbeat {0} (health 503, db and disk still serving); not restarting" -f $script:WorkerDetail)
+  if (Test-AlertDue $State 'workerStaleAlerted') {
+    Send-Alert $State 'workerStaleAlerted' ("LashKirja: taustatyo (worker) ei toimi (health: worker {0}). Sahkoposti-, pankki- ja asiakirja-ajot eivat etene. Palvelin vastaa, joten sita ei aloitettu uudelleen. Tarkista C:\LashKirja\logs\worker-*.log ja aloita palvelu uudelleen: run-prod.ps1 -Stop, sitten Start-ScheduledTask '{1}'." -f $script:WorkerDetail, $TaskName)
+  }
+}
+
 function Restart-App([string]$Reason) {
   Log "restarting: $Reason"
   if ($DryRun) { Log 'dry run: restart suppressed'; return $false }
@@ -295,6 +315,7 @@ try {
     }
     Log "healthy ($first)"
     if ($script:LowSpace) { Warn-LowSpace $state }
+    if ($script:WorkerStale) { Warn-WorkerStale $state }
     $state.consecutiveFailures = 0
     $state.lastStatus = 'healthy'
     Write-State $state
@@ -315,6 +336,7 @@ try {
   if ($second -eq 'ok' -or $second -eq 'degraded') {
     Log 'recovered on its own; no restart'
     if ($script:LowSpace) { Warn-LowSpace $state }
+    if ($script:WorkerStale) { Warn-WorkerStale $state }
     $state.consecutiveFailures = 0
     $state.lastStatus = 'healthy'
     Write-State $state

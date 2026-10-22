@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "@/lib/db";
 import { reportEvent } from "@/lib/observe";
+import { WORKER_STALE_AFTER_MS, workerHeartbeatPath } from "@/lib/worker-heartbeat";
 
 export interface HealthCheck {
   ok: boolean;
@@ -15,6 +16,7 @@ export interface HealthReport {
     disk: HealthCheck;
     mail: HealthCheck & { configured: boolean };
     bankJobs: HealthCheck & { failedRecent: number };
+    worker: HealthCheck & { ageSeconds: number | null };
   };
 }
 
@@ -41,6 +43,34 @@ export function diskHealth(
     return { ok: true, detail: "writable" };
   } catch {
     return { ok: false, detail: "unwritable" };
+  }
+}
+
+/**
+ * The background worker (scripts/worker.ts: mail, bank and document jobs) is a separate process, and
+ * a web server that answers says nothing about it. It writes a heartbeat file every minute; this is
+ * red when the file is missing or older than WORKER_STALE_AFTER_MS. Counted in `ok` like bankJobs,
+ * and like bankJobs it must not make watchdog-prod.ps1 restart anything: it keys on db and disk only,
+ * and a restart of the web server does not bring the worker back.
+ * Only production runs a worker (run-prod.ps1); `next dev`, the tests and CI have none to wait for.
+ */
+export function workerHealth(
+  now = new Date(),
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+  heartbeatFile = workerHeartbeatPath()
+): HealthCheck & { ageSeconds: number | null } {
+  if (nodeEnv !== "production") return { ok: true, detail: "not-checked", ageSeconds: null };
+  try {
+    const beat = fs.statSync(heartbeatFile, { throwIfNoEntry: false });
+    if (!beat) return { ok: false, detail: "never-started", ageSeconds: null };
+    // A clock that stepped back would give a negative age.
+    const ageMs = Math.max(0, now.getTime() - beat.mtimeMs);
+    const ageSeconds = Math.floor(ageMs / 1000);
+    return ageMs > WORKER_STALE_AFTER_MS
+      ? { ok: false, detail: "stale", ageSeconds }
+      : { ok: true, detail: "ok", ageSeconds };
+  } catch {
+    return { ok: false, detail: "unreadable", ageSeconds: null };
   }
 }
 
@@ -103,8 +133,10 @@ export async function collectHealth(now = new Date()): Promise<HealthReport> {
     bankJobs = { ok: false, failedRecent: -1, detail: "unavailable" };
   }
 
-  const ok = db.ok && disk.ok && bankJobs.ok && mail.ok;
-  const report: HealthReport = { ok, checks: { db, disk, mail, bankJobs } };
+  const worker = workerHealth(now);
+
+  const ok = db.ok && disk.ok && bankJobs.ok && mail.ok && worker.ok;
+  const report: HealthReport = { ok, checks: { db, disk, mail, bankJobs, worker } };
   if (!ok) {
     reportEvent({
       kind: "health",
@@ -115,6 +147,7 @@ export async function collectHealth(now = new Date()): Promise<HealthReport> {
         disk.ok ? "" : "disk",
         mail.ok ? "" : "mail",
         bankJobs.ok ? "" : "bank",
+        worker.ok ? "" : "worker",
       ]
         .filter(Boolean)
         .join(","),
