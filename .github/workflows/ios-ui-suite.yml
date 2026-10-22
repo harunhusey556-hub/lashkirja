@@ -3,10 +3,6 @@ name: iOS UI suite
 # Every UI test class of the native app, one simulator job per class, each against its own fresh
 # demo API (the setup of ios-native.yml's "iOS build and tests" job, copied). The walks change demo
 # data (copies, customers, problem reports), so no class sees another's leftovers.
-#
-# Branch audit/phase2-walk (audit only, never merged): a dispatch runs ONLY ExploratoryWalkTests, the
-# owner's Phase 2 exploratory walk, with OwnerScreensTests' environment (reader stub on loopback) and
-# app/scripts/audit-seed.ts on top of the demo seed (sure pairs, credit notes). AUDIT-WALK.md maps it.
 on:
   workflow_dispatch:
     inputs:
@@ -25,13 +21,11 @@ jobs:
   ui:
     name: ${{ matrix.class }}
     runs-on: macos-26
-    # The walk shoots every screen, sheet and menu (several hundred shots, each an XCTAttachment and
-    # a host PNG): longer than one suite class.
-    timeout-minutes: 150
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
-        class: [ExploratoryWalkTests]
+        class: ${{ fromJSON(inputs.classes || '["P0Tests", "P1Tests", "P2Tests", "P3Tests", "P4Tests", "P5Tests", "StabilityTests", "OwnerScreensTests", "IntegrationTests"]') }}
     steps:
       - uses: actions/checkout@v4
       - name: Tools
@@ -67,9 +61,9 @@ jobs:
         env:
           DATABASE_URL: "file:${{ github.workspace }}/app/ui-demo.db"
           SESSION_SECRET: "ci-only-secret-not-used-anywhere-real-32plus"
-          CLOUD_AI_ENABLED: ${{ contains(fromJSON('["OwnerScreensTests","ExploratoryWalkTests"]'), matrix.class) && 'true' || 'false' }}
-          LLM_API_KEY: ${{ contains(fromJSON('["OwnerScreensTests","ExploratoryWalkTests"]'), matrix.class) && 'ci-reader-stub-not-a-key' || '' }}
-          LLM_BASE_URL: ${{ contains(fromJSON('["OwnerScreensTests","ExploratoryWalkTests"]'), matrix.class) && 'http://127.0.0.1:3997/v1' || '' }}
+          CLOUD_AI_ENABLED: ${{ matrix.class == 'OwnerScreensTests' && 'true' || 'false' }}
+          LLM_API_KEY: ${{ matrix.class == 'OwnerScreensTests' && 'ci-reader-stub-not-a-key' || '' }}
+          LLM_BASE_URL: ${{ matrix.class == 'OwnerScreensTests' && 'http://127.0.0.1:3997/v1' || '' }}
           ENABLEBANKING_ENABLED: "false"
           MAIL_TRANSPORT: "json"
         run: |
@@ -79,11 +73,6 @@ jobs:
           rm -f ui-demo.db
           npx prisma migrate deploy
           npx tsx scripts/demo-seed.ts --ci
-          # The walk's own rows (two sure pairs with a rival each, two credit notes, three free bank
-          # rows), added before the picture step below so these receipts get a picture too.
-          if [ "${{ matrix.class }}" = "ExploratoryWalkTests" ]; then
-            npx tsx scripts/audit-seed.ts
-          fi
           # The seed's receipts name files that do not exist. Each gets a real picture, stored the way
           # an upload is (data/uploads/<user>/<uuid>.jpg), so Kuitit has thumbnails to show.
           DB=ui-demo.db
@@ -168,7 +157,7 @@ jobs:
           P=$!
           trap 'kill $W $P 2>/dev/null' EXIT
           # Ad-hoc signed: an unsigned simulator build cannot use the Keychain, so sign-in would fail.
-          TEST_RUNNER_LK_SHOT_DIR="$SH" TEST_RUNNER_LK_READER_STUB="${{ contains(fromJSON('["OwnerScreensTests","ExploratoryWalkTests"]'), matrix.class) && '1' || '0' }}" xcodebuild test -project LashKirja.xcodeproj -scheme LashKirja-UITests \
+          TEST_RUNNER_LK_SHOT_DIR="$SH" TEST_RUNNER_LK_READER_STUB="${{ matrix.class == 'OwnerScreensTests' && '1' || '0' }}" xcodebuild test -project LashKirja.xcodeproj -scheme LashKirja-UITests \
             -destination "id=$SIM_UDID" -derivedDataPath build \
             -only-testing:LashKirjaUITests/${{ matrix.class }} -resultBundlePath UITestResults.xcresult \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
@@ -189,11 +178,6 @@ jobs:
           if [ -d UITestResults.xcresult ]; then
             xcrun xcresulttool get test-results summary --path UITestResults.xcresult --compact > result/summary.json \
               || echo "::warning::xcresulttool summary failed"
-          fi
-          # H8: scroll shots that repeat their page, and the x12 pair that must differ, as notes lines.
-          if [ -d ui-shots ]; then
-            python3 ../../scripts/sim/diffshots.py ui-shots x07 x08 x14 x15 --differ x12-asetukset-offline x12-ostolaskut-offline >> ui-shots/notes.txt \
-              || echo "::warning::diffshots found repeated scroll shots (notes.txt)"
           fi
           cp ui-shots/notes.txt result/notes.txt 2>/dev/null || touch result/notes.txt
           # One line for the suite table: class, passed, failed, skipped, soft-check FAILs (notes.txt).
