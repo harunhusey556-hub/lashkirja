@@ -106,11 +106,15 @@ async function closedPort(): Promise<number> {
   return port;
 }
 
-function healthHandler(status: number, disk: { ok: boolean; detail: string } = { ok: true, detail: "writable" }): Handler {
+function healthHandler(
+  status: number,
+  disk: { ok: boolean; detail: string } = { ok: true, detail: "writable" },
+  worker: { ok: boolean; detail: string } = { ok: true, detail: "ok" }
+): Handler {
   return (_req, res) => {
     const body = {
       ok: status === 200,
-      checks: { db: { ok: true, detail: "ok" }, disk, mail: { ok: true, detail: "ok" }, bankJobs: { ok: true, detail: "ok" } },
+      checks: { db: { ok: true, detail: "ok" }, disk, mail: { ok: true, detail: "ok" }, bankJobs: { ok: true, detail: "ok" }, worker },
     };
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(body));
@@ -412,6 +416,103 @@ describe.skipIf(!canRun)("watchdog-prod.ps1", () => {
       await server.close();
     }
   });
+
+  // A stale worker makes /api/health 503 like a failed bank sync does, and a restart of the web
+  // server does not bring the worker back: the web server stays up, the owner gets one line.
+  it.each(["stale", "never-started", "unreadable"])(
+    "treats a 503 whose only red check is the worker (%s) as serving: no restart, one alert",
+    async (detail) => {
+      const server = await listen(healthHandler(503, undefined, { ok: false, detail }));
+      try {
+        const root = tempRoot();
+        writeBackup(root, 1);
+        writeCalmState(root);
+        const first = await watchdog(root, server.port);
+        expect(first.code, first.stderr).toBe(0);
+        expect(first.log).toContain("healthy (degraded)");
+        expect(first.log).toContain(`worker: heartbeat ${detail}`);
+        expect(first.log).not.toContain("health not ok");
+        expect(first.log).not.toContain("restarting:");
+        expect(first.log).toContain("taustatyo (worker) ei toimi");
+
+        const second = await watchdog(root, server.port);
+        expect(count(second.log, "taustatyo (worker) ei toimi")).toBe(1);
+      } finally {
+        await server.close();
+      }
+    }
+  );
+
+  // The cases above run with a recent restart on record, which would stop any restart at "not
+  // restarting again"; with no state at all this one shows that the decision itself is not to restart.
+  it("never reaches the restart for a stale worker", async () => {
+    const server = await listen(healthHandler(503, undefined, { ok: false, detail: "stale" }));
+    try {
+      const root = tempRoot();
+      writeBackup(root, 1);
+      const run = await watchdog(root, server.port, ["-DryRun"]);
+      expect(run.log).toContain("healthy (degraded)");
+      expect(run.log).not.toContain("restarting:");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("still restarts for a dead database, whatever the worker says", async () => {
+    const server = await listen((_req, res) => {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: false,
+          checks: {
+            db: { ok: false, detail: "unavailable" },
+            disk: { ok: true, detail: "writable" },
+            mail: { ok: true, detail: "ok" },
+            bankJobs: { ok: true, detail: "ok" },
+            worker: { ok: false, detail: "stale" },
+          },
+        })
+      );
+    });
+    try {
+      const root = tempRoot();
+      writeBackup(root, 1);
+      const run = await watchdog(root, server.port, ["-DryRun"]);
+      expect(run.log).toContain("health not ok: down_503");
+      expect(run.log).toContain("restarting:");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("reads a 503 from a server that has no worker check yet (mid-deploy) as before", async () => {
+    const server = await listen((_req, res) => {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: false,
+          checks: {
+            db: { ok: true, detail: "ok" },
+            disk: { ok: true, detail: "writable" },
+            mail: { ok: true, detail: "ok" },
+            bankJobs: { ok: false, detail: "failed-recent" },
+          },
+        })
+      );
+    });
+    try {
+      const root = tempRoot();
+      writeBackup(root, 1);
+      writeCalmState(root);
+      const run = await watchdog(root, server.port);
+      expect(run.code, run.stderr).toBe(0);
+      expect(run.log).toContain("healthy (degraded)");
+      expect(run.log).not.toContain("worker: heartbeat");
+      expect(run.log).not.toContain("restarting:");
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 describe.skipIf(!canRun)("deploy-local.ps1 (its functions, run on their own)", () => {
@@ -525,6 +626,22 @@ describe.skipIf(!canRun)("deploy-local.ps1 (its functions, run on their own)", (
       });
       expect(out.ok).toBe(true);
       expect(out.lines.join("\n")).toContain("degraded: disk");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps a deploy whose health check is 503 only because the worker has not written its heartbeat", async () => {
+    const server = await listen(healthHandler(503, undefined, { ok: false, detail: "never-started" }));
+    try {
+      const root = tempRoot();
+      mkdirSync(path.join(root, "prod", "app"), { recursive: true });
+      writeFileSync(path.join(root, "prod", "app", ".env"), "HEALTH_TOKEN=\r\n");
+      const out = await runFunctions(root, ["Get-HealthToken", "Get-HealthErrorBody", "Test-Health"], healthBody, {
+        LK_PORT: String(server.port),
+      });
+      expect(out.ok).toBe(true);
+      expect(out.lines.join("\n")).toContain("degraded: worker");
     } finally {
       await server.close();
     }

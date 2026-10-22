@@ -15,7 +15,7 @@ import {
   statementHeaderText,
 } from "@/lib/parsers";
 import {
-  MAX_STATEMENT_BYTES,
+  MAX_STATEMENT_REQUEST_BYTES,
   UploadValidationError,
   removeUserUpload,
   sha256,
@@ -216,10 +216,7 @@ export async function POST(req: NextRequest) {
 
   const crossSite = rejectCrossSite(req);
   if (crossSite) return crossSite;
-  const oversized = rejectOversizedContentLength(
-    req,
-    MAX_STATEMENT_BYTES + 1024 * 1024
-  );
+  const oversized = rejectOversizedContentLength(req, MAX_STATEMENT_REQUEST_BYTES);
   if (oversized) return oversized;
 
   let storageKey: string | null = null;
