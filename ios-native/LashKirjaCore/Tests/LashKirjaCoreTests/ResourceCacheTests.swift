@@ -287,6 +287,14 @@ private struct Report: Decodable, Equatable { let n: Int; let extra: String? }
         #expect(requests.allSatisfy { !$0.persist })
     }
 
+    @Test func kirjanpitoWarmsTheOpenOstolaskutKohdistaListsBesideTheProposals() {
+        let requests = NextPrefetch.kirjanpito(month: "2026-10", alvPeriod: nil)
+        // Kohdista ostolaskujen maksut asks for the open ostolaskut alone (`status=open`), a key of its own
+        // beside Ostolaskut's list: without it the screen opened on a spinner page and its rows came later (F011).
+        #expect(requests.contains(PrefetchRequest(path: "/api/purchase-invoices", query: ["status": "open"], persist: false)))
+        #expect(requests.contains(PrefetchRequest(path: "/api/purchase-invoices/match", persist: false)))
+    }
+
     @Test func myyntiWarmsTheNewInvoiceForm() {
         #expect(NextPrefetch.myynti().map(\.path) == ["/api/customers", "/api/catalog", "/api/recurring-invoices"])
         // Toistuvat laskut opens on its active plans: no query, so the screen finds this answer.

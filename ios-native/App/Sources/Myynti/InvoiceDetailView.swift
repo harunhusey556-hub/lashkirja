@@ -605,6 +605,9 @@ struct InvoiceDetailView: View {
         await runKeyed(notDone: "Kopiota ei luotu.", maybeDone: "Kopio on voinut tallentua luonnoksiin.",
                        retry: { await duplicate() }) { key in
             let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/duplicate", body: EmptyBody(), idempotencyKey: key)
+            // The answer is the whole copy: it opens on its rows, not on a spinner page while the
+            // detail is fetched again (motion lasku-copy). A new draft is never overdue: no reminder.
+            app.rememberInvoiceDetail(InvoiceDetailResponse(invoice: r.invoice), reminder: nil)
             openRoute(.invoice(r.invoice.id))
         }
     }

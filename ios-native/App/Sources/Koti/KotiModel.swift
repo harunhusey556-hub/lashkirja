@@ -77,7 +77,9 @@ final class KotiModel {
             show(month, dashboard)
             timing.dataReady()
             if let jobs = await jobsList, loads.isCurrent(generation) {
-                failedJobs = JobsQueue.failedCount(jobs.jobs, connections: await connections, dismissedLocally: JobDismissals.ids)
+                let states = await connections
+                failedJobs = JobsQueue.failedCount(jobs.jobs, connections: states, dismissedLocally: JobDismissals.ids)
+                if failedJobs > 0 { warmWorkQueue(jobs: jobs.jobs, connections: states) }
             }
             await loadVatDue(dashboard, generation: generation)
         } catch is CancellationError {
@@ -92,6 +94,17 @@ final class KotiModel {
             }
             // With a dashboard shown it stays, under a banner saying the refresh failed.
             state.fail(error)
+        }
+    }
+
+    /// Tuonnit ja virheet's rows, asked for while the row that leads there is on screen: the page opens
+    /// on them, not on a spinner page that they replace (motion koti-workqueue-open, F011).
+    private func warmWorkQueue(jobs: [BackgroundJob], connections: [JobsQueue.ConnectionState]?) {
+        guard let app else { return }
+        let api = self.api
+        Task {
+            guard let queue: WorkQueueList = try? await api.get("/api/work-queue") else { return }
+            app.rememberPainted(WorkQueueView.Snapshot(jobs: jobs, items: queue.items, connections: connections), WorkQueueView.path)
         }
     }
 
