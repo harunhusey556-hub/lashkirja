@@ -6,11 +6,13 @@
  * is not accounting material (mailbox credential, assistant conversations,
  * bank secrets, phone). Receipts and invoices stay. Completing an export writes a zip the user can
  * download. A recovery row is queued when a reset link could not be mailed.
+ * Each decision on a close or copy request is mailed to the user.
  */
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { prisma } from "@/lib/db";
-import { revokeAuthSessions } from "@/lib/account-security";
+import { revokeAuthSessions, sendAccountMail } from "@/lib/account-security";
+import { CLOSED_LOGIN_MESSAGE, contactSupportPhrase } from "@/lib/account-copy";
 import { toCsv, type CsvValue } from "@/lib/csv";
 import { buildStoredZip } from "@/lib/zip-store";
 import { readUserUpload, safeOriginalName } from "@/lib/storage";
@@ -137,6 +139,63 @@ async function requireOpen(id: string) {
   return row;
 }
 
+/**
+ * The mail the Tietosuoja page and the close dialog promise ("Tuki ilmoittaa
+ * sinulle sähköpostilla"): one per decision support makes on a close or copy
+ * request. null where nothing is owed. A recovery row is answered by the reset
+ * link itself.
+ */
+function accountRequestMail(row: {
+  kind: string;
+  status: string;
+  note: string | null;
+}): { subject: string; text: string } | null {
+  if (row.kind !== "close" && row.kind !== "export") return null;
+  const close = row.kind === "close";
+  const note = row.note?.trim();
+  if (row.status === "completed") {
+    return close
+      ? { subject: "LashKirjan tili on suljettu", text: `Tilin sulkemispyyntösi on käsitelty. ${CLOSED_LOGIN_MESSAGE}` }
+      : {
+          subject: "LashKirjan tietokopio on valmis",
+          text: "Tietokopiosi on valmis. Lataa se LashKirjassa kohdasta Asetukset > Tietosuoja.",
+        };
+  }
+  if (row.status === "denied") {
+    return {
+      subject: "LashKirjan pyyntöäsi ei voitu toteuttaa",
+      text:
+        `${close ? "Tilin sulkemispyyntöäsi" : "Tietojen kopiopyyntöäsi"} ei voitu toteuttaa.` +
+        `${note ? `\n\nSyy: ${note}\n\n` : " "}Kysymyksiä varten ${contactSupportPhrase()}.`,
+    };
+  }
+  if (row.status === "needs_info") {
+    return {
+      subject: "LashKirja tarvitsee lisätietoa pyyntöösi",
+      text:
+        "Tarvitsemme lisätietoa pyyntösi käsittelyyn." +
+        `${note ? `\n\nPuuttuva tieto: ${note}\n\n` : " "}Jotta pyyntö voi edetä, ${contactSupportPhrase()}.`,
+    };
+  }
+  return null;
+}
+
+/**
+ * The request is already decided, so a missing or failing mail path never
+ * undoes it: it is logged for support, who then tell the user by hand.
+ */
+async function mailRequestOutcome(row: { id: string; userId: string; kind: string; status: string; note: string | null }) {
+  const mail = accountRequestMail(row);
+  if (!mail) return;
+  try {
+    const user = await prisma.user.findUnique({ where: { id: row.userId }, select: { email: true } });
+    if (user && (await sendAccountMail(row.userId, { to: user.email, ...mail }))) return;
+    console.warn(`Account request ${row.id}: no mail reached the user, tell them by hand`);
+  } catch (error) {
+    console.error(`Account request ${row.id}: outcome mail failed, tell the user by hand`, error);
+  }
+}
+
 export async function setAccountRequestStatus(id: string, status: AccountRequestStatus, note?: string) {
   if (!ACCOUNT_REQUEST_STATUSES.includes(status)) {
     throw new AccountRequestError("Tila ei kelpaa.", 400);
@@ -146,7 +205,7 @@ export async function setAccountRequestStatus(id: string, status: AccountRequest
     throw new AccountRequestError("Valmis-tila vaatii viennin tai sulkemisen komennon.", 400);
   }
   const now = new Date();
-  return prisma.accountRequest.update({
+  const updated = await prisma.accountRequest.update({
     where: { id },
     data: {
       status,
@@ -154,6 +213,10 @@ export async function setAccountRequestStatus(id: string, status: AccountRequest
       ...(status === "completed" || status === "denied" ? { resolvedAt: now } : { resolvedAt: null }),
     },
   });
+  // Only what support typed with this decision goes in the mail: the row may
+  // still carry the note of an earlier step.
+  await mailRequestOutcome({ ...updated, note: note ?? null });
+  return updated;
 }
 
 const COPY_FILE_KEY = /^[a-f0-9-]{36}\.[a-z0-9]{2,5}$/;
@@ -338,10 +401,12 @@ export async function completeAccountExport(id: string) {
   const bytes = await buildAccountCopyZip(row.userId);
   await mkdir(path.dirname(absolute), { recursive: true });
   await writeFile(absolute, bytes);
-  return prisma.accountRequest.update({
+  const done = await prisma.accountRequest.update({
     where: { id: row.id },
     data: { status: "completed", packagePath: relative, resolvedAt: new Date() },
   });
+  await mailRequestOutcome(done);
+  return done;
 }
 
 /**
@@ -418,7 +483,11 @@ export async function completeAccountClose(id: string, options: { bankClient?: E
     }),
   ]);
   await revokeAuthSessions(row.userId);
-  return prisma.accountRequest.findUniqueOrThrow({ where: { id: row.id } });
+  const done = await prisma.accountRequest.findUniqueOrThrow({ where: { id: row.id } });
+  // After the purge: the mailbox credential is gone, so only the platform
+  // mailbox can reach the user now.
+  await mailRequestOutcome(done);
+  return done;
 }
 
 export async function readAccountPackageForUser(userId: string, requestId: string): Promise<Buffer> {
