@@ -29,6 +29,9 @@ Per step (docs/quality/SIMULATOR.md §4):
                 time XCUITest was driving the app (xcui.log: from 'XCUI begin' to the step's TOUCH,
                 or to 'XCUI end' when nothing touched the app): its element snapshots run on the
                 app's main thread. app_stall_ms of STALL_MS or more is a FAIL (M003, M069, M098).
+  prebuild      once per walk, a row of its own ("prebuild-freed"): the tab copies the app builds
+                after launch and throws away (Shell/TabPrebuild.swift) must be gone 2 s later. The
+                probe's 'MARK prebuild-<tab>-freed=false' for any of them is a FAIL (M086, M032).
 A step's t = 0 is its TOUCH, the probe's line for the finger reaching the app (steps.json touchAt,
 else the first TOUCH after tapAt), not tapAt: XCUITest may take seconds between the two (M046).
 A check that saw nothing is never PASS: NO-MOTION (no video, fewer than MIN_FRAMES frames, or no
@@ -433,6 +436,25 @@ def app_stall_ms(events, windows, start, end):
 
 KS = ("intermediate", "flash", "shift_video", "shift_probe", "stall")
 MISSES = ("NO-MOTION", "UNREACHED", "SKIPPED", "MISS-WINDOW", "NO-TOUCH", "n/a (no settle)", "n/a (bad timestamps)")
+# 'prebuild-<tab>-freed=<bool>' is the copy; '-host-freed' and '-window-freed' say which half stays.
+PREBUILD_FREED = re.compile(r"^prebuild-(.+?)(-host|-window)?-freed=(true|false)$")
+
+
+def prebuild_copies(events):
+    """[(tab, freed)] in log order, one per copy per launch: TabPrebuild logs it 2 s after it
+    discarded the copy. One still alive keeps its views and their tasks, and what UIKit holds
+    with them (M086, M032)."""
+    return [(m.group(1), m.group(3) == "true") for e in events
+            if e["kind"] == "MARK" and (m := PREBUILD_FREED.match(e["screen"])) and not m.group(2)]
+
+
+def prebuild_row(suite, copies, probe_seen):
+    """The suite's launch as one row of the report: no step, so the video checks do not apply."""
+    kept = [tab for tab, freed in copies if not freed]
+    return {"suite": suite, "id": "prebuild-freed", "from": "launch", "to": "launch", "kind": "launch",
+            "expect": "every prebuilt tab copy is released", "reached": True, "skipped": False, "crashed": False,
+            "probe_shift": [], "probe_settle_ms": None, "app_stall_ms": None, "probe_seen": probe_seen,
+            "prebuild_kept": kept, "checks": {**dict.fromkeys(KS, "n/a"), "prebuild": "FAIL" if kept else "PASS"}}
 
 
 def checks(row, probe_seen, late):
@@ -551,6 +573,9 @@ def main():
             row["probe_seen"] = bool(events)
             row["checks"] = checks(row, bool(events), late)
             rows.append(row)
+        copies = prebuild_copies(events)
+        if copies:
+            rows.append(prebuild_row(suite, copies, bool(events)))
         for name, sid, why in skipped_in_notes(os.path.join(d, "notes.txt"), {s["id"] for s in steps}):
             rows.append({"suite": name, "id": sid, "from": "", "to": "", "kind": "", "expect": "", "reached": False,
                          "skipped": True, "crashed": False, "error": why, "probe_shift": [], "probe_settle_ms": None,
@@ -558,12 +583,13 @@ def main():
     json.dump(rows, open(os.path.join(out, "motion-report.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False, default=str)
 
     def count(check):
-        return sum(1 for r in rows if r["checks"][check] == "FAIL")
+        return sum(1 for r in rows if r["checks"].get(check) == "FAIL")
 
     def unseen(verdict):
         return sum(1 for r in rows if verdict in r["checks"].values())
     lines = ["# Motion audit", "", f"{len(rows)} steps. FAIL: intermediate {count('intermediate')}, flash {count('flash')}, "
-             f"shift (video) {count('shift_video')}, shift (probe) {count('shift_probe')}, stall {count('stall')}; "
+             f"shift (video) {count('shift_video')}, shift (probe) {count('shift_probe')}, stall {count('stall')}, "
+             f"prebuild copies kept {count('prebuild')}; "
              f"crashes {sum(1 for r in rows if r['crashed'])}. Not judged: "
              + ", ".join(f"{v} {unseen(v)}" for v in MISSES) + ".", "",
              # The walk's own timing: each count is 0 on a walk that stamps and films as it should.
@@ -595,7 +621,8 @@ def main():
                              f"flash {r['flash']}" if r.get("flash") else "",
                              f"late change {r['shift']}" if r.get("shift") and r["kind"] != "scroll" else "",
                              f"probe {r['probe_shift'][:3]}" if r["probe_shift"] and r["kind"] != "scroll" else "",
-                             f"the app held its main thread {r['app_stall_ms']} ms" if r["checks"]["stall"] == "FAIL" else ""] if x))
+                             f"the app held its main thread {r['app_stall_ms']} ms" if r["checks"]["stall"] == "FAIL" else "",
+                             f"tab copies still alive 2 s after they were thrown away: {', '.join(r['prebuild_kept'])}" if r.get("prebuild_kept") else ""] if x))
     open(os.path.join(out, "motion-report.md"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
     print("\n".join(lines[:5]))
 

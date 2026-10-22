@@ -22,6 +22,11 @@ on:
         description: 'JSON list: "all" (one run of the whole class) or MotionAuditTests method names, one runner each'
         required: false
         default: '["all"]'
+      retain_trace:
+        description: "Save who holds a tab copy still alive after launch (M086): leaks on the app, once per copy"
+        type: boolean
+        required: false
+        default: false
 
 env:
   # Only the audit instrument (walk, probe, analyzer), no fixes: laid on the baseline so it can be walked.
@@ -104,6 +109,8 @@ jobs:
         env:
           SUITE: ${{ matrix.suite }}
           LK_DEDICATED_MAC: "1"
+          # A prebuilt tab copy still alive after launch (M086): run-ui.sh saves who holds it.
+          LK_RETAIN_TRACE: ${{ inputs.retain_trace && '1' || '' }}
         run: |
           # Errors are handled where they matter: a walk that fails some steps still has a report.
           set +e -u
@@ -165,6 +172,7 @@ jobs:
             motion-gate/*/*/notes.txt
             motion-gate/*/*/steps.json
             motion-gate/*/*/probe.log
+            motion-gate/*/*/retain-*.txt
             motion-gate/*/*/xcui.log
             motion-gate/*/*/sheet-*.png
       - uses: actions/upload-artifact@v4

@@ -618,5 +618,92 @@ class GateStall(unittest.TestCase):
             self.assertIn(f"{miss} 1", out)
 
 
+class PrebuildFreed(unittest.TestCase):
+    COPIES = ["MARK 100.100 prebuild-0-skipped", "MARK 100.300 prebuild-1-Myynti", "MARK 100.900 prebuild-Myynti-built_ms=600",
+              "MARK 102.900 prebuild-Myynti-freed=%s", "MARK 102.900 prebuild-Myynti-host-freed=true",
+              "MARK 102.900 prebuild-Myynti-window-freed=%s",
+              "MARK 103.400 prebuild-Kirjanpito-freed=true", "MARK 103.800 prebuild-Lisää-freed=true"]
+
+    def report(self, myynti_freed, extra=()):
+        lines = [x % ((myynti_freed,) * x.count("%s")) if "%s" in x else x for x in self.COPIES] + list(extra)
+        with tempfile.TemporaryDirectory() as root:
+            rows = walk(root, "s", [step("tab", video=False)], {}, probe_lines=lines, xcui=())
+            with open(os.path.join(root, "motion-report.md"), encoding="utf-8") as f:
+                return rows, f.read()
+
+    def test_a_copy_still_alive_fails_the_walk_and_is_named(self):
+        # M086: the Myynti copy was alive 2 s after TabPrebuild threw it away in every CI launch.
+        rows, report = self.report("false")
+        r = rows["prebuild-freed"]
+        self.assertEqual(r["checks"]["prebuild"], "FAIL")
+        self.assertEqual(r["prebuild_kept"], ["Myynti"])
+        self.assertIn("prebuild copies kept 1", report)
+        self.assertIn("tab copies still alive 2 s after they were thrown away: Myynti", report)
+
+    def test_every_copy_released_passes_and_the_controller_line_is_not_a_copy(self):
+        rows, report = self.report("true")
+        self.assertEqual(rows["prebuild-freed"]["checks"]["prebuild"], "PASS")
+        self.assertEqual(rows["prebuild-freed"]["prebuild_kept"], [])
+        self.assertIn("prebuild copies kept 0", report)
+
+    def test_a_later_launch_of_the_same_suite_counts_too(self):
+        # A walk that relaunches the app: the second launch's copy is judged like the first's.
+        again = ["MARK 140.900 prebuild-Myynti-freed=false", "MARK 141.400 prebuild-Kirjanpito-freed=true"]
+        rows, _ = self.report("true", again)
+        self.assertEqual(rows["prebuild-freed"]["checks"]["prebuild"], "FAIL")
+
+    def test_the_late_look_is_not_a_copy(self):
+        # 'prebuild-<tab>-late=' is the same handles 10 s on: it says how long, not which copy.
+        rows, _ = self.report("true", ["MARK 110.900 prebuild-Myynti-late=false"])
+        self.assertEqual((rows["prebuild-freed"]["checks"]["prebuild"], rows["prebuild-freed"]["prebuild_kept"]), ("PASS", []))
+
+    def test_a_walk_without_the_marks_has_no_such_row(self):
+        with tempfile.TemporaryDirectory() as root:
+            rows = walk(root, "s", [step("tab", video=False)], {}, probe_lines=["TOUCH 100.500 tab.koti"], xcui=())
+        self.assertNotIn("prebuild-freed", rows)
+
+
+class GatePrebuild(unittest.TestCase):
+    @staticmethod
+    def walk(verdict=None):
+        """A walk's report: one step that passed, and the launch row when the walk logged the marks."""
+        launch = [] if verdict is None else [{"suite": "s", "id": "prebuild-freed", "crashed": False, "checks": {"prebuild": verdict}}]
+        return [row("a"), *launch]
+
+    def test_copies_released_in_both_pr_walks_are_fixed(self):
+        out, code = gate([self.walk("FAIL"), self.walk("PASS"), self.walk("PASS")])
+        self.assertEqual((count(out, "FIXED"), code), (1, 0))
+        self.assertIn("| s | prebuild-freed | prebuild | FAIL | PASS | PASS | fixed |", out)
+
+    def test_a_copy_kept_in_both_pr_walks_is_new_fail_fails_the_job_and_the_counts_name_it(self):
+        out, code = gate([self.walk("PASS"), self.walk("FAIL"), self.walk("FAIL")])
+        self.assertEqual((count(out, "NEW FAIL"), code), (1, 1))
+        self.assertIn("tab copies kept alive after launch: baseline 0, pr-run1 1, pr-run2 1", out)
+        self.assertIn("PREBUILD: a tab copy was kept alive after launch in both PR walks (s)", out)
+
+    def test_a_copy_kept_before_and_after_is_listed_not_failed(self):
+        # The baseline leaked too (the open M086): named in the output, but every gate must not go red over it.
+        out, code = gate([self.walk("FAIL"), self.walk("FAIL"), self.walk("FAIL")])
+        self.assertEqual((count(out, "NEW FAIL"), count(out, "FIXED"), code), (0, 0, 0))
+        self.assertIn("PREBUILD: a tab copy kept alive before and after (s), the open M086", out)
+        self.assertNotIn("this fails the job", out)
+
+    def test_one_noisy_pr_walk_does_not_fail_the_job(self):
+        out, code = gate([self.walk("PASS"), self.walk("FAIL"), self.walk("PASS")])
+        self.assertEqual(code, 0)
+        self.assertNotIn("PREBUILD:", out)
+
+    def test_the_launch_row_alone_is_not_a_walk(self):
+        # F003: three empty walks compare as equal; a launch row must not make a stepless walk look like one that ran.
+        launch = self.walk("PASS")[1:]
+        out, code = gate([self.walk("PASS"), launch, launch])
+        self.assertEqual(code, 1)
+        self.assertIn("NO WALK: pr-run1, pr-run2", out)
+
+    def test_a_branch_that_stops_logging_the_marks_is_a_new_miss(self):
+        out, code = gate([self.walk("PASS"), self.walk(), self.walk()])
+        self.assertEqual((count(out, "NEW MISS"), code), (1, 1))
+
+
 if __name__ == "__main__":
     unittest.main()
