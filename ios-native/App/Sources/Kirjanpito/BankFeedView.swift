@@ -102,7 +102,6 @@ struct BankFeedView: View {
                 HStack(spacing: 8) { ProgressView(); Text(syncWaiting ? "Päivitetään…" : "Haetaan tapahtumia pankista…").foregroundStyle(Theme.ink2) }
                     .font(.footnote)
             }
-            if let notice { Text(notice).font(.footnote).foregroundStyle(noticeFailed ? Theme.danger : Theme.success) }
             if confirmable > 0 {
                 Section {
                     VStack(alignment: .leading, spacing: 10) {
@@ -194,6 +193,8 @@ struct BankFeedView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast(Binding(get: { noticeFailed ? notice : nil }, set: { if $0 == nil { notice = nil } }))
+        .noticeToast(Binding(get: { noticeFailed ? nil : notice }, set: { if $0 == nil { notice = nil } }))
         .searchable(text: Binding(get: { search }, set: { search = $0; limit.reset() }), prompt: "Hae…")
         .navigationTitle("Pankki")
         .toolbar {
@@ -854,12 +855,12 @@ struct BankRowSheet: View {
                     }
                     .listRowBackground(Color.clear)
                 }
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
                 details
                 if searchable { candidateSection }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .appDestinations()
             // A confirmed link closes the sheet like the other actions.
             .navigationDestination(isPresented: $linkingPurchase) {

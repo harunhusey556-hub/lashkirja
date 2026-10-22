@@ -48,6 +48,7 @@ struct PasswordRecoveryView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .background(Theme.canvas)
+                .failureToast($failure)
             }
         }
         .navigationTitle(step == .request ? "Salasanan palautus" : "Uusi salasana")
@@ -91,7 +92,6 @@ struct PasswordRecoveryView: View {
             } footer: {
                 Text("Kirjoita tilisi sähköpostiosoite. Jos tili löytyy, saat postiin linkin ja koodin, joilla valitset uuden salasanan. Jos viestiä ei tule, ota yhteyttä tukeen.")
             }
-            if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             Section {
                 Button { Task { await requestLink() } } label: {
                     busyLabel("Lähetä linkki", busyText: "Lähetetään…")

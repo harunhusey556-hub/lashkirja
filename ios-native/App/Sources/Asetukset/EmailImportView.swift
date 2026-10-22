@@ -180,7 +180,6 @@ private struct ConnectMailboxSheet: View {
                     } footer: {
                         Text("Salasana tallennetaan salattuna. Käytä sovellussalasanaa, älä tilin omaa salasanaa.")
                     }
-                    if let failure { Text(failure).foregroundStyle(Theme.danger) }
                 } else {
                     Section("Valitse palveluntarjoaja") {
                         ForEach(MailProvider.allCases) { option in
@@ -197,6 +196,7 @@ private struct ConnectMailboxSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle(provider?.title ?? "Yhdistä sähköposti")
             .navigationBarTitleDisplayMode(.inline)
