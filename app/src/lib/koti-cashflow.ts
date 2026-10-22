@@ -2,14 +2,13 @@
  * OWN-22: income and expenses of the last months for Koti's chart, by the same
  * rule as Koti's "Kuukauden tulos" cards, so the last bar always equals them:
  * a month with tiliote rows is read from the bank (kassaperuste, own transfers
- * left out), any other month from the documents (receipts plus sales
- * invoices, laskutusperuste).
+ * left out), any other month from the documents (receipts, sales invoices and
+ * purchase invoices, laskutusperuste).
  */
 import { prisma } from "./db";
 import { Prisma } from "@/generated/prisma/client";
 import { addMonths } from "./bank-balances";
-import { loadAlvPeriodSources } from "./alv-period";
-import { buildProfitLoss } from "./reports";
+import { loadAlvPeriodSources, profitLossOf } from "./alv-period";
 import { centsToEuros } from "./money";
 
 export interface CashflowMonth {
@@ -78,7 +77,7 @@ export async function loadCashflow(userId: string, throughMonth: string, months 
   );
 
   const documents = new Map<string, { incomeCents: number; expenseCents: number }>();
-  for (const period of buildProfitLoss(books.reportReceipts, books.reportInvoices).months) {
+  for (const period of profitLossOf(books).months) {
     if (!period.month) continue;
     documents.set(period.month, { incomeCents: period.incomeGrossCents, expenseCents: period.expenseGrossCents });
   }

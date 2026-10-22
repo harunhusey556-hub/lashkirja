@@ -8,8 +8,8 @@
  */
 import { z } from "zod";
 import { prisma } from "./db";
-import { buildProfitLoss, type CategoryRow } from "./reports";
-import { alvReportOf, loadAlvPeriodSources } from "./alv-period";
+import type { CategoryRow } from "./reports";
+import { alvReportOf, loadAlvPeriodSources, profitLossOf } from "./alv-period";
 import { parseVatDetails } from "./alv";
 import { categoryLabel, isKnownCategory, normalizeExtractedCategory } from "./receipt-categories";
 import { creditedCentsOf, daysOverdue, displayStatus, openPosition, overdueBefore, type InvoiceStatus } from "./invoices";
@@ -403,7 +403,7 @@ function categoryRows(rows: CategoryRow[]) {
 
 async function summarize(userId: string, period: ResolvedPeriod, detailed: boolean) {
   const sources = await loadAlvPeriodSources(userId, period.start, period.end);
-  const report = buildProfitLoss(sources.reportReceipts, sources.reportInvoices);
+  const report = profitLossOf(sources);
   const total = report.total;
   const vat = alvReportOf(sources).field308;
   const headline = {
@@ -433,6 +433,7 @@ async function summarize(userId: string, period: ResolvedPeriod, detailed: boole
       receipts: total.receiptCount,
       invoices: total.invoiceCount,
       creditNotes: total.creditNoteCount,
+      purchaseInvoices: total.purchaseInvoiceCount,
       receiptsWithoutVat: total.missingVatCount,
       uncategorised: total.uncategorisedCount,
       undatedReceipts: report.undatedCount,

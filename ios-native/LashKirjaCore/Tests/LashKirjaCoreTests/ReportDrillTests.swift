@@ -36,10 +36,11 @@ private func row(_ name: String, count: Int) -> ProfitLoss.Category {
 }
 
 private func period(_ month: String?, income: [ProfitLoss.Category] = [], expense: [ProfitLoss.Category] = [],
-                    invoices: Int = 0, creditNotes: Int? = 0, incomeNet: Decimal = 0, expenseNet: Decimal = 0) -> ProfitLoss.Period {
+                    invoices: Int = 0, creditNotes: Int? = 0, incomeNet: Decimal = 0, expenseNet: Decimal = 0,
+                    purchaseInvoices: Int? = nil) -> ProfitLoss.Period {
     ProfitLoss.Period(month: month, incomeNet: incomeNet, incomeVat: 0, incomeGross: 0, expenseNet: expenseNet, expenseVat: 0,
                       expenseGross: 0, profitNet: incomeNet - expenseNet, incomeByCategory: income, expenseByCategory: expense,
-                      receiptCount: 0, invoiceCount: invoices, creditNoteCount: creditNotes)
+                      receiptCount: 0, invoiceCount: invoices, creditNoteCount: creditNotes, purchaseInvoiceCount: purchaseInvoices)
 }
 
 @Test func reportIncomeOpensEveryListItLivesIn() {
@@ -63,6 +64,22 @@ private func period(_ month: String?, income: [ProfitLoss.Category] = [], expens
     let month = period("2026-09", income: [row("muut_tulot", count: 1)], expense: [row("vuokra", count: 1)])
     #expect(ReportDrill.monthTargets(month).map(\.label) == ["Tulokuitit", "Menokuitit"])
     #expect(ReportDrill.monthTargets(period(nil, expense: [row("vuokra", count: 1)])).isEmpty)
+}
+
+/// S1: purchase invoices no receipt documents are expenses, but Kuitit does not list them. Their figure
+/// opens Ostolaskut, and Kuitit only for the rows that are receipts, never an empty list.
+@Test func reportExpensesOpenPurchaseInvoicesApart() {
+    let mixed = period("2026-09", expense: [row("tarvikkeet", count: 3), row("vuokra", count: 1)], purchaseInvoices: 1)
+    #expect(ReportDrill.expenseTargets(mixed, key: "2026-09") == [.receipts(period: "2026-09", tab: "meno", category: ""), .purchaseInvoices])
+    #expect(ReportDrill.expenseTargets(mixed, key: "2026-09").map(\.label) == ["Menokuitit", "Ostolaskut"])
+    // Rent and nothing else: no receipts to open.
+    let rentOnly = period("2026-09", expense: [row("vuokra", count: 1)], purchaseInvoices: 1)
+    #expect(ReportDrill.expenseTarget(rentOnly, key: "2026-09") == nil)
+    #expect(ReportDrill.expenseTargets(rentOnly, key: "2026-09") == [.purchaseInvoices])
+    #expect(ReportDrill.monthTargets(rentOnly).map(\.label) == ["Ostolaskut"])
+    // A server that does not count them: the receipts as before.
+    let older = period("2026-09", expense: [row("vuokra", count: 1)])
+    #expect(ReportDrill.expenseTargets(older, key: "2026-09") == [.receipts(period: "2026-09", tab: "meno", category: "")])
 }
 
 @Test func reportChartSelectsTheLatestMonthWithFigures() {

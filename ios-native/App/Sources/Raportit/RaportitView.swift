@@ -216,7 +216,7 @@ struct RaportitView: View {
                 drillFigure(ReportDrill.incomeTargets(report.total, key: yearKey)) {
                     LabeledContent("Tulot") { MoneyText(amount: report.total.incomeNet) }
                 }
-                drillFigure([ReportDrill.expenseTarget(report.total, key: yearKey)].compactMap { $0 }) {
+                drillFigure(ReportDrill.expenseTargets(report.total, key: yearKey)) {
                     LabeledContent("Menot") { MoneyText(amount: report.total.expenseNet) }
                 }
                 LabeledContent("Tulos") { MoneyText(amount: report.total.profitNet).fontWeight(.semibold) }
@@ -483,7 +483,7 @@ struct RaportitView: View {
         guard let report = state.value, !swapping else { return [] }
         let key = String(year)
         var drills = ReportDrill.incomeTargets(report.total, key: key)
-        drills += [ReportDrill.expenseTarget(report.total, key: key)].compactMap { $0 }
+        drills += ReportDrill.expenseTargets(report.total, key: key)
         drills += ReportDrill.dataQuality(missingVat: report.total.missingVatCount, undated: report.undatedCount, year: key).map(\.drill)
         if let kind = ReportCategoryKind.resolve(categoryChoice, in: report.total) {
             let rows = kind.rows(report.total)

@@ -1,5 +1,6 @@
 /**
- * Profit and loss (tuloslaskelma) built from receipts and sales invoices.
+ * Profit and loss (tuloslaskelma) built from receipts, sales invoices and
+ * purchase invoices.
  *
  * Documents, not bank rows, are the source: only a receipt or an invoice
  * carries the VAT breakdown. A receipt whose VAT is unknown is counted at its
@@ -8,6 +9,11 @@
  *
  * Sales invoices count by invoice date, the same basis as the VAT return
  * (see ./alv-period). A credit note is negative income in its own month.
+ *
+ * A purchase invoice no receipt documents (rent, a bill typed in by hand) is an
+ * expense of its invoice month, as the ledger posts it. The rule for which
+ * purchase invoices those are lives in ./alv-period; a supplier credit note is
+ * a negative expense.
  */
 import { parseVatDetails } from "./alv";
 import { monthKey } from "./bank-balances";
@@ -28,6 +34,15 @@ export interface ReportInvoice {
   netCents: number;
   vatCents: number;
   grossCents: number;
+}
+
+/** A purchase invoice the books count on its own, with no receipt standing in for it; signed (a supplier credit note < 0). */
+export interface ReportPurchaseInvoice {
+  issueDate: Date | string;
+  category: string | null;
+  grossCents: number;
+  /** The VAT the ledger splits off the cost: none under reverse charge or foreign VAT, where the whole amount is the expense. */
+  vatCents: number;
 }
 
 /** Category rows the invoices land in, so the drill-down can tell them apart. */
@@ -61,6 +76,8 @@ export interface ProfitLossPeriod {
   invoiceCount: number;
   /** Credit notes counted (negative) in the period. */
   creditNoteCount: number;
+  /** Purchase invoices counted in the period, supplier credit notes included. */
+  purchaseInvoiceCount: number;
   missingVatCount: number;
   uncategorisedCount: number;
 }
@@ -87,6 +104,7 @@ function emptyPeriod(month: string | null): ProfitLossPeriod {
     receiptCount: 0,
     invoiceCount: 0,
     creditNoteCount: 0,
+    purchaseInvoiceCount: 0,
     missingVatCount: 0,
     uncategorisedCount: 0,
   };
@@ -143,7 +161,8 @@ export interface ProfitLossResult {
 
 export function buildProfitLoss(
   receipts: ReportReceipt[],
-  invoices: ReportInvoice[] = []
+  invoices: ReportInvoice[] = [],
+  purchaseInvoices: ReportPurchaseInvoice[] = []
 ): ProfitLossResult {
   const total = newAccumulator(null);
   const byMonth = new Map<string, Accumulator>();
@@ -166,6 +185,18 @@ export function buildProfitLoss(
       target.period.incomeGrossCents += invoice.grossCents;
       target.period.incomeVatCents += invoice.vatCents;
       addToCategory(target.income, category, invoice.grossCents, invoice.vatCents);
+    }
+  }
+
+  for (const purchase of purchaseInvoices) {
+    const category = purchase.category?.trim() || UNCATEGORISED;
+    for (const target of [total, monthAccumulator(purchase.issueDate)]) {
+      target.period.purchaseInvoiceCount += 1;
+      if (category === UNCATEGORISED) target.period.uncategorisedCount += 1;
+      // Signed: a supplier credit note reduces expenses, it is never income.
+      target.period.expenseGrossCents += purchase.grossCents;
+      target.period.expenseVatCents += purchase.vatCents;
+      addToCategory(target.expense, category, purchase.grossCents, purchase.vatCents);
     }
   }
 
@@ -239,6 +270,7 @@ export function periodToEuros(period: ProfitLossPeriod) {
     receiptCount: period.receiptCount,
     invoiceCount: period.invoiceCount,
     creditNoteCount: period.creditNoteCount,
+    purchaseInvoiceCount: period.purchaseInvoiceCount,
     missingVatCount: period.missingVatCount,
     uncategorisedCount: period.uncategorisedCount,
   };

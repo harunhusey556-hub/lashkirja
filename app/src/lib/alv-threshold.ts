@@ -13,8 +13,7 @@
  * statement no longer hides the invoices of every month without one.
  */
 import { prisma } from "./db";
-import { loadAlvPeriodSources } from "./alv-period";
-import { buildProfitLoss } from "./reports";
+import { loadAlvPeriodSources, profitLossOf } from "./alv-period";
 
 export interface VatThresholdRevenue {
   /** Turnover without VAT, in cents. */
@@ -62,7 +61,7 @@ export async function computeYearTurnover(
     }
   }
 
-  const byMonth = buildProfitLoss(books.reportReceipts, books.reportInvoices).months;
+  const byMonth = profitLossOf(books).months;
   let documentNetCents = 0;
   for (const month of byMonth) {
     if (!month.month || bankMonths.has(month.month)) continue;
