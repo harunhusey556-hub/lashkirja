@@ -174,6 +174,8 @@ struct EmailTemplateEditor: View {
     /// The fields as the editor opened; anything else is an unsaved change.
     @State private var baseline: [String]?
     @State private var confirmDiscard = false
+    private enum Field: Hashable { case name, subject }
+    @FocusState private var focus: Field?
     private var snapshot: [String] { [name, subject, message, String(isDefault)] }
     private var dirty: Bool { baseline.map { $0 != snapshot } ?? false }
 
@@ -187,8 +189,9 @@ struct EmailTemplateEditor: View {
                 Section {
                     // Named in its row: typed into, the field lost its only name, the placeholder (X146).
                     LabeledContent("Mallin nimi") {
-                        TextField("", text: $name).multilineTextAlignment(.trailing)
+                        TextField("", text: $name).multilineTextAlignment(.trailing).focused($focus, equals: .name)
                     }
+                    .tapFocuses($focus, equals: .name)
                     Toggle("Oletusmalli", isOn: $isDefault)
                 } footer: {
                     Text("Oletusmalli täyttää laskun lähetyksen valmiiksi.")
@@ -198,7 +201,9 @@ struct EmailTemplateEditor: View {
                     // first line (X146). Its text keeps the message's left edge.
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Aihe").font(.caption).foregroundStyle(Theme.ink2)
-                        TextField("", text: $subject).accessibilityLabel("Aihe")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .tapFocuses($focus, equals: .subject)
+                        TextField("", text: $subject).accessibilityLabel("Aihe").focused($focus, equals: .subject)
                     }
                     // The text view's 5 pt line-fragment inset put the message 5 pt right of the
                     // subject above it (U005, X148).

@@ -290,6 +290,8 @@ struct AppLockSettingsView: View {
     @State private var confirmPin = ""
     @State private var enabled = AppLock.shared.isEnabled
     @State private var message: String?
+    private enum Field: Hashable { case new, again }
+    @FocusState private var focus: Field?
 
     var body: some View {
         Form {
@@ -306,10 +308,14 @@ struct AppLockSettingsView: View {
                 Section {
                     LabeledContent("Uusi PIN") {
                         SecureField("4–8 numeroa", text: $newPin).keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                            .focused($focus, equals: .new)
                     }
+                    .tapFocuses($focus, equals: .new)
                     LabeledContent("PIN uudelleen") {
                         SecureField("", text: $confirmPin).keyboardType(.numberPad).multilineTextAlignment(.trailing)
+                            .focused($focus, equals: .again)
                     }
+                    .tapFocuses($focus, equals: .again)
                     Button {
                         enable()
                     } label: {
