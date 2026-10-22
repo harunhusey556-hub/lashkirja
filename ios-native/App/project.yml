@@ -150,6 +150,8 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources: [Tests/LashKirjaAppTests]
+    # Ad-hoc signing (N001: the Keychain tests need a signed host) refuses a bundle with no Info.plist.
+    settings: { base: { GENERATE_INFOPLIST_FILE: "YES" } }
     dependencies:
       - target: LashKirja
   # Simulator walk against a throwaway demo server (scripts/sim/run-ui.sh). Not in the LashKirja
@@ -165,7 +167,8 @@ schemes:
   LashKirja-UITests:
     build: { targets: { LashKirja: all, LashKirjaUITests: [test] } }
     test: { config: Debug, targets: [LashKirjaUITests] }
-  # Unsigned, as CI and the IPA build it.
+  # Unsigned, as the IPA is built. CI's unit run signs it ad hoc on the command line (ios-native.yml)
+  # so the Keychain tests run.
   LashKirja:
     build: { targets: { LashKirja: all } }
     run: { config: Debug }
