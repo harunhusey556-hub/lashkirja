@@ -100,6 +100,11 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_swipe_roles.py'
           python3 scripts/swipe-roles.py ios-native/App/Sources
 
+      # The iOS native workflow reads its build logs with this script: its reading of them is tested here.
+      - name: Compiler warning gate
+        working-directory: .
+        run: python3 -m unittest discover -s scripts -p 'test_compiler_warnings.py'
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
