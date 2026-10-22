@@ -219,9 +219,6 @@ private struct CreatePasskeySheet: View {
                 } footer: {
                     Text("Pääsyavain on uusi tapa kirjautua tilillesi, joten vahvista ensin nykyinen salasanasi. Sen jälkeen laite pyytää Face ID:n tai Touch ID:n.")
                 }
-                if let message {
-                    Section { Text(message).foregroundStyle(Theme.danger) }
-                }
                 Section {
                     Button { Task { await create() } } label: {
                         HStack {
@@ -234,6 +231,7 @@ private struct CreatePasskeySheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($message)
             .formKeyboard()
             .navigationTitle("Vahvista salasanalla")
             .navigationBarTitleDisplayMode(.inline)

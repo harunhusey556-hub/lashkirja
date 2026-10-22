@@ -72,10 +72,10 @@ struct EmailTemplatesView: View {
                 ScreenStateView(state: state, retry: load) { (_: [EmailTemplate]) in EmptyView() }
                     .listRowBackground(Color.clear)
             }
-            if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
         .navigationTitle("Sähköpostimallit")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -225,10 +225,10 @@ struct EmailTemplateEditor: View {
                     Text(EmailPlaceholder.help(placeholders) + ".").padding(.horizontal, ChipRow.inset)
                 }
                 .chipRowSection()
-                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi malli" : "Muokkaa mallia")
             .navigationBarTitleDisplayMode(.inline)

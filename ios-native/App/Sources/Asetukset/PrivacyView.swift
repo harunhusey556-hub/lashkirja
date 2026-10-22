@@ -225,9 +225,6 @@ private struct CloseAccountSheet: View {
                 } footer: {
                     Text("Kirjoita \(AccountCopy.closeConfirmWord) vahvistaaksesi, että haluat pyytää tilin sulkemista.")
                 }
-                if let failure {
-                    Section { Text(failure).foregroundStyle(Theme.danger) }
-                }
                 Section {
                     Button(role: .destructive) {
                         Task {
@@ -247,6 +244,7 @@ private struct CloseAccountSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle("Pyydetäänkö tilin sulkemista?")
             .navigationBarTitleDisplayMode(.inline)

@@ -21,9 +21,6 @@ struct PurchaseReceiptLinkSheet: View {
                 Section {
                     Text(PurchaseReceiptLinkText.intro(invoice)).font(.subheadline).foregroundStyle(Theme.ink2)
                 }
-                if let failure {
-                    Section { Text(failure).font(.footnote).foregroundStyle(Theme.danger) }
-                }
                 switch state.display {
                 case .content(let links):
                     if let banner = state.banner {
@@ -49,6 +46,7 @@ struct PurchaseReceiptLinkSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .navigationTitle(PurchaseReceiptLinkText.title(invoice))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

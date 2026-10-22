@@ -200,6 +200,8 @@ struct Toast: Equatable, Identifiable {
     let text: String
     let actionLabel: String?
     var stays = false
+    /// A notice that goes by itself but is read whole, where a toast's own words are two lines at most.
+    var wraps = false
     static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
 }
 
@@ -243,13 +245,96 @@ struct ToastView: View {
         } else {
             HStack(spacing: 12) {
                 Image(systemName: "checkmark.circle").accessibilityHidden(true)
-                Text(toast.text).font(.subheadline).lineLimit(2)
+                Text(toast.text).font(.subheadline).lineLimit(toast.wraps ? nil : 2)
                 Spacer(minLength: 8)
                 if let label = toast.actionLabel {
                     Button(label, action: action).font(.subheadline.bold())
                 }
             }
         }
+    }
+}
+
+/// The one button a toast may carry (a reload, the page that lifts the block, the invoice a run made).
+struct ToastAction {
+    let label: String
+    let run: () -> Void
+
+    init(_ label: String, run: @escaping () -> Void) {
+        self.label = label
+        self.run = run
+    }
+}
+
+extension View {
+    /// A write's failure, said over the bottom of the screen as the invoice detail says its own
+    /// (U045). A Section or a row put in the list for it pushed what lay under it down, or sat below
+    /// the fold of a long form with nothing on screen to show the save had failed (G003). It stays
+    /// until the owner closes it or the next attempt clears `failure`; the retry is the screen's own
+    /// button, so there is none here, only the `action` a screen needs for a fix elsewhere.
+    func failureToast(_ failure: Binding<String?>, action: ToastAction? = nil) -> some View {
+        modifier(FailureToastModifier(failure: failure, action: action))
+    }
+
+    /// What a write did, said the same way and gone after five seconds, as the invoice detail's own
+    /// (U045). A Section put in the list for it moved the rows under it.
+    func noticeToast(_ notice: Binding<String?>, action: ToastAction? = nil) -> some View {
+        modifier(NoticeToastModifier(notice: notice, action: action))
+    }
+}
+
+private struct FailureToastModifier: ViewModifier {
+    @Binding var failure: String?
+    let action: ToastAction?
+
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .bottom) {
+            // The animation sits on this stack, not on the screen: only the toast eases, whatever
+            // else changes in the same update.
+            ZStack {
+                if let text = failure {
+                    ToastView(toast: Toast(text: text, actionLabel: action?.label, stays: true), action: act, close: close)
+                        .padding(.bottom, 8)
+                }
+            }
+            .motion(.snappy, value: failure)
+        }
+    }
+
+    private func close() { failure = nil }
+
+    private func act() {
+        failure = nil
+        action?.run()
+    }
+}
+
+private struct NoticeToastModifier: ViewModifier {
+    @Binding var notice: String?
+    let action: ToastAction?
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .bottom) {
+                ZStack {
+                    if let text = notice {
+                        ToastView(toast: Toast(text: text, actionLabel: action?.label, wraps: true), action: act)
+                            .padding(.bottom, 8)
+                    }
+                }
+                .motion(.snappy, value: notice)
+            }
+            // A newer notice starts the count again; the task of the one it replaced is cancelled.
+            .task(id: notice) {
+                guard notice != nil else { return }
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                if !Task.isCancelled { notice = nil }
+            }
+    }
+
+    private func act() {
+        notice = nil
+        action?.run()
     }
 }
 
