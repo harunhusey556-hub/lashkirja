@@ -24,7 +24,15 @@ struct RecurringPurchasesView: View {
             if unavailable {
                 Section {
                     ContentUnavailableView {
-                        Label("Tulossa pian", systemImage: "clock")
+                        // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                        Label {
+                            Text("Tulossa pian")
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "clock")
+                        }
                     } description: {
                         Text(RecurringPurchaseText.unavailable)
                     }
@@ -96,7 +104,15 @@ struct RecurringPurchasesView: View {
         if rows.isEmpty {
             Section {
                 ContentUnavailableView {
-                    Label("Ei toistuvia ostolaskuja", systemImage: "repeat")
+                    // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                    Label {
+                        Text("Ei toistuvia ostolaskuja")
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "repeat")
+                    }
                 } description: {
                     Text("Vuokra ja muut säännölliset kulut tulevat ostolaskuiksi itsestään joka kerta.")
                 } actions: {

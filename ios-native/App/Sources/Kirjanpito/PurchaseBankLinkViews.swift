@@ -269,7 +269,15 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
         if list.candidates.isEmpty {
             Section {
                 ContentUnavailableView {
-                    Label(search.isEmpty ? "Ei sopivia pankkitapahtumia" : "Ei osumia", systemImage: "building.columns")
+                    // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                    Label {
+                        Text(search.isEmpty ? "Ei sopivia pankkitapahtumia" : "Ei osumia")
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "building.columns")
+                    }
                 } description: {
                     Text(search.isEmpty ? emptyText : "Kokeile toista hakusanaa tai summaa.")
                 }
@@ -430,7 +438,15 @@ struct PurchaseRowLinkView: View {
                 if list.candidates.isEmpty {
                     Section {
                         ContentUnavailableView {
-                            Label(search.isEmpty ? "Ei avoimia ostolaskuja" : "Ei osumia", systemImage: "doc.text")
+                            // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                            Label {
+                                Text(search.isEmpty ? "Ei avoimia ostolaskuja" : "Ei osumia")
+                                    .lineLimit(nil)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } icon: {
+                                Image(systemName: "doc.text")
+                            }
                         } description: {
                             Text(search.isEmpty
                                  ? "Lisää ostolasku ensin Ostolaskut-näkymässä."
