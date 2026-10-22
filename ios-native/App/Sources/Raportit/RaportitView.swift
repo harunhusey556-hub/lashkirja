@@ -225,7 +225,17 @@ struct RaportitView: View {
             categorySection(report.total)
         } else {
             Section {
-                ContentUnavailableView("Ei kirjauksia vuodelta \(yearKey)", systemImage: "chart.bar")
+                ContentUnavailableView {
+                    // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                    Label {
+                        Text("Ei kirjauksia vuodelta \(yearKey)")
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "chart.bar")
+                    }
+                }
             }
             .listRowBackground(Color.clear)
             if !quality.isEmpty {

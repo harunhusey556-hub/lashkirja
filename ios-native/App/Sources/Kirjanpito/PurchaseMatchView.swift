@@ -70,7 +70,15 @@ struct PurchaseMatchView: View {
         if data.rows.isEmpty {
             Section {
                 ContentUnavailableView {
-                    Label(PurchaseMatch.emptyTitle, systemImage: "building.columns")
+                    // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                    Label {
+                        Text(PurchaseMatch.emptyTitle)
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "building.columns")
+                    }
                 } description: {
                     Text(PurchaseMatch.emptyBody)
                 }

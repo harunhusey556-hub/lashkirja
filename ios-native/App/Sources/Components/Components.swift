@@ -93,7 +93,16 @@ struct LoadFailureView: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label(failure.title, systemImage: failure.symbol)
+            // Shown in a list row by most screens, where a title too long for one line is cut
+            // mid-word ('Palvelimeen ei saada yhteyttä' is as long as M073's): it takes the lines it needs.
+            Label {
+                Text(failure.title)
+                    .lineLimit(nil)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: failure.symbol)
+            }
         } description: {
             Text(failure.message)
         } actions: {

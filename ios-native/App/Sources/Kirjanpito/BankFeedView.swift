@@ -124,7 +124,15 @@ struct BankFeedView: View {
                 }
                 if months.isEmpty {
                     ContentUnavailableView {
-                        Label(month == nil ? "Ei pankkitapahtumia vielä" : "Ei tapahtumia tässä kuussa", systemImage: "building.columns")
+                        // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                        Label {
+                            Text(month == nil ? "Ei pankkitapahtumia vielä" : "Ei tapahtumia tässä kuussa")
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "building.columns")
+                        }
                     } description: { Text("Tuo tiliote tai yhdistä pankki.") } actions: {
                         // Borderless: two buttons in one list row each keep their own tap.
                         Button("Tuo tiliote") { importing = true }.buttonStyle(.borderless)
