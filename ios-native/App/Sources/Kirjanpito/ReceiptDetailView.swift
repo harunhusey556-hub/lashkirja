@@ -93,7 +93,6 @@ struct ReceiptDetailView: View {
                     if let notes = r.notes, !notes.isEmpty { LabeledContent("Selite", value: notes) }
                 }
                 matchSection(r)
-                if let failure { Text(failure).foregroundStyle(Theme.danger).transition(.opacity) }
             } else if state.failure == nil, let row = app.receiptPreview(receiptId) {
                 // The row the list showed, at once; the fields, picture and actions fill in.
                 previewSections(row)
@@ -114,7 +113,8 @@ struct ReceiptDetailView: View {
                 }
             }
         }
-        .motion(.snappy, value: failure)
+        // Before the bottom bar, so the toast stands above the primary and not over it.
+        .failureToast($failure)
         // Held from the first loaded frame; it steps aside while a toast says something there.
         .bottomBar {
             if let r = state.value, toast == nil, let action = primary(r) {
@@ -773,18 +773,10 @@ struct ReceiptEditSheet: View {
                 } header: {
                     Text("Lisätiedot")
                 }
-                if let failure {
-                    Section {
-                        Text(failure.message).foregroundStyle(Theme.danger).transition(.opacity)
-                        if case .versionConflict = failure {
-                            Button { Task { await reload() } } label: { Label("Lataa uudelleen", systemImage: "arrow.clockwise") }
-                                .disabled(busy)
-                        }
-                    }
-                }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast(failureText, action: reloadAction)
             .formKeyboard()
             .navigationTitle("Muokkaa kuittia")
             .navigationBarTitleDisplayMode(.inline)
@@ -801,10 +793,9 @@ struct ReceiptEditSheet: View {
                         .motion(.easeOut(duration: 0.15), value: busy)
                 }
             }
-            // A field error, the failure, the foreign-purchase section or a VAT row coming or
-            // going: the rows below ease to their new place.
+            // A field error, the foreign-purchase section or a VAT row coming or going: the rows
+            // below ease to their new place.
             .motion(.snappy, value: errors)
-            .motion(.snappy, value: failure?.message)
             .motion(.snappy, value: form.type)
             .motion(.snappy, value: form.vatRows.map(\.id))
             .motion(.snappy, value: customCategory)
@@ -817,6 +808,17 @@ struct ReceiptEditSheet: View {
 
     private var dateBinding: Binding<Date> {
         Binding(get: { APIDate.pickerDate(form.date) ?? Date() }, set: { form.setDate(APIDate.pickerDay($0)) })
+    }
+
+    /// The save's failure as the toast's words; closing the toast clears it.
+    private var failureText: Binding<String?> {
+        Binding(get: { failure?.message }, set: { if $0 == nil { failure = nil } })
+    }
+
+    /// Someone saved the receipt in between: the toast offers the newest copy, as the web does.
+    private var reloadAction: ToastAction? {
+        guard let failure, case .versionConflict = failure else { return nil }
+        return ToastAction("Lataa uudelleen") { Task { await reload() } }
     }
 
     /// Anything typed that a save would send. The date filled in on open does not count.

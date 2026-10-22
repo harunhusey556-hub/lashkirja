@@ -34,6 +34,8 @@ struct PurchaseMatchView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
+        .noticeToast($message)
         .navigationTitle("Kohdista ostolaskujen maksut")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
@@ -64,13 +66,6 @@ struct PurchaseMatchView: View {
             } footer: {
                 Text("Pankin maksut avoimille ostolaskuille.")
             }
-        }
-        if let message {
-            Section { Text(message).font(.subheadline).foregroundStyle(Theme.ink) }
-                .listRowBackground(Theme.accentSoft)
-        }
-        if let failure {
-            Section { Text(failure).font(.subheadline).foregroundStyle(Theme.danger) }
         }
         if data.rows.isEmpty {
             Section {

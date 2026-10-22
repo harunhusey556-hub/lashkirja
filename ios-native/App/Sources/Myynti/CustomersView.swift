@@ -21,7 +21,6 @@ struct CustomersView: View {
 
     var body: some View {
         List {
-            if let notice { Section { Text(notice).font(.subheadline) } }
             Section {
                 HStack(spacing: 8) {
                     SectionChip(title: "Aktiiviset", selected: !includeArchived) { includeArchived = false }
@@ -61,6 +60,7 @@ struct CustomersView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .noticeToast($notice)
         .searchable(text: $search, prompt: "Hae asiakasta")
         .onChange(of: search) { _, _ in limit.reset() }
         .onChange(of: includeArchived) { _, _ in limit.reset() }
@@ -217,8 +217,6 @@ struct CustomerDetailView: View {
                         }
                     }
                 }
-                if let notice { Section { Text(notice).font(.subheadline).foregroundStyle(Theme.ink) } }
-                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
                 Section {
                     if let contact = c.contactPerson { LabeledContent("Yhteyshenkilö", value: contact) }
                     // Mail, phone and address open Mail, the phone and Maps (web ContactLink).
@@ -270,6 +268,8 @@ struct CustomerDetailView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
+        .noticeToast($notice)
         // The greyed invoices give way to the rows eased, as ScreenStateView's swap does: not a cut.
         .motion(.snappy, value: state.value == nil)
         // The banner eases in over what is shown, so the rows under it do not jump.
@@ -507,10 +507,10 @@ struct CustomerFormSheet: View {
                     TextField("Muistiinpanot", text: $draft.notes, axis: .vertical)
                         .focused($focus, equals: .notes)
                 }
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle(existing == nil ? "Uusi asiakas" : "Muokkaa asiakasta")
             .navigationBarTitleDisplayMode(.inline)
@@ -598,7 +598,6 @@ struct CustomerImportSheet: View {
                     }
                     .disabled(busy || (result?.validCount ?? 0) == 0)
                 }
-                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
                 if let result {
                     // Rows to fix first: a long file opens on its first rows only.
                     let rows = result.rows.filter { !$0.isValid } + result.rows.filter(\.isValid)
@@ -614,6 +613,7 @@ struct CustomerImportSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .navigationTitle("Tuo asiakkaita")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -701,10 +701,10 @@ struct CustomerMergeSheet: View {
                 } footer: {
                     Text("Laskut ja toistuvat laskut siirtyvät tälle asiakkaalle. Toinen asiakas arkistoidaan.")
                 }
-                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .navigationTitle("Yhdistä kaksoiskappale")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

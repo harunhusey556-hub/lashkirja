@@ -65,6 +65,8 @@ struct PurchaseInvoicesView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
+        .noticeToast($message)
         .navigationTitle("Ostolaskut")
         .toolbar {
             if selection.isActive {
@@ -179,16 +181,6 @@ struct PurchaseInvoicesView: View {
                     Text("Kohdistaa pankin lähtevät maksut ostolaskuihin viitenumerolla. Summan ja toimittajan perusteella löytyneet ovat ehdotuksia.")
                 }
             }
-        }
-
-        if let message {
-            Section {
-                Text(message).font(.subheadline).foregroundStyle(Theme.ink)
-            }
-            .listRowBackground(Theme.accentSoft)
-        }
-        if let failure {
-            Section { Text(failure).font(.subheadline).foregroundStyle(Theme.danger) }
         }
 
         if !noPurchases {
@@ -698,13 +690,6 @@ struct PurchaseInvoiceDetailView: View {
                 Section {
                     header(invoice).listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                 }
-                if let failure {
-                    Section { Text(failure).font(.footnote).foregroundStyle(Theme.danger) }
-                }
-                if let notice {
-                    Section { Text(notice).font(.subheadline) }
-                        .listRowBackground(Theme.accentSoft)
-                }
                 details(invoice)
                 receiptSection(invoice)
                 if !invoice.isCreditNote { paymentsSection(invoice) }
@@ -722,6 +707,8 @@ struct PurchaseInvoiceDetailView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
+        .noticeToast($notice)
         .navigationTitle(state.value?.supplierName ?? "Ostolasku")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

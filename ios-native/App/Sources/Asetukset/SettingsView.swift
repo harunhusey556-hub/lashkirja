@@ -48,9 +48,6 @@ struct SettingsView: View {
                         SettingRow(title: "Kohdista varmat automaattisesti", subtitle: "Kun viite ja summa täsmäävät, kuitti kohdistetaan pankkitapahtumaan heti.", symbol: "link")
                     }
                     .disabled(profile.autoLinkSureMatches == nil || savingAutoLink)
-                    if let settingFailure {
-                        Text(settingFailure).font(.footnote).foregroundStyle(Theme.danger)
-                    }
                 }
             } else if let profileFailure {
                 Section {
@@ -85,6 +82,7 @@ struct SettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($settingFailure)
         .navigationTitle("Asetukset")
         // The lock lives outside SwiftUI state; read it again when coming back from its screen.
         .onAppear { lockSubtitle = Self.lockRowSubtitle(AppLock.shared) }
@@ -318,10 +316,10 @@ struct ProfileForm: View {
                     if let fields = Binding($collection) { collectionSection(fields) }
                 }
             }
-            if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
         .formKeyboard()
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -433,10 +431,10 @@ struct PasswordView: View {
                 }
                 .tapFocuses($focus, equals: .again)
             } footer: { Text("Vähintään 8 merkkiä.") }
-            if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
         .formKeyboard()
         .navigationTitle("Vaihda salasana")
         .navigationBarTitleDisplayMode(.inline)
@@ -512,10 +510,10 @@ struct DevicesView: View {
             } else {
                 ScreenStateView(state: sessions, retry: load) { (_: [DeviceSession]) in EmptyView() }
             }
-            if let failure { Text(failure).foregroundStyle(Theme.danger) }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
         .navigationTitle("Laitteet")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
