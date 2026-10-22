@@ -287,7 +287,7 @@ struct RaportitView: View {
     /// Each category opens the receipts (or invoices) that make it up, for the year on screen.
     private func categories(_ rows: [ProfitLoss.Category], kind: ReportCategoryKind) -> some View {
         ForEach(rows) { row in
-            NavigationLink(value: Route.forDrill(ReportDrill.target(kind: kind, category: row.category, year: String(year)))) {
+            NavigationLink(value: Route.forDrill(ReportDrill.target(kind: kind, row: row, year: String(year)))) {
                 LabeledContent { MoneyText(amount: row.net) } label: {
                     VStack(alignment: .leading) {
                         // The label Kuitit shows ("Tarvikkeet & ostot", X081); the drill above keeps the id.
@@ -487,7 +487,7 @@ struct RaportitView: View {
         drills += ReportDrill.dataQuality(missingVat: report.total.missingVatCount, undated: report.undatedCount, year: key).map(\.drill)
         if let kind = ReportCategoryKind.resolve(categoryChoice, in: report.total) {
             let rows = kind.rows(report.total)
-            drills += rows.prefix(categoryLimit.visible(rows.count)).map { ReportDrill.target(kind: kind, category: $0.category, year: key) }
+            drills += rows.prefix(categoryLimit.visible(rows.count)).map { ReportDrill.target(kind: kind, row: $0, year: key) }
         }
         return ReportDrillWarm.requests(drills)
     }

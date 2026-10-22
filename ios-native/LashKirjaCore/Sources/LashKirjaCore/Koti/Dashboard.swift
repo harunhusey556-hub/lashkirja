@@ -10,6 +10,10 @@ public struct Dashboard: Decodable, Sendable {
     public let txCount: Int
     public let receiptCount: Int
     public let invoiceCount: Int
+    /// What the month's Kulut is made of on the document basis: its purchase invoices and its expense
+    /// receipts. Nil from a server that does not count them.
+    public let purchaseInvoiceCount: Int?
+    public let expenseReceiptCount: Int?
     public let pendingReceiptsCount: Int
     public let matching: Matching
     public let events: Events?
@@ -116,6 +120,7 @@ public struct Dashboard: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case firstName, month, income, expenses, source, txCount, receiptCount, invoiceCount, pendingReceiptsCount
+        case purchaseInvoiceCount, expenseReceiptCount
         case matching, events, handled, estimatedVat, isRefund, vat, hasImap, bank, bankTrend, cashflow
         case receivables, payables, items, itemTotals, blockingTotal, previousMonth, setup, accountCreatedMonth, sectionErrors
     }
@@ -130,6 +135,8 @@ public struct Dashboard: Decodable, Sendable {
         txCount = try c.decodeIfPresent(Int.self, forKey: .txCount) ?? 0
         receiptCount = try c.decodeIfPresent(Int.self, forKey: .receiptCount) ?? 0
         invoiceCount = try c.decodeIfPresent(Int.self, forKey: .invoiceCount) ?? 0
+        purchaseInvoiceCount = try c.decodeIfPresent(Int.self, forKey: .purchaseInvoiceCount)
+        expenseReceiptCount = try c.decodeIfPresent(Int.self, forKey: .expenseReceiptCount)
         pendingReceiptsCount = try c.decodeIfPresent(Int.self, forKey: .pendingReceiptsCount) ?? 0
         matching = try c.decode(Matching.self, forKey: .matching)
         events = try c.decodeIfPresent(Events.self, forKey: .events)

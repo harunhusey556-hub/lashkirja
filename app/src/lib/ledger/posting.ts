@@ -1,4 +1,4 @@
-import { reverseChargeRate, type VatLine } from "../alv";
+import { reverseChargeRate, splitsDocumentVat, type VatLine } from "../alv";
 import { accountOf, expenseAccount, salesAccount, type AccountKey } from "./chart";
 
 /**
@@ -104,7 +104,7 @@ function purchaseSide(
   date: string
 ): Array<[AccountKey, number]> {
   const expense = expenseAccount(category);
-  if (vatTreatment === "domestic" || vatTreatment === "") {
+  if (splitsDocumentVat(vatTreatment)) {
     return [
       [expense, grossCents - documentVatCents],
       ["inputVat", documentVatCents],
