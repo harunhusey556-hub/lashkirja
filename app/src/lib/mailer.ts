@@ -33,10 +33,20 @@ export interface SentMail {
 }
 
 /**
- * imap.gmail.com -> smtp.gmail.com. Anything unrecognised keeps the host, and
- * the user can always set smtpHost explicitly.
+ * Outgoing hosts that are not the incoming host with "imap." swapped for
+ * "smtp.". Microsoft's incoming host has no "imap." prefix and does not speak
+ * SMTP, so the Outlook / Hotmail preset sent nothing.
+ */
+const SMTP_HOST_BY_IMAP_HOST = new Map([["outlook.office365.com", "smtp-mail.outlook.com"]]);
+
+/**
+ * imap.gmail.com -> smtp.gmail.com, outlook.office365.com ->
+ * smtp-mail.outlook.com. Anything unrecognised keeps the host, and the user
+ * can always set smtpHost explicitly.
  */
 export function deriveSmtpHost(imapHost: string): string {
+  const known = SMTP_HOST_BY_IMAP_HOST.get(imapHost.toLowerCase());
+  if (known) return known;
   if (/^imap\./i.test(imapHost)) return imapHost.replace(/^imap\./i, "smtp.");
   if (/^mail\./i.test(imapHost)) return imapHost;
   return imapHost;

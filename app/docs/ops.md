@@ -45,7 +45,7 @@ Document analysis writes the extraction only when the job's `attemptToken` still
 
 Backups are described in `app/docs/backup.md`.
 
-Account close, a data copy, and a password recovery that could not be mailed are `AccountRequest` rows. `npx tsx scripts/account-requests.ts list` shows them. `set <id> in_progress|needs_info|denied` moves an open row. `complete-export` writes `data/account-packages/<userId>/<id>.zip` and the user downloads it from Tietosuoja. `complete-close` sets `User.accessDisabledAt` and revokes sessions. Receipts and invoices stay for the retention period. Password links prefer `PLATFORM_SMTP_*` and do not require the user's invoice mailbox. See `app/docs/account-recovery.md`.
+Account close, a data copy, and a password recovery that could not be mailed are `AccountRequest` rows. `npx tsx scripts/account-requests.ts list` shows them. `set <id> in_progress|needs_info|denied` moves an open row. `complete-export` writes `data/account-packages/<userId>/<id>.zip` and the user downloads it from Tietosuoja. `complete-close` sets `User.accessDisabledAt` and revokes sessions. Receipts and invoices stay for the retention period. Password links prefer `PLATFORM_SMTP_*` and do not require the user's invoice mailbox. `complete-export`, `complete-close` and `set <id> needs_info|denied` on a close or copy request also mail the user the outcome the same way; when no mail path exists or the send fails, the command prints a warning and support tells the user by hand. See `app/docs/account-recovery.md`.
 
 ## What is not collected
 
