@@ -21,7 +21,8 @@ Per step (docs/quality/SIMULATOR.md §4):
                 layout settled (its QUIET line: 0.4 s of ticks with nothing moving; after its
                 'MARK presented' line, that QUIET or PRESENTED_S, whichever comes first). Moves made
                 only of system chrome (CHROME) are transition machinery, not a shift; a SCROLLJUMP
-                counts anywhere after the tap. Catches what 4 fps misses.
+                counts anywhere after the tap, except one in the tick that wrote 'MARK presented':
+                the sheet's first frame is not drawn yet (SAME_TICK_S). Catches what 4 fps misses.
   jank          frames missing against 60 fps while the screen moved. The Haswell simulator emits
                 ~4 fps, so this is reported, never judged (in-app signposts are the jank tool).
   settle_ms     from the touch to the last frame that moved.
@@ -39,7 +40,10 @@ frame moved on a step that must move), UNREACHED (the step missed its target), S
 never ran it), MISS-WINDOW (the recording ended within MISS_WINDOW_S of the action, M029, M096),
 NO-TOUCH (a step that pressed the app has no TOUCH: its t = 0 is unknown) and 'n/a (no settle)'
 (nothing settled inside the window); the time-based checks (intermediate, shift-video) read
-'n/a (bad timestamps)' when the frame times go backwards.
+'n/a (bad timestamps)' when the frame times go backwards. A step whose own moves in the probe
+reach the recording REC_GAP_S or more late (no frame in between: the recorder stopped while the app
+moved, F007) reads 'n/a (not filmed)' where intermediate, flash, shift-video or stall would PASS;
+a check that found something keeps its FAIL, and shift-probe, which reads the probe alone, its verdict.
 The simulator writes a frame only when the screen changes, so frames are read at their own
 timestamps (variable rate), not resampled: a 30 fps resample would make every frame look settled.
 """
@@ -74,8 +78,17 @@ PROBE_MIN_PT = 3        # probe moves smaller than this are rounding
 # both hides it (M097). In run 39081865005, before the probe read presentation layers, the slide
 # wrote no MOVE at all and the late shift was the first move.
 PRESENTED_S = 0.7      # a sheet has landed this long after the probe's 'MARK presented'
+# The probe writes one tick's lines within a few ms of each other: 22 SCROLLJUMPs follow a 'MARK
+# presented' by 0 to 6 ms in gates 39525842170, 39636460950 and 39697234353, the next two by 0.159 s
+# (chat-open). Its next tick is 0.1 s later at the earliest (10 fps).
+SAME_TICK_S = 0.05
 MIN_FRAMES = 3          # fewer frames than this: the step's motion was not filmed
 MISS_WINDOW_S = 1.0     # a recording must run this long past the action to have filmed its result
+# The recorder shows a move of the step 0.21 s after the probe logged it (median; 95th percentile
+# 0.64 s) over 253 steps of gates 39525842170 and 39697234353. 6 of them waited longer than 1 s,
+# among them myynti-customer-open's baseline (F007): frames at 0, 0.662 and 0.667 s, none until 4.0 s,
+# and the push, a 0.44 s stall and the title change all inside that hole.
+REC_GAP_S = 1.0
 STALL_MS = 500          # an app-side stall this long fails the step (section 7: harness below it)
 TOUCH_SLACK_S = 0.05    # a TOUCH this far before tapAt still belongs to the step (clock rounding)
 MOTION_KINDS = ("nav", "sheet", "swap", "scroll")  # steps where no moving frame means not filmed
@@ -365,13 +378,15 @@ def chrome_only(raw):
 
 
 def probe_shift(events, start, end):
-    """MOVEs after the step's layout settled and SCROLLJUMPs anywhere, within [start, end], and
-    the settle point in ms after start (None: nothing settled inside the window). Settled is the
-    probe's own QUIET line (written only after ticks that ran) after the first move, or after a
-    'MARK presented' line that QUIET or PRESENTED_S, whichever comes first (M020, M097). A scroll
-    offset that jumps with no finger on it is never part of a transition (M079)."""
+    """MOVEs after the step's layout settled and SCROLLJUMPs anywhere (but in the tick of a 'MARK
+    presented'), within [start, end], and the settle point in ms after start (None: nothing settled
+    inside the window). Settled is the probe's own QUIET line (written only after ticks that ran)
+    after the first move, or after a 'MARK presented' line that QUIET or PRESENTED_S, whichever
+    comes first (M020, M097). A scroll offset that jumps with no finger on it is never part of a
+    transition (M079)."""
     window = [e for e in events if start <= e["t"] <= end]
-    mark = next((e["t"] for e in window if e["kind"] == "MARK" and e["screen"] == "presented"), None)
+    presented = [e["t"] for e in window if e["kind"] == "MARK" and e["screen"] == "presented"]
+    mark = presented[0] if presented else None
     if mark is not None:
         quiet = next((e["t"] for e in window if e["kind"] == "QUIET" and e["t"] > mark), None)
         settled = min(mark + PRESENTED_S, quiet) if quiet is not None else mark + PRESENTED_S
@@ -380,8 +395,11 @@ def probe_shift(events, start, end):
         settled = None if first_move is None else next((e["t"] for e in window[first_move:] if e["kind"] == "QUIET"), None)
     if settled is not None and settled > end:
         settled = None
+    # The tick that sees a sheet presented is before the sheet's first drawn frame: an offset that
+    # changes in that tick changed before anything of the sheet was on screen (koti-add-sheet
+    # dy=52 in both PR runs of gate 39636460950, the baseline's walk had none).
     late = [e for e in window if e["max"] >= PROBE_MIN_PT and (
-        e["kind"] == "SCROLLJUMP"
+        (e["kind"] == "SCROLLJUMP" and not any(0 <= e["t"] - m <= SAME_TICK_S for m in presented))
         or (e["kind"] == "MOVE" and settled is not None and e["t"] > settled and not chrome_only(e["raw"])))]
     return late, int((settled - start) * 1000) if settled is not None else None
 
@@ -434,8 +452,20 @@ def app_stall_ms(events, windows, start, end):
     return longest
 
 
+def film_wait(times, moves, rec_len):
+    """The longest wait, in s, from one of the step's own moves (on the video's clock) to the next
+    frame of the recording, which ends rec_len into the video; 0 without moves. The simulator writes
+    a frame only when the screen changes, so a long silence alone is a screen that held still: it is
+    the probe having seen the app move in it that makes the silence the recorder's (F007)."""
+    wait = 0.0
+    for x in moves:
+        wait = max(wait, min((t for t in times if t >= x), default=rec_len) - x)
+    return wait
+
+
 KS = ("intermediate", "flash", "shift_video", "shift_probe", "stall")
-MISSES = ("NO-MOTION", "UNREACHED", "SKIPPED", "MISS-WINDOW", "NO-TOUCH", "n/a (no settle)", "n/a (bad timestamps)")
+MISSES = ("NO-MOTION", "UNREACHED", "SKIPPED", "MISS-WINDOW", "NO-TOUCH", "n/a (no settle)", "n/a (bad timestamps)",
+          "n/a (not filmed)")
 # 'prebuild-<tab>-freed=<bool>' is the copy; '-host-freed' and '-window-freed' say which half stays.
 PREBUILD_FREED = re.compile(r"^prebuild-(.+?)(-host|-window)?-freed=(true|false)$")
 
@@ -482,7 +512,7 @@ def checks(row, probe_seen, late):
         if row["settle_ms"] is None:
             return "n/a (no settle)"
         return "FAIL" if found else "PASS"
-    return {
+    verdicts = {
         "intermediate": video(kind != "load", row.get("intermediate")),
         # Frame order alone finds a flash, so wrong frame times leave it judged.
         "flash": video(True, row.get("flash"), timed=False),
@@ -493,6 +523,13 @@ def checks(row, probe_seen, late):
         "stall": "n/a" if not probe_seen or row.get("app_stall_ms") is None else (
             "FAIL" if row["app_stall_ms"] >= STALL_MS else "PASS"),
     }
+    # A PASS on a recording with a hole where the step moved says nothing: the baseline of
+    # myynti-customer-open read PASS on intermediate, shift_video and stall (F007). The stall is
+    # voided with the video checks as F007 asks; shift_probe reads the probe alone, which saw the
+    # step whatever the recorder wrote, so its verdict stands.
+    if (row.get("film_wait_ms") or 0) >= REC_GAP_S * 1000:
+        return {k: "n/a (not filmed)" if v == "PASS" and k != "shift_probe" else v for k, v in verdicts.items()}
+    return verdicts
 
 
 def skipped_in_notes(path, known):
@@ -550,6 +587,7 @@ def main():
                     sheet = f"{suite}/sheet-{s['id']}.png"  # the run's directory
                     contact_sheet(os.path.join(out, sheet), res, tap_s)
                     row.update({k: res[k] for k in ("intermediate", "flash", "shift", "jank_dropped", "settle_ms", "frames", "bad_times")})
+                    row["film_wait_ms"] = int(round(1000 * film_wait(res["times"], [x for x, _ in own], end - s["recStart"])))
                     # Pull-to-refresh: the list sliding back up when the refresh ends is the
                     # system's rebound, not a shift; content popping in still counts.
                     if REFRESH.search(s["id"]):
@@ -596,22 +634,23 @@ def main():
              f"Walk timing: {sum(1 for r in rows if r.get('window_cut'))} recordings ended within {MISS_WINDOW_S:g} s "
              f"of the action, {sum(1 for r in rows if r.get('no_touch'))} pressed steps have no TOUCH, "
              f"{sum(1 for r in rows if (r.get('stamp_ms') or 0) >= 50)} taps went out 50 ms or more after their "
-             f"element was found.", "",
+             f"element was found. {sum(1 for r in rows if (r.get('film_wait_ms') or 0) >= REC_GAP_S * 1000)} steps went "
+             f"{REC_GAP_S:g} s or more without a frame after a move of their own.", "",
              "## Calibration", "", CALIBRATION, "",
              f"Thresholds: STATIC_DIFF={STATIC_DIFF}, DISTINCT={DISTINCT}, INTER_AREA={INTER_AREA} (cells off by {CELL_DIFF}), "
              f"LOADING_STD={LOADING_STD} (band {LOADING_BAND}), HOLD_S={HOLD_S} (drag steps {GESTURE_HOLD_S}, quiet {GESTURE_HOLD_S + 0.4}), FLASH_LUMA={FLASH_LUMA}, QUIET_S={QUIET_S}, "
              f"SHIFT_AREA={SHIFT_AREA}, PROBE_MIN_PT={PROBE_MIN_PT}, PRESENTED_S={PRESENTED_S}, MIN_FRAMES={MIN_FRAMES}, "
-             f"MISS_WINDOW_S={MISS_WINDOW_S}, STALL_MS={STALL_MS}.", "",
+             f"MISS_WINDOW_S={MISS_WINDOW_S}, STALL_MS={STALL_MS}, REC_GAP_S={REC_GAP_S}, SAME_TICK_S={SAME_TICK_S}.", "",
              "Jank is not judged: the simulator writes ~4 frames a second, so 'dropped' counts every animation.", "",
              "## Steps", "",
-             "| suite | step | from → to | kind | reached | intermediate | flash | shift video | shift probe | stall | settle ms | app stall ms | dropped@60 | sheet |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| suite | step | from → to | kind | reached | intermediate | flash | shift video | shift probe | stall | settle ms | app stall ms | film wait ms | dropped@60 | sheet |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         c = r["checks"]
         stall = "" if r.get("app_stall_ms") is None else r["app_stall_ms"]
         lines.append(f"| {r['suite']} | {r['id']} | {r['from']} → {r['to']} | {r['kind']} | {'CRASH' if r['crashed'] else ('yes' if r['reached'] else 'NO')} | "
                      f"{c['intermediate']} | {c['flash']} | {c['shift_video']} | {c['shift_probe']} | {c['stall']} | {r.get('settle_ms', '')} | "
-                     f"{stall} | {r.get('jank_dropped', '')} | {'[png](' + r['sheet'] + ')' if r.get('sheet') else r.get('error', '')} |")
+                     f"{stall} | {r.get('film_wait_ms', '')} | {r.get('jank_dropped', '')} | {'[png](' + r['sheet'] + ')' if r.get('sheet') else r.get('error', '')} |")
     lines += ["", "## Details of FAIL rows", ""]
     for r in rows:
         if "FAIL" in r["checks"].values():

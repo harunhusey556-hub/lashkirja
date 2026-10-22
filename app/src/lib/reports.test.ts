@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildProfitLoss, periodToEuros, UNCATEGORISED, type ReportReceipt } from "./reports";
+import { buildProfitLoss, periodToEuros, UNCATEGORISED, type ReportPurchaseInvoice, type ReportReceipt } from "./reports";
 
 const vat = (rate: number, amount: number) => JSON.stringify([{ rate, amount }]);
 
@@ -140,6 +140,57 @@ describe("buildProfitLoss", () => {
       receipt({ date: "2026-02-01T00:00:00.000Z", vatDetails: null }),
     ]);
     expect(result.months.map((month) => month.month)).toEqual(["2026-01", "2026-02"]);
+  });
+});
+
+describe("buildProfitLoss with purchase invoices", () => {
+  const purchase = (overrides: Partial<ReportPurchaseInvoice> = {}): ReportPurchaseInvoice => ({
+    issueDate: "2026-03-01T00:00:00.000Z",
+    category: "vuokra",
+    grossCents: 80_000,
+    vatCents: 0,
+    ...overrides,
+  });
+
+  it("counts a purchase invoice as an expense of its invoice month, in its category", () => {
+    const result = buildProfitLoss([], [], [purchase(), purchase({ issueDate: "2026-04-02T00:00:00.000Z", grossCents: 12_400, vatCents: 2_519, category: "tarvikkeet" })]);
+    expect(result.total).toMatchObject({
+      expenseGrossCents: 92_400,
+      expenseVatCents: 2_519,
+      expenseNetCents: 89_881,
+      profitNetCents: -89_881,
+      purchaseInvoiceCount: 2,
+      receiptCount: 0,
+    });
+    expect(result.months.map((month) => [month.month, month.expenseNetCents, month.purchaseInvoiceCount])).toEqual([
+      ["2026-03", 80_000, 1],
+      ["2026-04", 9_881, 1],
+    ]);
+    expect(result.total.expenseByCategory.map((row) => [row.category, row.netCents, row.count])).toEqual([
+      ["vuokra", 80_000, 1],
+      ["tarvikkeet", 9_881, 1],
+    ]);
+  });
+
+  it("adds them to the receipts of the same category and keeps the document counts apart", () => {
+    const result = buildProfitLoss([receipt({ category: "vuokra", totalAmountCents: 10_000, vatDetails: null })], [], [purchase()]);
+    expect(result.total.expenseByCategory).toEqual([{ category: "vuokra", grossCents: 90_000, vatCents: 0, netCents: 90_000, count: 2 }]);
+    expect(result.total.receiptCount).toBe(1);
+    expect(result.total.purchaseInvoiceCount).toBe(1);
+  });
+
+  it("takes a supplier credit note off the expenses and puts a missing category under Luokittelematon", () => {
+    const result = buildProfitLoss([], [], [
+      purchase({ category: null, grossCents: 12_550, vatCents: 2_550 }),
+      purchase({ category: " ", grossCents: -2_510, vatCents: -510 }),
+    ]);
+    expect(result.total).toMatchObject({ expenseGrossCents: 10_040, expenseVatCents: 2_040, expenseNetCents: 8_000, uncategorisedCount: 2 });
+    expect(result.total.expenseByCategory[0]).toMatchObject({ category: UNCATEGORISED, netCents: 8_000, count: 2 });
+    expect(result.total.incomeGrossCents).toBe(0);
+  });
+
+  it("reports the purchase invoice count in euros-facing shape", () => {
+    expect(periodToEuros(buildProfitLoss([], [], [purchase()]).total).purchaseInvoiceCount).toBe(1);
   });
 });
 

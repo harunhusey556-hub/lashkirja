@@ -144,7 +144,7 @@ private func gated() async -> (AuthService, InMemoryTokenStore, GatedTransport) 
 
 @Test func refreshAnsweredAfterLogoutIsNotStored() async throws {
     let (auth, store, transport) = await gated()
-    try await store.save(dueToken)
+    await store.save(dueToken)
     let refresh = Task { await auth.refreshIfDue() }
     await transport.waitFor(1)
     let logout = Task { await auth.logout() }
@@ -159,7 +159,7 @@ private func gated() async -> (AuthService, InMemoryTokenStore, GatedTransport) 
 
 @Test func refreshRefusedAfterAnotherSignInKeepsTheNewSession() async throws {
     let (auth, store, transport) = await gated()
-    try await store.save(dueToken)
+    await store.save(dueToken)
     let refresh = Task { await auth.refreshIfDue() }
     await transport.waitFor(1)
     await auth.endSession()
@@ -175,7 +175,7 @@ private func gated() async -> (AuthService, InMemoryTokenStore, GatedTransport) 
 
 @Test func concurrentRefreshesSendOneRequest() async throws {
     let (auth, store, transport) = await gated()
-    try await store.save(dueToken)
+    await store.save(dueToken)
     let first = Task { await auth.refreshIfDue() }
     let second = Task { await auth.refreshIfDue() }
     await transport.waitFor(1)
@@ -189,7 +189,7 @@ private func gated() async -> (AuthService, InMemoryTokenStore, GatedTransport) 
 
 @Test func endSessionClearsAtOnceAndLeavesTheRevokeForLater() async throws {
     let (auth, store, transport) = await make([])
-    try await store.save(dueToken)
+    await store.save(dueToken)
     await auth.endSession()
     #expect(transport.requests.isEmpty)
     #expect(await store.load() == nil)
@@ -235,7 +235,7 @@ private let t3Body = tokenBody.replacingOccurrences(of: "T1", with: "T3").replac
 
 @Test func staleUnauthorizedDoesNotEndANewerSession() async throws {
     let (auth, store, _) = await make([json(t3Body)])
-    try await store.save(dueToken)
+    await store.save(dueToken)
     await auth.endSession()
     _ = try await auth.login(email: "b@b.fi", password: "pw")
     // The 401 answers a request sent with T1, the session before this sign-in.
@@ -254,7 +254,7 @@ private let t3Body = tokenBody.replacingOccurrences(of: "T1", with: "T3").replac
 
 @Test func storedSessionUnauthorizedSignsOutBeforeTheTokenIsCached() async throws {
     let (auth, store, _) = await make([])
-    try await store.save(dueToken)
+    await store.save(dueToken)
     #expect(await auth.handleUnauthorized(sentToken: "T1"))
     #expect(await store.load() == nil)
     #expect(await auth.currentToken() == nil)
@@ -268,7 +268,7 @@ private let t3Body = tokenBody.replacingOccurrences(of: "T1", with: "T3").replac
     let auth = AuthService(store: store, now: { fixedNow })
     let client = APIClient(baseURL: URL(string: "https://example.test")!, transport: transport, tokens: auth, sleep: { _ in })
     await auth.bind(client)
-    try await store.save(dueToken)
+    await store.save(dueToken)
     let dropped = Box()
     await client.setOnUnauthorized { sentToken in
         await auth.endSession()
@@ -289,7 +289,7 @@ private let t3Body = tokenBody.replacingOccurrences(of: "T1", with: "T3").replac
     let auth = AuthService(store: store, now: { fixedNow })
     let client = APIClient(baseURL: URL(string: "https://example.test")!, transport: transport, tokens: auth, sleep: { _ in })
     await auth.bind(client)
-    try await store.save(dueToken)
+    await store.save(dueToken)
     let dropped = Box()
     await client.setOnUnauthorized { sentToken in await dropped.set(await auth.handleUnauthorized(sentToken: sentToken)) }
     await #expect(throws: LKError.self) { let _: Ignored = try await client.get("/api/receipts") }

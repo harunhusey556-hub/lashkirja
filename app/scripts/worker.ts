@@ -5,6 +5,10 @@ import { drainPendingDocumentJobs } from "../src/lib/document-jobs";
 import { runDueRecurringPurchases } from "../src/lib/recurring-purchases";
 import { runMatchReviewCycle } from "../src/lib/match-review-run";
 import { formatReconcileSummary, reconcileEnabled, reconcilePosPayments } from "../src/lib/pos-payments";
+import { assertStartupEnv } from "../src/lib/startup-env";
+
+// Outside main(), whose errors are only logged: a worker that cannot start must exit non-zero.
+assertStartupEnv();
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 

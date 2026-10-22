@@ -18,7 +18,9 @@ export interface HealthReport {
   };
 }
 
-const LOW_SPACE_BYTES = 50 * 1024 * 1024;
+// Early enough that the owner can still free space before a full disk breaks SQLite writes, uploads
+// and the backup (its VACUUM INTO snapshot and zip need room too). 50 MB warned only when it was too late.
+export const LOW_SPACE_BYTES = 5 * 1024 * 1024 * 1024;
 
 export function healthAuthOk(authorization: string | null, nodeEnv = process.env.NODE_ENV): boolean {
   const token = process.env.HEALTH_TOKEN?.trim();
@@ -26,13 +28,16 @@ export function healthAuthOk(authorization: string | null, nodeEnv = process.env
   return authorization === `Bearer ${token}`;
 }
 
-export function diskHealth(uploadsDir = path.join(process.cwd(), "data", "uploads")): HealthCheck {
+export function diskHealth(
+  uploadsDir = path.join(process.cwd(), "data", "uploads"),
+  lowSpaceBytes = LOW_SPACE_BYTES
+): HealthCheck {
   try {
     if (!fs.existsSync(uploadsDir)) return { ok: false, detail: "uploads-missing" };
     fs.accessSync(uploadsDir, fs.constants.W_OK);
     const stats = fs.statfsSync(uploadsDir);
     const free = stats.bavail * stats.bsize;
-    if (free < LOW_SPACE_BYTES) return { ok: false, detail: "low-space" };
+    if (free < lowSpaceBytes) return { ok: false, detail: "low-space" };
     return { ok: true, detail: "writable" };
   } catch {
     return { ok: false, detail: "unwritable" };

@@ -5,8 +5,9 @@ name: iOS motion gate
 # instrument laid on (baseline) once, then on this branch twice. Before every walk the demo DB is
 # seeded afresh, the app is uninstalled and the API is warmed, so no walk inherits another's data
 # or cache. scripts/sim/motion-gate.py: a row is NEW FAIL when it PASSes in the baseline and FAILs
-# in both branch runs, and NEW MISS when the baseline judged it and neither branch run did; a NEW
-# MISS fails the job, a NEW FAIL is listed for the PR's review.
+# in both branch runs (a stall row also needs the margin the script names), and NEW MISS when the
+# baseline judged it and neither branch run did (a step the recording did not film is not judged);
+# a NEW MISS fails the job, a NEW FAIL is listed for the PR's review.
 # Artifact motion-gate-<suite>: {baseline,pr-run1,pr-run2}/motion-report.{json,md} and gate.md.
 on:
   push:

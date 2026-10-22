@@ -818,10 +818,10 @@ struct PaymentSheet: View {
                         .tint(Theme.accent)
                     }
                 }
-                if let failure { Text(failure).foregroundStyle(Theme.danger) }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle("Kirjaa maksu")
             .navigationBarTitleDisplayMode(.inline)
@@ -941,10 +941,10 @@ struct ReminderSheet: View {
                 } footer: {
                     Text("Maksettava viimeistään \(APIDate.displayDay(preview.dueDate)).")
                 }
-                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             // The bar's Lähetä already says what happens; the long title was cut beside it (X002).
             .navigationTitle("Maksumuistutus")
             .navigationBarTitleDisplayMode(.inline)
@@ -1006,6 +1006,9 @@ struct SendInvoiceSheet: View {
     @State private var submit = SubmitGuard()
     private var busy: Bool { submit.inFlight }
     @State private var failure: String?
+    /// A send that failed may still have gone through: its key stays for the retry, whether or not
+    /// the owner has closed the failure.
+    @State private var sendFailed = false
     @State private var to = ""
     @State private var subject = ""
     @State private var message = ""
@@ -1039,7 +1042,6 @@ struct SendInvoiceSheet: View {
                             }
                         }
                     }
-                    if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
                     mailSection(preview)
                     Section {
                         LabeledContent("Summa") { MoneyText(amount: preview.gross) }
@@ -1069,6 +1071,7 @@ struct SendInvoiceSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle(invoice.isCreditNote ? "Lähetä hyvityslasku" : "Lähetä lasku")
             .navigationBarTitleDisplayMode(.inline)
@@ -1198,7 +1201,7 @@ struct SendInvoiceSheet: View {
                 to = preview.recipient ?? ""
             }
             // A fresh check is a new send, unless a lost answer left it open whether the last one went.
-            if failure == nil { submit.renew() }
+            if !sendFailed { submit.renew() }
         } catch is CancellationError {
         } catch {
             check.fail(error)
@@ -1289,6 +1292,7 @@ struct SendInvoiceSheet: View {
             dismiss()
         } catch {
             failure = InvoiceSendResult.failureMessage(error)
+            sendFailed = true
             Haptics.error()
         }
     }

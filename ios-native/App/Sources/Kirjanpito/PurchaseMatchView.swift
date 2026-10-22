@@ -34,6 +34,8 @@ struct PurchaseMatchView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
+        .noticeToast($message)
         .navigationTitle("Kohdista ostolaskujen maksut")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
@@ -65,17 +67,18 @@ struct PurchaseMatchView: View {
                 Text("Pankin maksut avoimille ostolaskuille.")
             }
         }
-        if let message {
-            Section { Text(message).font(.subheadline).foregroundStyle(Theme.ink) }
-                .listRowBackground(Theme.accentSoft)
-        }
-        if let failure {
-            Section { Text(failure).font(.subheadline).foregroundStyle(Theme.danger) }
-        }
         if data.rows.isEmpty {
             Section {
                 ContentUnavailableView {
-                    Label(PurchaseMatch.emptyTitle, systemImage: "building.columns")
+                    // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                    Label {
+                        Text(PurchaseMatch.emptyTitle)
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "building.columns")
+                    }
                 } description: {
                     Text(PurchaseMatch.emptyBody)
                 }

@@ -150,7 +150,7 @@ final class StabilityTests: WalkTestCase {
         for _ in 0..<4 where hubRow.exists && bar.exists && hubRow.frame.minY < bar.frame.maxY {
             app.windows.firstMatch.swipeDown(velocity: .slow)
         }
-        tap("Pankki")
+        _ = tap("Pankki")
         XCTAssertTrue(app.navigationBars["Pankki"].waitForExistence(timeout: 10), "Pankki did not open")
         // The rows' screen (N2), not a screen that is only named Pankki: the hub was one too.
         XCTAssertTrue(app.navigationBars["Pankki"].buttons["Toiminnot"].waitForExistence(timeout: 10), "Pankki opened without its rows' Toiminnot")
@@ -168,7 +168,7 @@ final class StabilityTests: WalkTestCase {
         XCTAssertTrue(app.navigationBars["Lisää tiedosto"].waitForExistence(timeout: 10), "receipt page did not open")
         XCTAssertTrue(app.buttons["Valitse kuvista"].exists || app.staticTexts["Valitse kuvista"].exists, "picker buttons missing")
         shot("stability-lisaa-kuitti")
-        tap("Peruuta"); sleep(1)
+        _ = tap("Peruuta"); sleep(1)
         assertResponsive("lisää kuitti closed")
     }
 
@@ -179,7 +179,7 @@ final class StabilityTests: WalkTestCase {
         assertWarmCanvas(app, under: app.navigationBars["Ilmoita ongelmasta"], "ilmoita ongelmasta")
         let field = app.textFields.firstMatch.exists ? app.textFields.firstMatch : app.textViews.firstMatch
         if field.waitForExistence(timeout: 10) { type(field, "Simulaattoritesti") }
-        tap("Lähetä ilmoitus")
+        _ = tap("Lähetä ilmoitus")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Ilmoitus tallennettu")).firstMatch.waitForExistence(timeout: 15),
                       "no confirmation code after sending")
         // U081: the keyboard leaves with the sent note. It stayed up over the code's line and
@@ -1893,6 +1893,34 @@ final class StabilityTests: WalkTestCase {
         if !shown { dump(app, "stability-25-no-row") }
         XCTAssertTrue(shown, "Pankki does not show the imported row")
         shot("stability-25-pankki")
+    }
+
+    /// Lisää > Tuo tiliote with a file the app cannot open (the scope refused, or the file gone) did
+    /// nothing and said nothing: the import returned silently. It now says "Tiedostoa ei voitu lukea."
+    /// as any failed import does. A test cannot pick a file in the system's picker, so ⋯ has a fixture
+    /// under `-LKUITest` that hands the import a statement file that is not there. It brings no row,
+    /// so it can run anywhere in the class.
+    func test34_UnreadableStatementSaysSo() {
+        app.terminate()
+        app.launchArguments += ["-LKUITest", "-notifications.asked.v1", "YES"]
+        launchSignedIn()
+        dismissSystemPrompts()
+        tab("Lisää")
+        let bar = app.navigationBars["Lisää"]
+        guard bar.waitForExistence(timeout: 10) else { dump(app, "stability-34-no-lisaa"); XCTFail("Lisää did not open"); return }
+        guard pickFromAddMenu(bar, "Testitiliote (ei luettavissa)") else {
+            XCTFail("Lisää's ⋯ has no Testitiliote (ei luettavissa): is the app a Debug build launched with -LKUITest?"); return
+        }
+        let notice = app.staticTexts["Tiedostoa ei voitu lukea."]
+        guard notice.waitForExistence(timeout: 10) else {
+            dump(app, "stability-34-no-notice"); XCTFail("an unreadable statement left Lisää without a word"); return
+        }
+        shot("stability-34-unreadable")
+        // A failure, not an import: no link to rows. The spinner is gone and ⋯ answers again.
+        let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Näytä tapahtumat ›")).firstMatch
+        XCTAssertFalse(rows.exists, "an unreadable statement offered Näytä tapahtumat")
+        let free = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: bar.buttons["Toiminnot"].firstMatch)
+        XCTAssertEqual(XCTWaiter().wait(for: [free], timeout: 10), .completed, "⋯ stayed busy after the failed read")
     }
 
     /// Taps `item` in Lisää's ⋯. The mailbox item reads "Hae sähköpostista" until the sheet has read

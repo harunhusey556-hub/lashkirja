@@ -239,6 +239,40 @@ class ProbeShift(unittest.TestCase):
         self.assertEqual(r["koti-refresh"]["probe_shift"], [lines[-1]])
         self.assertEqual(r["koti-refresh"]["checks"]["shift_probe"], "FAIL")
 
+    # koti-add-sheet (F011, gate 39636460950): the probe's tick that saw the sheet presented, after
+    # a 1.1 s stall, also saw the sheet's list change its offset by 52 pt, 0 to 1 ms after the mark
+    # and before the sheet had drawn a frame. Both PR runs read shift_probe FAIL, the baseline's none.
+    ADD_SHEET = {
+        "pr-run1": (dict(step("koti-add-sheet", kind="sheet", video=False), tapAt=1792603009.7301, doneAt=1792603012.2534,
+                          foundAt=1792603009.7301, touchAt=1792603010.087, recStart=1792603008.686, recEnd=1792603016.913),
+                    ["TOUCH 1792603010.087 assistant", "MARK 1792603010.170 add-tap", "ROOT 1792603010.374 add-sheet 402x435",
+                     "SCREEN 1792603010.375 add-sheet", "STALL 1792603011.185 add-sheet ms=1122", "MARK 1792603011.185 presented",
+                     "SCROLLJUMP 1792603011.186 add-sheet dy=52", "STALL 1792603011.442 add-sheet ms=257"]),
+        "pr-run2": (dict(step("koti-add-sheet", kind="sheet", video=False), tapAt=1792603402.7449, doneAt=1792603405.6622,
+                          foundAt=1792603402.7448, touchAt=1792603403.351, recStart=1792603401.387, recEnd=1792603410.545),
+                    ["TOUCH 1792603403.351 assistant",
+                     "MOVE 1792603403.410 assistant n=31 max=270 _UILiquidLensView@295,787,90x70:270,-8 UIView@295,787,90x70:270,-8 ClearGlassView@295,787,90x70:270,-8",
+                     "MARK 1792603403.434 add-tap", "ROOT 1792603403.613 add-sheet 402x435", "SCREEN 1792603403.613 add-sheet",
+                     "STALL 1792603404.515 add-sheet ms=1106", "MARK 1792603404.516 presented", "SCROLLJUMP 1792603404.516 add-sheet dy=52",
+                     "MOVE 1792603404.517 add-sheet n=48 max=270 _UILiquidLensView@25,795,74x54:-270,8 UIView@25,795,74x54:-270,8 BackdropView@25,795,74x54:-270,8",
+                     "STALL 1792603404.827 add-sheet ms=251", "STALL 1792603405.096 add-sheet ms=269", "QUIET 1792603405.097 add-sheet"]),
+    }
+
+    def test_scrolljump_in_the_presented_tick_is_not_a_shift(self):
+        for run, (koti, lines) in self.ADD_SHEET.items():
+            with tempfile.TemporaryDirectory() as root:
+                r = walk(root, "s", [koti], {}, probe_lines=lines)["koti-add-sheet"]
+            self.assertEqual((r["probe_shift"], r["checks"]["shift_probe"]), ([], "PASS"), run)
+
+    def test_scrolljump_after_the_presented_tick_still_fails(self):
+        # chat-open (gate 39697234353): the jump came 0.159 s after the mark, one tick on, with the
+        # sheet already drawing; it stays a shift. So does any jump past SAME_TICK_S, or before the mark.
+        mark = "MARK 1792630254.184 presented"
+        for jump in ("SCROLLJUMP 1792630254.343 assistant dy=62", "SCROLLJUMP 1792630254.240 assistant dy=62",
+                     "SCROLLJUMP 1792630254.183 assistant dy=62"):
+            late, _ = ma.probe_shift(probe([mark, jump, "QUIET 1792630254.900 assistant"]), 1792630253.289, 1792630260.75)
+            self.assertEqual([e["raw"] for e in late], [jump], jump)
+
 
 class Intermediate(unittest.TestCase):
     def test_partly_flat_grey_held_frame_is_intermediate(self):
@@ -547,6 +581,115 @@ class TouchIsTimeZero(unittest.TestCase):
                       "1 taps went out 50 ms or more after their element was found.", report)
 
 
+# myynti-customer-open in the baseline of gate 39525842170 (F007): the recorder wrote frames at 0,
+# 0.662 and 0.667 s, nothing until 4.0 s, then 31 within 0.2 s. The finger came at 1.981 s, the push
+# at 2.428 s, a 0.44 s stall ended at 2.88 s and the title moved at 3.115 s: all inside the hole.
+# The old analyzer read PASS on intermediate, flash, shift_video and stall there (the report said
+# settle_ms 2019, app_stall_ms 438), FAIL on shift_probe.
+HOLE_TIMES = [0.0, 0.662, 0.667, 4.0, 4.03, 4.042, 4.048, 4.057, 4.063, 4.073, 4.085, 4.087, 4.09, 4.092, 4.095, 4.102, 4.105,
+              4.107, 4.12, 4.122, 4.123, 4.132, 4.133, 4.135, 4.143, 4.145, 4.155, 4.157, 4.158, 4.17, 4.173, 4.175, 4.187, 4.19]
+HOLE_STEP = {"id": "myynti-customer-open", "suite": "myynti", "from": "Asiakkaat", "to": "Asiakas", "action": "myynti-customer-open",
+             "kind": "nav", "expect": "single destination", "tapAt": 1792554541.5766, "doneAt": 1792554542.2762,
+             "recStart": 1792554539.895, "recEnd": 1792554547.655, "foundAt": 1792554541.5766, "touchAt": 1792554541.876,
+             "pressed": True, "video": "m-myynti-customer-open.mov", "reached": True, "skipped": False, "crashed": False}
+HOLE_PROBE = ["STALL 1792554541.559 customers ms=466", "TOUCH 1792554541.876 customers",
+              "SCREEN 1792554542.129 customer", "STALL 1792554542.276 customer ms=415",
+              "MOVE 1792554542.323 customer n=9 max=121 HostingView@-121,0,402x874:-121,0",
+              "STALL 1792554542.898 customer ms=438", "QUIET 1792554542.899 customer",
+              "MOVE 1792554543.010 customer n=5 max=17 HostedViewWrapper@153,73,95x20:-17,0 _UINavigationBarTitleControl@153,73,95x20:-17,0",
+              "QUIET 1792554543.461 customer"]
+HOLE_XCUI = ["XCUI begin 1792554540.349 myynti-customer-open", "XCUI end 1792554542.276 myynti-customer-open"]
+NOT_FILMED = "n/a (not filmed)"
+
+
+def hole_walk(times=None, probe_lines=HOLE_PROBE):
+    """The step walked with a recording that has `times` for frames: the start screen until the
+    finger at 1.981 s, the end screen after. Returns the analyzer's row and the report text."""
+    times = HOLE_TIMES if times is None else times
+    frames = np.stack([A if t < 1.981 else B for t in times])
+    with tempfile.TemporaryDirectory() as root:
+        r = walk(root, "myynti", [HOLE_STEP], {"m-myynti-customer-open.mov": (times, frames)},
+                 probe_lines=probe_lines, xcui=HOLE_XCUI)["myynti-customer-open"]
+        with open(os.path.join(root, "motion-report.md"), encoding="utf-8") as f:
+            return r, f.read().splitlines()
+
+
+class RecordingHole(unittest.TestCase):
+    def test_step_the_recording_did_not_film_is_not_judged(self):
+        # F007: the push, the stall and the title change fell in the hole, and the step read PASS.
+        r, _ = hole_walk()
+        self.assertAlmostEqual(r["settle_ms"], 2019, delta=1)  # the numbers gate 39525842170 printed
+        self.assertEqual(r["app_stall_ms"], 438)
+        self.assertEqual(r["film_wait_ms"], 1572)
+        self.assertEqual(r["checks"], {"intermediate": NOT_FILMED, "flash": NOT_FILMED, "shift_video": NOT_FILMED,
+                                       "shift_probe": "FAIL", "stall": NOT_FILMED})
+        # The probe saw the whole step whatever the recorder wrote: without the title move its PASS stands.
+        r, _ = hole_walk(probe_lines=HOLE_PROBE[:-2])
+        self.assertEqual(r["checks"], {"intermediate": NOT_FILMED, "flash": NOT_FILMED, "shift_video": NOT_FILMED,
+                                       "shift_probe": "PASS", "stall": NOT_FILMED})
+
+    def test_the_same_step_with_frames_after_the_push_is_judged(self):
+        # The recorder wrote a frame 0.12 s after the push: the step is judged, and its 438 ms stall is a PASS.
+        r, _ = hole_walk([*HOLE_TIMES[:3], 2.55, 3.2, *HOLE_TIMES[3:]])
+        self.assertEqual(r["film_wait_ms"], 122)
+        self.assertEqual(r["checks"], {"intermediate": "PASS", "flash": "PASS", "shift_video": "PASS",
+                                       "shift_probe": "FAIL", "stall": "PASS"})
+
+    def test_the_gap_is_where_a_wait_stops_being_filmed(self):
+        # filter-late in gate 39697234353 waited 0.97 s for its frame and was filmed.
+        self.assertEqual(ma.REC_GAP_S, 1.0)
+        for frame_at, verdict in ((2.428 + 0.95, "PASS"), (2.428 + 1.05, NOT_FILMED)):
+            r, _ = hole_walk([*HOLE_TIMES[:3], frame_at, *HOLE_TIMES[3:]])
+            self.assertEqual(r["checks"]["intermediate"], verdict, frame_at)
+
+    def test_film_wait(self):
+        times = [0.0, 0.5, 4.0]
+        self.assertEqual(ma.film_wait(times, [], 5.0), 0)
+        self.assertAlmostEqual(ma.film_wait(times, [0.4, 2.0], 5.0), 2.0)  # the longer wait counts
+        self.assertAlmostEqual(ma.film_wait(times, [4.2], 5.0), 0.8)  # no frame after: until the recording ends
+        self.assertEqual(ma.film_wait(times, [5.5], 5.0), 0)  # a move after the recording is MISS-WINDOW's to say
+
+    def test_silence_without_a_move_of_the_step_is_a_still_screen(self):
+        # The simulator writes a frame only when the screen changes: the same hole without the push
+        # and the title move in the probe is a page that held still.
+        r, _ = hole_walk(probe_lines=[x for x in HOLE_PROBE if not x.startswith(("MOVE", "QUIET"))])
+        self.assertEqual(r["film_wait_ms"], 0)
+        self.assertNotIn(NOT_FILMED, r["checks"].values())
+
+    def test_report_counts_the_steps_and_shows_the_wait(self):
+        _, report = hole_walk()
+        self.assertIn("1 steps went 1 s or more without a frame after a move of their own.",
+                      next(x for x in report if x.startswith("Walk timing")))
+        self.assertIn("n/a (not filmed) 1", next(x for x in report if "Not judged" in x))
+        header = next(x for x in report if x.startswith("| suite |"))
+        row = next(x for x in report if x.startswith("| myynti | myynti-customer-open |"))
+        cells = [c.strip() for c in header.split("|")]
+        self.assertEqual([c.strip() for c in row.split("|")][cells.index("film wait ms")], "1572")
+
+    def test_gate_does_not_call_the_hole_a_new_fail_nor_a_fix(self):
+        # The step's gate rows: the baseline as the analyzer reads it above, the PR runs as gate
+        # 39525842170 read them (they filmed the spinner page): there 3 NEW FAIL, now none.
+        def report(checks):
+            return [{"suite": "myynti", "id": "myynti-customer-open", "crashed": False, "checks": checks}]
+        pr = report({"intermediate": "FAIL", "flash": "PASS", "shift_video": "FAIL", "shift_probe": "FAIL", "stall": "FAIL"})
+        passed = report(dict.fromkeys(ma.KS, "PASS"))
+        out, code = gate([report(hole_walk()[0]["checks"]), pr, pr])
+        self.assertEqual((count(out, "NEW FAIL"), count(out, "FIXED"), count(out, "NEW MISS"), code), (0, 0, 0, 0), out)
+        self.assertIn("not judged: NO-MOTION 0, UNREACHED 0, SKIPPED 0, MISS-WINDOW 0, NO-TOUCH 0, n/a (no settle) 0, n/a (not filmed) 1", out)
+        out, _ = gate([passed, pr, pr])  # a baseline that filmed and passed: the four FAILs are NEW FAILs
+        self.assertEqual(count(out, "NEW FAIL"), 4, out)
+        out, _ = gate([report(dict.fromkeys(ma.KS, "FAIL")), passed, passed])
+        self.assertEqual(count(out, "FIXED"), 5, out)
+        out, _ = gate([report(dict.fromkeys(ma.KS, NOT_FILMED)), passed, passed])
+        self.assertEqual(count(out, "FIXED"), 0, out)
+        lost = report({**dict.fromkeys(ma.KS, NOT_FILMED), "shift_probe": "PASS"})
+        out, _ = gate([report(dict.fromkeys(ma.KS, "FAIL")), lost, lost])
+        self.assertEqual(count(out, "FIXED"), 1, out)  # a hole fixes nothing but what the probe saw
+        # A branch whose recordings lose what the baseline filmed has lost what the gate could see.
+        out, code = gate([passed, lost, lost])
+        self.assertEqual((count(out, "NEW MISS"), code), (4, 1), out)
+
+
 # xcui.log of a tap: XCUITest looks the element up until the touch, then waits for the app to idle.
 TAP = ["XCUI begin 100.400 push", "XCUI end 103.300 push"]
 
@@ -581,6 +724,12 @@ class StallAttribution(unittest.TestCase):
         # A walk without xcui.log cannot tell XCUITest's time from the app's.
         self.assertEqual(self.stall(["TOUCH 100.500 tab.koti", "STALL 101.700 tab.koti ms=900"], xcui=())["checks"]["stall"], "n/a")
 
+    def test_a_stall_just_over_the_line_still_fails(self):
+        # asetukset-help-open (gate 39636460950): 526 and 516 ms are FAIL in their runs; the gate's
+        # NEW FAIL listing has a margin (GateStall), the verdict of a run has not.
+        r = self.stall(["TOUCH 100.500 tab.koti", "STALL 101.100 tab.koti ms=526"])
+        self.assertEqual((r["app_stall_ms"], r["checks"]["stall"]), (526, "FAIL"))
+
     def test_report_has_the_app_stall_column(self):
         with tempfile.TemporaryDirectory() as root:
             walk(root, "s", [dict(step("push"), doneAt=103.3, recEnd=106.0)], {"m-push.mov": PUSH},
@@ -609,6 +758,52 @@ class GateStall(unittest.TestCase):
         self.assertEqual(code, 0)
         line = next(x for x in out.splitlines() if x.startswith("NEW FAIL"))
         self.assertIn("does not fail", line)
+
+    # app_stall_ms (baseline, pr-run1, pr-run2) of the four stall NEW FAILs that gates 39636460950
+    # and 39697234353 listed, from their motion-report.json. All four were noise: on the one
+    # baseline tree the same steps read 1206 and 418 ms (chat-send), 798, 631 and 451 (prev-year).
+    NOISE = {"asetukset-help-open": (493, 526, 516), "raportit-prev-year": (451, 533, 533),
+             "raportit-category-picker": (482, 601, 650), "chat-send": (418, 843, 1182)}
+
+    @staticmethod
+    def timed(sid, ms, **over):
+        r = row(sid, **over)
+        r["checks"]["stall"] = "FAIL" if ms >= ma.STALL_MS else "PASS"
+        r["app_stall_ms"] = ms
+        return r
+
+    def stalls(self, readings):
+        """The gate's output for steps whose stall read (baseline, pr-run1, pr-run2)."""
+        return gate([[self.timed(sid, r[i]) for sid, r in readings.items()] for i in range(3)])
+
+    def test_noise_between_runs_of_one_tree_is_not_a_new_fail(self):
+        out, code = self.stalls(self.NOISE)
+        self.assertEqual((count(out, "NEW FAIL"), count(out, "STALL WITHIN MARGIN"), code), (0, 4, 0), out)
+        self.assertIn("| raportit-category-picker | stall | PASS | FAIL | FAIL | within margin (482 -> 601, 650 ms) |", out)
+
+    def test_a_big_slowdown_is_still_listed(self):
+        # raportit-tab (M040): the main thread held 0.9 s after the tab's touch.
+        out, _ = self.stalls({"raportit-tab": (120, 900, 950)})
+        self.assertEqual((count(out, "NEW FAIL"), count(out, "STALL WITHIN MARGIN")), (1, 0), out)
+        self.assertIn("| raportit-tab | stall | PASS | FAIL | FAIL | NEW FAIL |", out)
+
+    def test_the_margin_is_the_gap_between_the_baseline_and_the_shorter_pr_stall(self):
+        m = ma.STALL_MS  # the margin is as long as the line: a run is FAIL from there, the gate waits a line more
+        for readings, listed in (((400, 400 + m, 950), 1), ((400, 400 + m - 1, 950), 0),
+                                 ((300, 1200, 700), 0), ((300, 800, 1200), 1)):
+            out, _ = self.stalls({"a": readings})
+            self.assertEqual(count(out, "NEW FAIL"), listed, readings)
+
+    def test_a_crash_and_a_report_without_readings_are_listed_as_before(self):
+        base = self.timed("a", 100)
+        crashed = self.timed("a", 150, crashed=True)
+        crashed["checks"]["stall"] = "FAIL"
+        out, _ = gate([[base], [crashed], [crashed]])
+        self.assertIn("| a | stall | PASS | CRASH | CRASH | NEW FAIL |", out)
+        old = self.timed("a", 900)
+        del old["app_stall_ms"]
+        out, _ = gate([[base], [old], [old]])
+        self.assertEqual((count(out, "NEW FAIL"), count(out, "STALL WITHIN MARGIN")), (1, 0), out)
 
     def test_cut_or_untouched_pr_walks_are_new_misses(self):
         for miss in ("MISS-WINDOW", "NO-TOUCH"):

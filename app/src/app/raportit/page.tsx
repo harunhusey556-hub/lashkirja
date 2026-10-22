@@ -34,7 +34,7 @@ import {
 } from "@/components/ds";
 import { formatEur, formatMonthShort } from "@/lib/format";
 import {
-  expenseDrillTarget,
+  expenseDrillTargets,
   incomeDrillTargets,
   invoiceDrillHref,
   receiptDrillHref,
@@ -82,6 +82,7 @@ interface Period {
   receiptCount: number;
   invoiceCount?: number;
   creditNoteCount?: number;
+  purchaseInvoiceCount?: number;
   missingVatCount: number;
   uncategorisedCount: number;
 }
@@ -238,8 +239,7 @@ function DownloadRow({
 function SelectedMonthRow({ item }: { item: ChartMonth }) {
   const period = item.period;
   if (!period) return null;
-  const expense = expenseDrillTarget(period);
-  const targets = [...incomeDrillTargets(period), ...(expense ? [expense] : [])];
+  const targets = [...incomeDrillTargets(period), ...expenseDrillTargets(period)];
   return (
     <ListRow
       href={targets.length === 1 ? targets[0].href : undefined}
@@ -332,7 +332,7 @@ export default function ReportsPage() {
   useScrollRestoration("raportit", status === "ready");
 
   const totalIncomeTargets = report ? incomeDrillTargets({ ...report.total, month: String(year) }) : [];
-  const totalExpenseTarget = report ? expenseDrillTarget({ ...report.total, month: String(year) }) : null;
+  const totalExpenseTargets = report ? expenseDrillTargets({ ...report.total, month: String(year) }) : [];
 
   // The bar chart: six months (or a whole past year), one of them selected. The lists below stay the
   // exact figures and the text alternative.
@@ -417,13 +417,11 @@ export default function ReportsPage() {
                     : []),
                   {
                     label: "Menot",
-                    value: (
-                      <DrillFigure
-                        value={formatEur(report.total.expenseNet)}
-                        targets={totalExpenseTarget ? [totalExpenseTarget] : []}
-                      />
-                    ),
+                    value: <DrillFigure value={formatEur(report.total.expenseNet)} targets={totalExpenseTargets} />,
                   },
+                  ...(totalExpenseTargets.length > 1
+                    ? [{ label: "Avaa menot", value: <DrillLinks targets={totalExpenseTargets} /> }]
+                    : []),
                   ...(report.total.missingVatCount > 0
                     ? [
                         {
@@ -444,7 +442,8 @@ export default function ReportsPage() {
             {/* What the figures are built from, and on which basis (SALES-01, SALES-37). */}
             <p className="-mt-3 px-1 text-caption leading-relaxed text-ink-2">
               {report.total.receiptCount} {report.total.receiptCount === 1 ? "kuitti" : "kuittia"} ja{" "}
-              {(report.total.invoiceCount ?? 0) + (report.total.creditNoteCount ?? 0)} myyntilaskua. Laskut
+              {(report.total.invoiceCount ?? 0) + (report.total.creditNoteCount ?? 0)} myyntilaskua
+              {(report.total.purchaseInvoiceCount ?? 0) > 0 ? ` sekä ${report.total.purchaseInvoiceCount} ostolaskua` : ""}. Laskut
               lasketaan laskun päivän mukaan, hyvityslasku vähentää myyntiä omalla kuukaudellaan.
             </p>
 
@@ -453,10 +452,9 @@ export default function ReportsPage() {
             ) : (
               <Section title="Kuukaudet, ilman ALV:ta">
                 {report.months.map((month) => {
-                  // Income lives in invoices and cash-sale receipts, expenses in receipts: a month with
-                  // more than one source gets labelled links instead of one wrong list (F71).
-                  const expense = expenseDrillTarget(month);
-                  const targets = [...incomeDrillTargets(month), ...(expense ? [expense] : [])];
+                  // Income lives in invoices and cash-sale receipts, expenses in receipts and purchase
+                  // invoices: a month with more than one source gets labelled links instead of one wrong list (F71).
+                  const targets = [...incomeDrillTargets(month), ...expenseDrillTargets(month)];
                   const label = formatMonthShort(month.month!);
                   return (
                   <ListRow

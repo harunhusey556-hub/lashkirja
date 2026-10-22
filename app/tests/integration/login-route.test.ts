@@ -1,6 +1,12 @@
 import bcrypt from "bcryptjs";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as login } from "@/app/api/auth/login/route";
+import {
+  accountSlowDownMs,
+  SLOWDOWN_FREE_FAILURES,
+  SLOWDOWN_MAX_MS,
+  SLOWDOWN_STEP_MS,
+} from "@/lib/auth-login";
 import { prisma } from "@/lib/db";
 import { resetRateLimitsForTests } from "@/lib/rate-limit";
 import { createUser, resetDatabase, type TestUser } from "./helpers/factories";
@@ -124,5 +130,79 @@ describe("POST /api/auth/login (no-JS form fallback)", () => {
     const response = await login(buildFormRequest("/api/auth/login", form));
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/login?error=auth");
+  });
+});
+
+describe("POST /api/auth/login behind the proxy: a stranger cannot lock the owner out", () => {
+  const STRANGER = "203.0.113.9";
+  const OWNER_AT_HOME = "198.51.100.7";
+
+  function loginFrom(client: string, email: string, password: string) {
+    return login(
+      buildRequest("POST", "/api/auth/login", { email, password }, { headers: { "x-forwarded-for": client } })
+    );
+  }
+
+  beforeEach(() => {
+    process.env.TRUST_PROXY = "true";
+  });
+  afterEach(() => {
+    delete process.env.TRUST_PROXY;
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the owner's guesses apart from a stranger's, however many the stranger spends", async () => {
+    let last: Response | undefined;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      last = await loginFrom(STRANGER, user.email, "guess");
+    }
+    expect(last?.status).toBe(429);
+
+    const owner = await loginFrom(OWNER_AT_HOME, user.email, PASSWORD);
+    expect(owner.status).toBe(200);
+  });
+
+  it("still stops the stranger's own address after five wrong guesses at one account", async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect((await loginFrom(STRANGER, user.email, "guess")).status).toBe(401);
+    }
+    // Even the right password is refused from the address that has used its guesses.
+    expect((await loginFrom(STRANGER, user.email, PASSWORD)).status).toBe(429);
+  });
+
+  it("stops one address that tries many accounts, and leaves the owner's address alone", async () => {
+    for (let index = 0; index < 20; index += 1) {
+      expect((await loginFrom(STRANGER, `nobody-${index}@example.com`, "guess")).status).toBe(401);
+    }
+    const limited = await loginFrom(STRANGER, "nobody-20@example.com", "guess");
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
+
+    expect((await loginFrom(OWNER_AT_HOME, user.email, PASSWORD)).status).toBe(200);
+  });
+
+  it("holds back wrong answers once many addresses have guessed at the account, and never the right password", async () => {
+    const timeouts = vi.spyOn(globalThis, "setTimeout");
+    const waits = () => timeouts.mock.calls.map((call) => call[1]);
+
+    for (let guess = 1; guess <= SLOWDOWN_FREE_FAILURES + 2; guess += 1) {
+      expect((await loginFrom(`192.0.2.${guess}`, user.email, "guess")).status).toBe(401);
+    }
+    expect(waits()).toContain(SLOWDOWN_STEP_MS);
+    expect(waits()).toContain(2 * SLOWDOWN_STEP_MS);
+
+    const owner = await loginFrom(OWNER_AT_HOME, user.email, PASSWORD);
+    expect(owner.status).toBe(200);
+    expect(waits()).not.toContain(3 * SLOWDOWN_STEP_MS);
+  });
+});
+
+describe("accountSlowDownMs", () => {
+  it("is free for the first guesses, then grows a step at a time up to a cap", () => {
+    expect(accountSlowDownMs(0)).toBe(0);
+    expect(accountSlowDownMs(SLOWDOWN_FREE_FAILURES)).toBe(0);
+    expect(accountSlowDownMs(SLOWDOWN_FREE_FAILURES + 1)).toBe(SLOWDOWN_STEP_MS);
+    expect(accountSlowDownMs(SLOWDOWN_FREE_FAILURES + 2)).toBe(2 * SLOWDOWN_STEP_MS);
+    expect(accountSlowDownMs(10_000)).toBe(SLOWDOWN_MAX_MS);
   });
 });

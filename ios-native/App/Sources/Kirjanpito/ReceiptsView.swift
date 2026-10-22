@@ -151,8 +151,6 @@ struct ReceiptsView: View {
                     return rejected.count
                 }
             )
-            if let failure { Text(failure).foregroundStyle(Theme.danger).transition(.opacity) }
-            if let notice { Text(notice).foregroundStyle(Theme.ink2).transition(.opacity) }
             Section {
                 tabChips
                 if query.isFiltered && (!query.month.isEmpty || !query.category.isEmpty || query.source != .all || query.amountLabel != nil || query.missingVat) {
@@ -196,6 +194,8 @@ struct ReceiptsView: View {
         .environment(\.listMotion, visibility)
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        .failureToast($failure)
+        .noticeToast($notice)
         .searchable(text: $searchText, prompt: "Hae kuitteja")
         .navigationTitle("Kuitit")
         .toolbar { toolbar }
