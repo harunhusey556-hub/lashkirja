@@ -3,7 +3,7 @@
 Branch `audit/phase2-walk`. It is never merged into native: the round's end is merged into it, and it runs once as the confirming walk (FIX-ROUND.md section 7). The walk records what it reaches and does not stop on a failure. Since H8 each check reads what is drawn and settled:
 - a sheet's bar draws its title, and the textClipped audit finds nothing cut in it;
 - a chip is selected, and the list under it is as long as the chip's count;
-- a file sheet (PDF, zip, CSV, a receipt's file) shows its file: a share button, no "Avataan…";
+- a file sheet (PDF, zip, CSV, a receipt's file) shows its file: a button in the bar, no "Avataan…", no "Tiedostoa ei voitu avata", a zip's size read (its Valmis and summary stand from the first frame since M047);
 - a scroll shot is taken only when the page moved; the end of a page is noted as `END <name> after N`;
 - a menu is closed by a tap inside the window, beside it, and a menu left open is noted as MISS.
 

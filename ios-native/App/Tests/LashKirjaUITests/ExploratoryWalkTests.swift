@@ -459,23 +459,32 @@ final class ExploratoryWalkTests: WalkTestCase {
         xwShot("x04-lomake")
         let vendor = xwField("Myyjä")
         guard xwCheck("x04 the reading opened the form with the file's picture", preview.exists && vendor.waitForExistence(timeout: 5), tree: "x04-lomake") else { return }
+        // Pinned under the form (N4): it gives way to the keyboard while a field is typed into, and
+        // the rows below the form's first screen sit under it, still hittable.
+        let save = app.buttons["Tallenna kuitti"].firstMatch
         if xwBlank(vendor, "Myyjä") { type(vendor, "Testikauppa Oy") }
         // "Summa" beside the field, "0,00" in it while empty; the field is named "Summa euroina" (N4).
         let total = app.textFields.matching(NSPredicate(format: "label BEGINSWITH %@ OR placeholderValue == %@", "Summa", "0,00")).firstMatch
         // Whole euros: the decimal key follows the simulator's region, not the app's Finnish.
-        if total.exists && xwBlank(total, "0,00") { type(total, "12") }
+        if total.exists && xwBlank(total, "0,00") {
+            xwCheck("x04 the amount can be brought above Tallenna kuitti", xwClearOfSave(total, save), tree: "x04-lomake-summa")
+            type(total, "12")
+        }
         if app.buttons["Valmis"].exists { app.buttons["Valmis"].tap() }
+        // Read before the bar is back and in place, a row would seem clear of it.
+        guard save.waitForExistence(timeout: 5) else { xwCheck("x04 Tallenna kuitti on the form", false, tree: "x04-lomake-taytetty"); return }
+        waitStill(save)
         let category = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kategoria, ")).firstMatch
         if category.waitForExistence(timeout: 5), category.label.hasSuffix("Valitse") {
-            if !category.isHittable { app.swipeUp() }
+            // A tap on Kategoria where the bar stands saved the form without one (F010: "Valitse
+            // kategoria.", the screen still up, and the queue's steps after it walked the form).
+            xwCheck("x04 Kategoria can be brought above Tallenna kuitti", xwClearOfSave(category, save), tree: "x04-lomake-kategoria")
             category.tap()
             let choice = app.buttons["Tarvikkeet & ostot"].firstMatch
             if choice.waitForExistence(timeout: 5) { choice.tap() }
         }
         xwShot("x04-lomake-taytetty")
-        // Pinned under the form (N4): tapped where it is, as `tap` scrolls for anything near the bottom edge.
-        let save = app.buttons["Tallenna kuitti"].firstMatch
-        guard save.waitForExistence(timeout: 5) else { xwCheck("x04 Tallenna kuitti on the form", false, tree: "x04-lomake-taytetty"); return }
+        // Tapped where it is, as `tap` scrolls for anything near the bottom edge.
         save.tap(); taps += 1
 
         let toast = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Tallennettu · ")).firstMatch
@@ -759,7 +768,8 @@ final class ExploratoryWalkTests: WalkTestCase {
         // The six CSV exports, behind Toiminnot › Vienti (CSV) (B8: Lataa zip is the page's one action).
         xwMenu("Toiminnot", via: "Vienti (CSV)", item: "Tuloslaskelma", shot: "x07-raportit-vienti-menu")
         if xwMenuPick("Toiminnot", "Tuloslaskelma", via: "Vienti (CSV)") {
-            let csv = xwBarPrefix("profit-loss-")
+            // Titled in words and by year (X084, P5): not by the API's type key, 'profit-loss-2026.csv'.
+            let csv = xwBar("Tuloslaskelma \(StabilityTests.helsinkiMonth().year)")
             if xwSheetUp(csv, "x07 Toiminnot › Vienti (CSV) › Tuloslaskelma → CSV", shot: "x07-csv-tuloslaskelma") {
                 xwFileShown(csv, "x07 the CSV", shot: "x07-csv-tuloslaskelma")
                 xwCloseSheet(csv, "the CSV", with: [], shot: "x07-csv-tuloslaskelma")
@@ -922,7 +932,11 @@ final class ExploratoryWalkTests: WalkTestCase {
         if offered {
             one.tap(); taps += 1
             xwConfirmCancel("x10 Kirjaa ulos (one device)", titlePrefix: "Kirjataanko laite ulos?", shot: "x10-laite-kirjaa-ulos")
-            if row.exists { row.swipeRight() }
+            // The tap on the action closes the row, so Peruuta leaves it closed: a swipe right on a
+            // closed row is the edge swipe that pops Laitteet (F010: no Selain row was left to sign out).
+            let stillOpen = one.exists
+            note("INFO x10 after Peruuta the row is \(stillOpen ? "still open, closed by a swipe" : "closed")")
+            if stillOpen && row.exists { row.swipeRight() }
             // Then for real: the browser session is the CI's own throwaway sign-in. A step that cannot
             // run says so, as the map in AUDIT-WALK.md counts on these shots.
             if row.exists {
@@ -1456,6 +1470,22 @@ final class ExploratoryWalkTests: WalkTestCase {
         return element.exists && element.isHittable
     }
 
+    /// Scrolls a form row above the pinned save, as the owner would before tapping it: a row under
+    /// the bar still counts as hittable, and a tap on it lands on the save (OwnerScreensTests.
+    /// clearOfSave; the walk's category tap pressed Tallenna kuitti, F010). The frame is judged
+    /// before `isHittable`, which fails the test for a row wholly below the screen.
+    private func xwClearOfSave(_ element: XCUIElement, _ save: XCUIElement) -> Bool {
+        for attempt in 0...4 {
+            guard element.exists else { return false }
+            let bar = save.exists ? save.frame.minY : xwWindow.frame.maxY
+            if element.frame.minY > 100, element.frame.maxY <= bar - 4, element.isHittable { return true }
+            guard attempt < 4 else { break }
+            xwWindow.swipeUp(velocity: .slow); scrolls += 1
+            waitStill(element)
+        }
+        return false
+    }
+
     private func xwToTop(_ swipes: Int = 4) {
         for _ in 0..<swipes { xwWindow.swipeDown(velocity: .fast) }
     }
@@ -1647,16 +1677,21 @@ final class ExploratoryWalkTests: WalkTestCase {
         return found.texts
     }
 
-    /// A file sheet (DocumentPreviewSheet) shows its file: the bar's share button, and no "Avataan…".
-    /// The bar has the file's name from the first frame, so the bar alone passed on a blank sheet
-    /// still opening (X030, X087).
+    /// A file sheet (DocumentPreviewSheet) shows its file: no "Avataan…", no "Tiedostoa ei voitu
+    /// avata", a zip's size read, and a button in the bar. The bar has the file's name from the
+    /// first frame, so the bar alone passed on a blank sheet still opening (X030, X087). Since M047
+    /// its Valmis is there from the first frame too, and a zip's summary stands from the first
+    /// frame with its size "Ladataan…": neither a button in the bar nor the lack of "Avataan…"
+    /// says the file came.
     @discardableResult
     private func xwFileShown(_ bar: XCUIElement, _ what: String, shot name: String) -> Bool {
         let opening = xwAny("label == %@", "Avataan…")
-        let shown = xwUntil(30) { bar.buttons.count > 0 && !opening.exists }
+        let failed = xwAny("label == %@", "Tiedostoa ei voitu avata")
+        let sizing = app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label == %@", "document-zip-size", "Ladataan…")).firstMatch
+        let shown = xwUntil(30) { bar.buttons.count > 0 && !opening.exists && !failed.exists && !sizing.exists }
         if shown { waitStill(bar.buttons.firstMatch) }
         xwShot(name + "-sisalto")
-        return xwCheck("\(what) shows the file (a share button, no Avataan…)", shown, tree: name + "-sisalto")
+        return xwCheck("\(what) shows the file (a button in the bar, no Avataan…, no failure, a zip's size read)", shown, tree: name + "-sisalto")
     }
 
     /// Closes the sheet whose bar is `bar` with the first of `buttons` it shows (else a swipe down by
@@ -1737,15 +1772,17 @@ final class ExploratoryWalkTests: WalkTestCase {
     }
 
     /// Taps a menu button and returns the entry `item` its menu added. Not the first button of that
-    /// name: a screen can hold one too (Kuitti's "Muokkaa" row), so the entry is the match the tap added.
+    /// name: a screen can hold one too (Kuitti's "Muokkaa" row; an open ostolasku's primary says
+    /// "Kohdista pankkiin" as its menu does, X165), so the entry is the match the tap added, told
+    /// by its frame and not by its place in the tree: the tap on the primary under the open menu
+    /// only closed it and the sheet never came (F010, test15).
     private func xwOpenMenu(_ label: String, item: String) -> XCUIElement? {
         guard let button = xwHittable(label, timeout: 5) else { return nil }
         let entries = app.buttons.matching(NSPredicate(format: "label == %@", item))
-        let before = entries.count
+        let before = entries.allElementsBoundByIndex.map(\.frame)
         button.tap(); taps += 1
-        guard xwUntil(6, { entries.count > before }) else { return nil }
-        let now = entries.count
-        return now > before ? entries.element(boundBy: now - 1) : nil
+        guard xwUntil(6, { entries.count > before.count }) else { return nil }
+        return entries.allElementsBoundByIndex.last(where: { !before.contains($0.frame) })
     }
 
     /// Opens `label`'s menu, then its submenu entry `prefix` (Toiminnot › Suodata, › Vienti (CSV),
@@ -1813,13 +1850,16 @@ final class ExploratoryWalkTests: WalkTestCase {
 
     /// The list's "Näytä enemmän (N)" / "Näytä vähemmän" row, scrolled into view (StabilityTests.toggleRow).
     /// In a sheet it only scrolls down: a downward swipe at the top of a sheet's list closes the sheet.
+    /// Only the row in front counts: the screen under a sheet keeps its own in the tree, covered
+    /// (Koti's 'Näytä enemmän (6)' under Keskustelut: the tap on it failed test09, F010).
     private func xwToggleRow(up: Bool = false, inSheet: Bool = false, maxSwipes: Int = 8) -> XCUIElement? {
         let query = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ OR label == %@", "Näytä enemmän", "Näytä vähemmän"))
         _ = query.firstMatch.waitForExistence(timeout: 3)
         for down in inSheet ? [true] : [!up, up] {
             for _ in 0...maxSwipes {
-                let row = query.firstMatch
-                if row.exists && row.frame.minY > 30 && row.frame.maxY < xwWindow.frame.maxY - 60 { return row }
+                if let row = query.allElementsBoundByIndex.first(where: {
+                    $0.exists && $0.frame.minY > 30 && $0.frame.maxY < xwWindow.frame.maxY - 60 && $0.isHittable
+                }) { return row }
                 if down { xwWindow.swipeUp(velocity: .slow) } else { xwWindow.swipeDown(velocity: .slow) }
                 scrolls += 1
             }
@@ -1879,7 +1919,10 @@ final class ExploratoryWalkTests: WalkTestCase {
     /// Taps a Kuitit chip by its id. The chip row is a section of the list, built only near its top:
     /// three swipes down the list took it out of the tree, and Laskut was never found (X050). So the
     /// list goes back to its top when the row is not on screen (only then: a swipe down at the top
-    /// pulls a refresh), and the row is waited for. The row scrolls sideways.
+    /// pulls a refresh), and the row is waited for. The row scrolls sideways, edge to edge (B11), so
+    /// a chip past the screen's edge is brought in by its frame: `isHittable` of a chip wholly past
+    /// the edge fails the test instead of answering false, and a swipe on an off-screen chip does
+    /// too (F010: Ei kohdistettu in test03 and test05, Laskut and Kaikki in test04).
     private func xwChip(_ id: String) -> Bool {
         let row = app.scrollViews.matching(identifier: "receipt-chips").firstMatch
         // A moment for a list still sliding in, before it counts as scrolled away.
@@ -1887,13 +1930,10 @@ final class ExploratoryWalkTests: WalkTestCase {
         guard row.waitForExistence(timeout: 15) else { return false }
         let chip = app.buttons["receipt-tab-\(id)"].firstMatch
         guard chip.waitForExistence(timeout: 15) else { return false }
-        if !chip.isHittable {
-            let anchor = app.buttons[["linked", "unlinked", "laskut"].contains(id) ? "receipt-tab-all" : "receipt-tab-laskut"].firstMatch
-            if anchor.exists {
-                if ["linked", "unlinked", "laskut"].contains(id) { anchor.swipeLeft() } else { anchor.swipeRight() }
-            }
+        guard revealChip(chip, inRow: "receipt-chips") else {
+            note("MISS chip \(id) could not be brought onto the screen (frame \(chip.frame), window \(xwWindow.frame))")
+            return false
         }
-        guard chip.isHittable else { return false }
         chip.tap(); taps += 1
         return true
     }
@@ -1906,7 +1946,11 @@ final class ExploratoryWalkTests: WalkTestCase {
         let headers = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", pattern))
         var said = "no chip on screen"
         let ok = xwUntil(10) {
-            guard let chip = chips.allElementsBoundByIndex.first(where: { $0.isHittable }) else { return false }
+            // Its centre is looked at first: `isHittable` of a chip wholly past the screen's edge fails the test.
+            guard let chip = chips.allElementsBoundByIndex.first(where: { candidate in
+                let frame = candidate.frame
+                return xwWindow.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) && candidate.isHittable
+            }) else { return false }
             let count = xwLastNumber(chip.label)
             let header = headers.allElementsBoundByIndex.first { $0.isHittable }
             let listed = header.map { xwLastNumber($0.label) } ?? 0
