@@ -25,6 +25,11 @@ struct LedgerView: View {
                     ForEach(Part.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
+            } header: {
+                // The books come from the documents only (no owner draws, no opening balance), so the
+                // screen says so from its first frame, before the figures load.
+                Text("Alustava – laskettu tositteista. Kirjanpitäjä tekee tilinpäätöksen.")
+                    .font(.footnote).foregroundStyle(Theme.ink2).textCase(nil)
             }
             if let books = state.value {
                 if let banner = state.banner {

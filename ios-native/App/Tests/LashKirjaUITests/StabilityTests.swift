@@ -105,6 +105,8 @@ final class StabilityTests: WalkTestCase {
             let selected = shown && XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: segment)],
                                                      timeout: 5) == .completed
             check("kirjanpito: \(part) selected after its tap", selected)
+            // S11: every view of the books keeps the 'Alustava' caption; it is not part of one segment.
+            check("kirjanpito: \(part) keeps the preliminary caption", ledgerCaption.exists)
             assertResponsive("kirjanpito: \(part)")
         }
         XCTAssertFalse(app.staticTexts["Tase ei täsmää. Ilmoita tästä tukeen."].exists, "balance sheet does not balance")
@@ -255,6 +257,11 @@ final class StabilityTests: WalkTestCase {
         XCTAssertEqual(doubles.count, 0, "a row on the Kirjanpito hub is called Kirjanpito: \(doubles.allElementsBoundByIndex.map { $0.label })")
         row.tap(); taps += 1
         XCTAssertTrue(app.navigationBars["Tulos ja tase"].waitForExistence(timeout: 10), "the row did not open 'Tulos ja tase'")
+        // S11: the caption sits under the title from the first frame, not once the figures have loaded.
+        let caption = ledgerCaption
+        XCTAssertTrue(caption.waitForExistence(timeout: 5), "'Tulos ja tase' does not say it is preliminary")
+        XCTAssertFalse(caption.frame.isEmpty, "the 'Alustava' caption has no frame")
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(caption.frame), "the 'Alustava' caption is off screen: \(caption.frame)")
         shot("stability-23-ledger")
         backToBooks("Tulos ja tase")
     }
@@ -980,6 +987,13 @@ final class StabilityTests: WalkTestCase {
     /// Any bank row's button, whatever its state. A copy of P1Tests.bankRow: the session gate
     /// builds this file alone onto an older ref, so it cannot borrow from P1Tests.
     static let bankRow = ".*, [0-9]{1,2}\\.[0-9]{1,2}\\.[0-9]{4} · .*, .*"
+
+    /// S11: 'Tulos ja tase' is built from the documents only, so its caption says it is preliminary.
+    static let ledgerCaptionText = "Alustava – laskettu tositteista. Kirjanpitäjä tekee tilinpäätöksen."
+    /// Matched by label over every element type: a List section header is not always a static text.
+    private var ledgerCaption: XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", Self.ledgerCaptionText)).firstMatch
+    }
 
     /// Pankki's bar: its title shown, and Toiminnot the one item beside Back, at the trailing end.
     private func assertBankBar(_ bar: XCUIElement, _ moment: String, file: StaticString = #filePath, line: UInt = #line) {

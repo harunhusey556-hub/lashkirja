@@ -202,6 +202,8 @@ export async function buildPeriodPackage(
       data: Buffer.from(
         [
           `Kirjanpitopaketti ${month}`,
+          // Same message as the Tulos ja tase screens; "kuiteista" because the glossary retires "tosite" outside the ledger.
+          "Alustava – laskettu kuiteista ja laskuista. Kirjanpitäjä tekee tilinpäätöksen.",
           "",
           "Tuloslaskelma ja ALV perustuvat hyväksyttyihin kuitteihin ja myyntilaskuihin laskun päivän mukaan (laskutusperuste). Luonnokset eivät ole mukana.",
           "Ostolasku on kulu tuloslaskelmassa ja sen ALV on mukana vähennettävässä verossa laskun päivän mukaan. Jos sama osto on jo kuittina, ostolasku jätetään pois (csv/ostolaskut.csv kertoo jokaisesta laskusta, onko se mukana).",

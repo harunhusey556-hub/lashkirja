@@ -317,6 +317,11 @@ describe("period export package", () => {
     const files = readStoredZip(Buffer.from(await response.arrayBuffer()));
     expect(files.get("lue-minut.txt")?.toString("utf8")).toContain("Tuloslaskelma");
     expect(files.get("lue-minut.txt")?.toString("utf8")).toContain("ALV");
+    // The package is built from the documents and the accountant closes the books: the first line under the title says so.
+    expect(files.get("lue-minut.txt")?.toString("utf8").split("\n").slice(0, 2)).toEqual([
+      "Kirjanpitopaketti 2026-03",
+      "Alustava – laskettu kuiteista ja laskuista. Kirjanpitäjä tekee tilinpäätöksen.",
+    ]);
     const alv = JSON.parse(files.get("raportit/alv.json")!.toString("utf8"));
     expect(alv.month).toBe("2026-03");
     expect(alv.field301.vat).toBe(25.5);
