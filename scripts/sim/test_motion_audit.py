@@ -218,6 +218,13 @@ class ProbeShift(unittest.TestCase):
             r = walk(root, "s", [step("pankki-accounts-open", video=False)], {}, probe_lines=lines)
         self.assertEqual(r["pankki-accounts-open"]["checks"]["shift_probe"], "FAIL")
 
+    def test_scrolljump_line_with_its_offset_and_place_reads_as_before(self):
+        # R5-COPY: the probe names the offset before and the list's place in the window after dy, so a
+        # jump no frame shows can be told to a pushed page's list or to the page under it.
+        lines = ["SCREEN 100.9 invoice(\"a\")", "SCROLLJUMP 101.1 invoice(\"a\") dy=-46 from=-60 x=-121", "QUIET 101.6 invoice(\"a\")"]
+        late, _ = ma.probe_shift(probe(lines), 100.0, 104.0)
+        self.assertEqual([(e["kind"], e["max"]) for e in late], [("SCROLLJUMP", 46)])
+
     def test_refresh_rebound_is_not_a_jump(self):
         # The list going back up when a pull-to-refresh ends is the system's, as on the video.
         base = ["MOVE 101.0 tab.koti n=11 max=60 _UITouchPassthroughView@0,-300,402x874:0,-60", "QUIET 102.0 tab.koti"]

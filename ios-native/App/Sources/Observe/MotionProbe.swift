@@ -13,8 +13,10 @@ import os
 ///   SCREEN <t> <name>                          a tab or pushed screen appeared
 ///   ROOT <t> <name> <w>x<h>                    the screen's root changed size (GeometryReader)
 ///   MOVE <t> <screen> n=<count> max=<pt> ...   layers moved more than 2 pt since the last tick
-///   SCROLLJUMP <t> <screen> dy=<pt>            a scroll offset changed with no finger on it, and
-///                                              the rows on screen did not move with it
+///   SCROLLJUMP <t> <screen> dy=<pt> from=<pt> x=<pt>
+///                                              a scroll offset changed with no finger on it, and
+///                                              the rows on screen did not move with it; `from` is
+///                                              the offset before, `x` the list's place in the window
 ///   QUIET <t> <screen>                         nothing moved for 0.4 s of ticks: the layout settled
 ///   STALL <t> <screen> ms=<ms>                 the main thread held the ticks back this long
 ///   TOUCH <t> <screen>                         a finger came down in the key window (its own time)
@@ -40,7 +42,7 @@ final class MotionProbe: NSObject, UIGestureRecognizerDelegate {
     private var link: CADisplayLink?
     private var handle: FileHandle?
     private var frames: [ObjectIdentifier: CGRect] = [:]
-    private var offsets: [ObjectIdentifier: CGPoint] = [:]
+    private var offsets = ScrollOffsets()
     private var screen = "launch"
     private var lastMove: CFTimeInterval = 0
     private var moving: OSSignpostIntervalState?
@@ -201,14 +203,13 @@ final class MotionProbe: NSObject, UIGestureRecognizerDelegate {
         if let scroll = layer.delegate as? UIScrollView {
             // The children are measured in content coordinates: scrolling does not move them.
             inner = layer
-            let key = ObjectIdentifier(scroll)
             let offset = scroll.contentOffset
-            if let old = offsets[key], abs(offset.y - old.y) > Self.threshold,
+            if let old = offsets.last(of: scroll), abs(offset.y - old.y) > Self.threshold,
                !scroll.isTracking, !scroll.isDragging, !scroll.isDecelerating,
                !rebased(layer, by: offset.y - old.y) {
-                write("SCROLLJUMP \(Self.now) \(screen) dy=\(Int(offset.y - old.y))")
+                write("SCROLLJUMP \(Self.now) \(screen) dy=\(Int(offset.y - old.y)) from=\(Int(old.y)) x=\(Int(scroll.convert(CGPoint.zero, to: nil).x))")
             }
-            offsets[key] = offset
+            offsets.record(scroll, at: offset)
         }
         for sub in layer.sublayers ?? [] { walk(sub, space: inner, seen: &seen, moved: &moved, budget: &budget) }
     }
@@ -234,6 +235,32 @@ final class MotionProbe: NSObject, UIGestureRecognizerDelegate {
             moved = frame.minY - old.minY
         }
         return top != nil && abs(moved - dy) <= Self.threshold
+    }
+}
+
+/// Each scroll view's offset as the tick before saw it, kept with the view itself, weakly. Kept under
+/// its address alone, a freed list's last offset came back as the first one of the next scroll view
+/// allocated at that address, and the difference was written as a SCROLLJUMP no frame ever showed:
+/// on the first tick after a push, whose page the probe had not seen before (R5-COPY: invoice
+/// dy=-46 on a copy that every frame of both videos shows still; the same tick of emailInbox,
+/// dy=-479, the offset a scrolled Pankki feed was left at).
+@MainActor
+struct ScrollOffsets {
+    private struct Seen {
+        weak var scroll: UIScrollView?
+        let offset: CGPoint
+    }
+    private var seen: [ObjectIdentifier: Seen] = [:]
+
+    /// Where the tick before saw this very view; nil for one the probe meets now, whatever stood at its
+    /// address. `key` is the view's identity; a test hands in the one a freed view had.
+    func last(of scroll: UIScrollView, key: ObjectIdentifier? = nil) -> CGPoint? {
+        guard let old = seen[key ?? ObjectIdentifier(scroll)], old.scroll === scroll else { return nil }
+        return old.offset
+    }
+
+    mutating func record(_ scroll: UIScrollView, at offset: CGPoint, key: ObjectIdentifier? = nil) {
+        seen[key ?? ObjectIdentifier(scroll)] = Seen(scroll: scroll, offset: offset)
     }
 }
 
