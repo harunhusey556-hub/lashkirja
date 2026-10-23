@@ -68,8 +68,9 @@ scripts/sim/motion-audit.sh --collect test01_Koti # a run already started: wait,
   steps in `test00_Calibration`) is stated at the top of every report.
 - Each suite's launch is also a row, `prebuild-freed`: the tab copies the app builds and throws away
   after launch (`Shell/TabPrebuild.swift`) must be gone 2 s later (`MARK prebuild-<tab>-freed=...`
-  in `probe.log`; `MARK prebuild-<tab>-late=` is the same look 10 s on). A copy kept alive in both PR
-  walks fails the gate job. With `LK_RETAIN_TRACE=1` (the workflow's `retain_trace` input) `run-ui.sh`
+  in `probe.log`; `MARK prebuild-<tab>-late=` is the same look 10 s on). A tab the baseline built and
+  released but both PR walks kept fails the gate job; a tab kept before and after (the open M086) or
+  one the baseline never built (whether a tab is prebuilt depends on timing) is listed only. With `LK_RETAIN_TRACE=1` (the workflow's `retain_trace` input) `run-ui.sh`
   also saves `retain-prebuild-<tab>-window.txt`, the `leaks --traceTree --noContent` of what holds
   the copy's window, and `retain-autoreleasepools.txt`. `LK_CONFIGURATION=Release-UITest` walks the
   optimized app instead of Debug (the probe is Debug only).

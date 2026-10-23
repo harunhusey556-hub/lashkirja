@@ -832,6 +832,7 @@ class PrebuildFreed(unittest.TestCase):
         r = rows["prebuild-freed"]
         self.assertEqual(r["checks"]["prebuild"], "FAIL")
         self.assertEqual(r["prebuild_kept"], ["Myynti"])
+        self.assertEqual(r["prebuild_freed"], ["Kirjanpito", "Lisää"])
         self.assertIn("prebuild copies kept 1", report)
         self.assertIn("tab copies still alive 2 s after they were thrown away: Myynti", report)
 
@@ -839,7 +840,17 @@ class PrebuildFreed(unittest.TestCase):
         rows, report = self.report("true")
         self.assertEqual(rows["prebuild-freed"]["checks"]["prebuild"], "PASS")
         self.assertEqual(rows["prebuild-freed"]["prebuild_kept"], [])
+        self.assertEqual(rows["prebuild-freed"]["prebuild_freed"], ["Myynti", "Kirjanpito", "Lisää"])
         self.assertIn("prebuild copies kept 0", report)
+
+    def test_a_tab_the_launch_skipped_is_neither_kept_nor_freed(self):
+        # Gate 39885786668's baseline: the test reached Myynti before TabPrebuild built its copy.
+        lines = ["MARK 100.100 prebuild-1-skipped", "MARK 103.400 prebuild-Kirjanpito-freed=true",
+                 "MARK 103.800 prebuild-Lisää-freed=true"]
+        with tempfile.TemporaryDirectory() as root:
+            rows = walk(root, "s", [step("tab", video=False)], {}, probe_lines=lines, xcui=())
+        r = rows["prebuild-freed"]
+        self.assertEqual((r["checks"]["prebuild"], r["prebuild_kept"], r["prebuild_freed"]), ("PASS", [], ["Kirjanpito", "Lisää"]))
 
     def test_a_later_launch_of_the_same_suite_counts_too(self):
         # A walk that relaunches the app: the second launch's copy is judged like the first's.
@@ -860,35 +871,81 @@ class PrebuildFreed(unittest.TestCase):
 
 class GatePrebuild(unittest.TestCase):
     @staticmethod
-    def walk(verdict=None):
+    def walk(verdict=None, kept=None, freed=None):
         """A walk's report: one step that passed, and the launch row when the walk logged the marks.
-        The launch row carries the step checks as 'n/a', as motion-audit.py's prebuild_row writes it."""
+        The launch row carries the step checks as 'n/a', as motion-audit.py's prebuild_row writes it,
+        and the tabs it saw kept and freed; a list left None is a report from before that field."""
         checks = {**dict.fromkeys(["intermediate", "flash", "shift_video", "shift_probe", "stall"], "n/a"), "prebuild": verdict}
-        launch = [] if verdict is None else [{"suite": "s", "id": "prebuild-freed", "crashed": False, "checks": checks}]
+        tabs = {f: v for f, v in (("prebuild_kept", kept), ("prebuild_freed", freed)) if v is not None}
+        launch = [] if verdict is None else [{"suite": "s", "id": "prebuild-freed", "crashed": False, "checks": checks, **tabs}]
         return [row("a"), *launch]
+
+    @classmethod
+    def tabs(cls, kept=(), freed=()):
+        """A walk as today's analyzer writes it: FAIL when any copy was kept."""
+        return cls.walk("FAIL" if kept else "PASS", list(kept), list(freed))
 
     def test_copies_released_in_both_pr_walks_are_fixed(self):
         out, code = gate([self.walk("FAIL"), self.walk("PASS"), self.walk("PASS")])
         self.assertEqual((count(out, "FIXED"), code), (1, 0))
         self.assertIn("| s | prebuild-freed | prebuild | FAIL | PASS | PASS | fixed |", out)
 
-    def test_a_copy_kept_in_both_pr_walks_is_new_fail_fails_the_job_and_the_counts_name_it(self):
-        out, code = gate([self.walk("PASS"), self.walk("FAIL"), self.walk("FAIL")])
+    def test_a_copy_the_baseline_released_kept_in_both_pr_walks_fails_the_job_and_the_counts_name_it(self):
+        pr = self.tabs(["Myynti"], ["Kirjanpito"])
+        out, code = gate([self.tabs([], ["Myynti", "Kirjanpito"]), pr, pr])
         self.assertEqual((count(out, "NEW FAIL"), code), (1, 1))
         self.assertIn("tab copies kept alive after launch: baseline 0, pr-run1 1, pr-run2 1", out)
-        self.assertIn("PREBUILD: a tab copy was kept alive after launch in both PR walks (s)", out)
+        self.assertIn("PREBUILD: a tab copy the baseline released was kept alive after launch in both PR walks (s/Myynti); this fails the job", out)
+
+    def test_a_tab_the_baseline_did_not_build_is_not_comparable(self):
+        # Gate 39885786668 (test02_Myynti): the baseline reached Myynti before TabPrebuild built its
+        # copy, so its launch row read PASS from the other tabs; both PR walks built Myynti and kept it.
+        pr = self.tabs(["Myynti"], ["Kirjanpito", "Lisää"])
+        out, code = gate([self.tabs([], ["Kirjanpito", "Lisää"]), pr, pr])
+        self.assertEqual(code, 0)
+        self.assertIn("PREBUILD: a tab copy kept alive in both PR walks, not comparable: baseline did not build Myynti (s); "
+                      "listed, the job does not fail on it", out)
+        self.assertNotIn("this fails the job", out)
+        # The row's own listing stays as it was: counted and marked, not failing the job.
+        self.assertEqual(count(out, "NEW FAIL"), 1)
+        self.assertIn("| s | prebuild-freed | prebuild | PASS | FAIL | FAIL | NEW FAIL |", out)
+
+    def test_a_baseline_with_no_launch_row_built_no_tab(self):
+        pr = self.tabs(["Myynti"])
+        out, code = gate([self.walk(), pr, pr])
+        self.assertEqual(code, 0)
+        self.assertIn("not comparable: baseline did not build Myynti (s)", out)
 
     def test_a_copy_kept_before_and_after_is_listed_not_failed(self):
         # The baseline leaked too (the open M086): named in the output, but every gate must not go red over it.
-        out, code = gate([self.walk("FAIL"), self.walk("FAIL"), self.walk("FAIL")])
+        kept = self.tabs(["Myynti"], ["Kirjanpito"])
+        out, code = gate([kept, kept, kept])
         self.assertEqual((count(out, "NEW FAIL"), count(out, "FIXED"), code), (0, 0, 0))
-        self.assertIn("PREBUILD: a tab copy kept alive before and after (s), the open M086", out)
+        self.assertIn("PREBUILD: a tab copy kept alive before and after (s/Myynti), the open M086", out)
         self.assertNotIn("this fails the job", out)
 
-    def test_one_noisy_pr_walk_does_not_fail_the_job(self):
-        out, code = gate([self.walk("PASS"), self.walk("FAIL"), self.walk("PASS")])
+    def test_a_tab_kept_in_one_pr_walk_only_does_not_fail_the_job(self):
+        base = self.tabs([], ["Myynti", "Kirjanpito"])
+        for name, p2 in (("released", self.tabs([], ["Myynti", "Kirjanpito"])), ("not built", self.tabs([], ["Kirjanpito"])),
+                         ("another tab kept", self.tabs(["Kirjanpito"], ["Myynti"]))):
+            with self.subTest(name):
+                out, code = gate([base, self.tabs(["Myynti"], ["Kirjanpito"]), p2])
+                self.assertEqual(code, 0)
+                self.assertNotIn("PREBUILD:", out)
+
+    def test_reports_from_before_prebuild_freed_are_listed_not_failed(self):
+        # Without the tabs the baseline freed, a kept copy may be one it never built: no reason to fail.
+        for name, (base, pr), listed in (
+                ("kept only", (self.walk("PASS", []), self.walk("FAIL", ["Myynti"])), "(s/Myynti), not comparable"),
+                ("no tabs", (self.walk("PASS"), self.walk("FAIL")), "(s), not comparable")):
+            with self.subTest(name):
+                out, code = gate([base, pr, pr])
+                self.assertEqual((count(out, "NEW FAIL"), code), (1, 0))
+                self.assertIn(f"PREBUILD: a tab copy kept alive in both PR walks {listed}: a report from before prebuild_freed", out)
+                self.assertNotIn("this fails the job", out)
+        out, code = gate([self.walk("FAIL"), self.walk("FAIL"), self.walk("FAIL")])
         self.assertEqual(code, 0)
-        self.assertNotIn("PREBUILD:", out)
+        self.assertIn("PREBUILD: a tab copy kept alive before and after (s), the open M086", out)
 
     def test_the_launch_row_alone_is_not_a_walk(self):
         # F003: three empty walks compare as equal; a launch row must not make a stepless walk look like one that ran.
