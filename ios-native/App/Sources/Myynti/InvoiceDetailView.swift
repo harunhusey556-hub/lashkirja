@@ -241,14 +241,8 @@ struct InvoiceDetailView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let barcode = invoice.barcode {
-                Button { copyBarcode(barcode) } label: {
-                    Label("Kopioi virtuaaliviivakoodi", systemImage: "barcode")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Theme.accent)
-                }
-                .buttonStyle(.borderless)
-            }
+            // The barcode is copied from Toiminnot only: a second visible copy action here would sit
+            // beside the screen's one primary (owner rule), and the card would grow when it arrives.
             if let issue = invoice.barcodeIssue, !issue.isEmpty {
                 Text(issue).font(.caption).foregroundStyle(Theme.ink2)
             }
@@ -547,7 +541,7 @@ struct InvoiceDetailView: View {
         var done = false
         await run {
             let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/status", body: change)
-            state.succeed(r.invoice)
+            state.succeed(r.invoice.keepingBarcode(of: state.value))
             done = true
         }
         return done
@@ -604,10 +598,11 @@ struct InvoiceDetailView: View {
     private func duplicate() async {
         await runKeyed(notDone: "Kopiota ei luotu.", maybeDone: "Kopio on voinut tallentua luonnoksiin.",
                        retry: { await duplicate() }) { key in
-            let r: InvoiceResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/duplicate", body: EmptyBody(), idempotencyKey: key)
+            let r: InvoiceDetailResponse = try await app.api.send("POST", "/api/invoices/\(invoiceId)/duplicate", body: EmptyBody(), idempotencyKey: key)
             // The answer is the whole copy: it opens on its rows, not on a spinner page while the
-            // detail is fetched again (motion lasku-copy). A new draft is never overdue: no reminder.
-            app.rememberInvoiceDetail(InvoiceDetailResponse(invoice: r.invoice), reminder: nil)
+            // detail is fetched again (motion lasku-copy), and carries the barcode the detail will
+            // show so nothing changes when that lands. A new draft is never overdue: no reminder.
+            app.rememberInvoiceDetail(r, reminder: nil)
             openRoute(.invoice(r.invoice.id))
         }
     }
@@ -667,7 +662,7 @@ struct InvoiceDetailView: View {
     private func deletePayment(_ payment: Invoice.Payment) async {
         await run {
             let r: InvoiceResponse = try await app.api.send("DELETE", "/api/invoices/\(invoiceId)/payments", query: ["paymentId": payment.id], body: Optional<EmptyBody>.none)
-            state.succeed(r.invoice)
+            state.succeed(r.invoice.keepingBarcode(of: state.value))
         }
     }
 
