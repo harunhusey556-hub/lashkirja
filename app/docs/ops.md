@@ -18,14 +18,15 @@ A background job that fails calls the same reporter with the job kind and a shor
 
 ## Health
 
-`GET /api/health` separates four checks:
+`GET /api/health` separates five checks:
 
 - `db` — `SELECT 1` and how long it took
-- `disk` — `data/uploads` exists, is writable, and has at least 50 MB free
+- `disk` — `data/uploads` exists, is writable, and has at least 5 GB free (`LOW_SPACE_BYTES` in `src/lib/health.ts`). Below that the detail is `low-space`: a warning that arrives while a backup still fits, not a failure the app needs a restart for. On the Windows host the watchdog and `deploy-local.ps1` treat a 503 whose only red disk detail is `low-space` as serving
 - `mail` — whether `SMTP_HOST` or a stored mailbox host is set. A machine with no mailbox is `configured: false` and still ok
 - `bankJobs` — `bank_sync` jobs that failed in the last 24 hours
+- `worker` — the background worker (`scripts/worker.ts`: mail, bank and document jobs) writes `data/worker-heartbeat` every minute; the check is red when that file is missing (`never-started`) or older than 5 minutes (`stale`, with `ageSeconds`). Only checked when `NODE_ENV=production`, the one place a worker runs. The file is plain, not a database row, so no migration. On the Windows host the watchdog and `deploy-local.ps1` treat a 503 whose db and disk are ok as serving, so a stale worker never restarts the web server; the watchdog sends the owner one Telegram line per day instead
 
-The response is 200 when db, disk, mail, and bank jobs are ok. Otherwise it is 503 and one JSON log line is written (`kind: health`). With `OBSERVE_WEBHOOK_URL` or `SENTRY_DSN` that same event is delivered. There is no separate email alerter: the operator watches the log or the webhook.
+The response is 200 when db, disk, mail, bank jobs, and the worker are ok. Otherwise it is 503 and one JSON log line is written (`kind: health`). With `OBSERVE_WEBHOOK_URL` or `SENTRY_DSN` that same event is delivered. There is no separate email alerter: the operator watches the log or the webhook.
 
 ```bash
 curl -fsS -H "Authorization: Bearer $HEALTH_TOKEN" https://example.invalid/api/health
@@ -45,7 +46,7 @@ Document analysis writes the extraction only when the job's `attemptToken` still
 
 Backups are described in `app/docs/backup.md`.
 
-Account close, a data copy, and a password recovery that could not be mailed are `AccountRequest` rows. `npx tsx scripts/account-requests.ts list` shows them. `set <id> in_progress|needs_info|denied` moves an open row. `complete-export` writes `data/account-packages/<userId>/<id>.zip` and the user downloads it from Tietosuoja. `complete-close` sets `User.accessDisabledAt` and revokes sessions. Receipts and invoices stay for the retention period. Password links prefer `PLATFORM_SMTP_*` and do not require the user's invoice mailbox. See `app/docs/account-recovery.md`.
+Account close, a data copy, and a password recovery that could not be mailed are `AccountRequest` rows. `npx tsx scripts/account-requests.ts list` shows them. `set <id> in_progress|needs_info|denied` moves an open row. `complete-export` writes `data/account-packages/<userId>/<id>.zip` and the user downloads it from Tietosuoja. `complete-close` sets `User.accessDisabledAt` and revokes sessions. Receipts and invoices stay for the retention period. Password links prefer `PLATFORM_SMTP_*` and do not require the user's invoice mailbox. `complete-export`, `complete-close` and `set <id> needs_info|denied` on a close or copy request also mail the user the outcome the same way; when no mail path exists or the send fails, the command prints a warning and support tells the user by hand. See `app/docs/account-recovery.md`.
 
 ## What is not collected
 

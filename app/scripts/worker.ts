@@ -5,6 +5,11 @@ import { drainPendingDocumentJobs } from "../src/lib/document-jobs";
 import { runDueRecurringPurchases } from "../src/lib/recurring-purchases";
 import { runMatchReviewCycle } from "../src/lib/match-review-run";
 import { formatReconcileSummary, reconcileEnabled, reconcilePosPayments } from "../src/lib/pos-payments";
+import { assertStartupEnv } from "../src/lib/startup-env";
+import { WORKER_HEARTBEAT_INTERVAL_MS, writeWorkerHeartbeat } from "../src/lib/worker-heartbeat";
+
+// Outside main(), whose errors are only logged: a worker that cannot start must exit non-zero.
+assertStartupEnv();
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -86,9 +91,24 @@ async function runSyncCycle() {
   }
 }
 
+/** What /api/health reads (workerHealth): the web server cannot see this process any other way. */
+function beat() {
+  try {
+    writeWorkerHeartbeat();
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Worker heartbeat failed`, error);
+  }
+}
+
 async function main() {
   console.log(`[${new Date().toISOString()}] Lashkirja Background Worker Started.`);
   console.log(`[${new Date().toISOString()}] Next sync in ${SYNC_INTERVAL_MS / 1000 / 60} minutes.`);
+
+  // Before the first cycle and on a timer of its own: a cycle can run for many minutes, and it must
+  // not read as a dead worker. unref(): if main() fails before the schedule below is set up, the
+  // process still ends and the supervisor restarts it, instead of a worker that only beats.
+  beat();
+  setInterval(beat, WORKER_HEARTBEAT_INTERVAL_MS).unref();
   
   // Run immediately on start
   await runSyncCycle();

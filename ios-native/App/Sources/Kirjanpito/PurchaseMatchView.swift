@@ -18,6 +18,22 @@ struct PurchaseMatchView: View {
     /// One key per proposal: tapping "Hyväksy" again after a failure is the same payment.
     @State private var acceptKeys: [String: String] = [:]
 
+    /// The two GETs the screen is made of: the open ostolaskut (the list asks for those alone) and
+    /// the proposals. Kirjanpito warms both, and keeps what it got in `app.lastPainted`.
+    static let listPath = "/api/purchase-invoices"
+    static let openQuery = ["status": PurchaseFilter.open.rawValue]
+    static let suggestionsPath = "/api/purchase-invoices/match"
+
+    /// `opening` (`app.purchaseMatchPreview`, what this screen or Kirjanpito's warm-up last got) is on
+    /// screen in the first frame. Loaded in `.task` instead, the push showed a spinner page and the rows
+    /// came in 0.5 s later (motion kirjanpito-match-open, F011).
+    init(opening: PurchaseMatchData? = nil) {
+        guard let opening else { return }
+        var shown = ScreenLoad<PurchaseMatchData>()
+        shown.succeed(opening)
+        _state = State(initialValue: shown)
+    }
+
     var body: some View {
         List {
             if let data = state.value {
@@ -27,16 +43,24 @@ struct PurchaseMatchView: View {
                         .listRowInsets(EdgeInsets())
                 }
                 content(data)
-            } else {
+            } else if state.failure != nil {
                 ScreenStateView(state: state, retry: load) { (_: PurchaseMatchData) in EmptyView() }
                     .listRowBackground(Color.clear)
+            } else {
+                placeholder
             }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+        // The greyed rows give way to the real ones eased, as ScreenStateView's swap does: not a cut.
+        .motion(.snappy, value: state.value == nil)
+        // The banner eases in over the rows, so they do not jump.
+        .motion(.snappy, value: state.failure != nil)
+        .failureToast($failure)
+        .noticeToast($message)
         .navigationTitle("Kohdista ostolaskujen maksut")
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await load() }
+        .refreshable { await load(force: true) }
         .task(id: app.dataVersion) {
             guard state.value == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.
@@ -65,17 +89,18 @@ struct PurchaseMatchView: View {
                 Text("Pankin maksut avoimille ostolaskuille.")
             }
         }
-        if let message {
-            Section { Text(message).font(.subheadline).foregroundStyle(Theme.ink) }
-                .listRowBackground(Theme.accentSoft)
-        }
-        if let failure {
-            Section { Text(failure).font(.subheadline).foregroundStyle(Theme.danger) }
-        }
         if data.rows.isEmpty {
             Section {
                 ContentUnavailableView {
-                    Label(PurchaseMatch.emptyTitle, systemImage: "building.columns")
+                    // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                    Label {
+                        Text(PurchaseMatch.emptyTitle)
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "building.columns")
+                    }
                 } description: {
                     Text(PurchaseMatch.emptyBody)
                 }
@@ -144,18 +169,48 @@ struct PurchaseMatchView: View {
 
     // MARK: Loading
 
+    /// The rows' shape until the first answer (cached or the server's): grey rows where the ostolaskut
+    /// will be, so the list fills the space it already had instead of growing out of a spinner.
+    @ViewBuilder private var placeholder: some View {
+        Section {
+            ForEach(0..<3, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Toimittaja Oy").foregroundStyle(Theme.ink)
+                        Spacer()
+                        Text("124,00 €").font(.subheadline.weight(.semibold))
+                    }
+                    Text("Eräpäivä 12.10.2026").font(.caption).foregroundStyle(Theme.ink2)
+                }
+                .redacted(reason: .placeholder)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Ladataan")
+            }
+        }
+    }
+
+    private func load() async { await load(force: false) }
+
     /// The open ostolaskut and the proposals side by side; a proposal's invoice is one of the open ones.
-    private func load() async {
+    /// Through the app's cache: Kirjanpito warmed both, so the page opens on rows and the server's
+    /// answer replaces them in place when they are stale; `force` (pull-to-refresh) always asks.
+    private func load(force: Bool) async {
+        // Painted from the cache only with both answers: one alone makes no row.
+        if state.value == nil,
+           let cachedList: PurchaseInvoiceList = await app.cachedValue(Self.listPath, query: Self.openQuery),
+           let cachedPending: PurchaseSuggestionList = await app.cachedValue(Self.suggestionsPath) {
+            state.succeed(app.purchaseMatchData(cachedList, cachedPending))
+        }
         state.begin()
-        let api = app.api
-        async let proposals: PurchaseSuggestionList = api.get("/api/purchase-invoices/match")
+        let suggestionsPath = Self.suggestionsPath
+        async let proposals: PurchaseSuggestionList = app.cachedGet(suggestionsPath, force: force)
         do {
-            let list: PurchaseInvoiceList = try await api.get("/api/purchase-invoices", query: ["status": PurchaseFilter.open.rawValue])
+            let list: PurchaseInvoiceList = try await app.cachedGet(Self.listPath, query: Self.openQuery, force: force)
             let pending = try await proposals
-            state.succeed(PurchaseMatchData(
-                invoices: list.invoices.filter { !app.removedIds.contains($0.id) },
-                suggestions: pending.suggestions
-            ))
+            state.succeed(app.purchaseMatchData(list, pending))
+            // The next visit's first frame (`init`).
+            app.rememberPainted(list, Self.listPath, query: Self.openQuery)
+            app.rememberPainted(pending, Self.suggestionsPath)
         } catch is CancellationError {
             return
         } catch {
@@ -244,5 +299,19 @@ struct PurchaseMatchView: View {
         }
         // Whatever went through changes the list, so it is asked again even after a failure.
         if accepted > 0 || failed > 0 { app.dataVersion += 1 }
+    }
+}
+
+extension AppModel {
+    /// The rows as Kohdista (or Kirjanpito's warm-up) last got them; nil unless both answers are known.
+    func purchaseMatchPreview() -> PurchaseMatchData? {
+        guard let list: PurchaseInvoiceList = lastPainted(PurchaseMatchView.listPath, query: PurchaseMatchView.openQuery),
+              let pending: PurchaseSuggestionList = lastPainted(PurchaseMatchView.suggestionsPath) else { return nil }
+        return purchaseMatchData(list, pending)
+    }
+
+    /// A proposal's invoice is one of the open ones; one deleted but not yet confirmed is left out.
+    func purchaseMatchData(_ list: PurchaseInvoiceList, _ pending: PurchaseSuggestionList) -> PurchaseMatchData {
+        PurchaseMatchData(invoices: list.invoices.filter { !removedIds.contains($0.id) }, suggestions: pending.suggestions)
     }
 }

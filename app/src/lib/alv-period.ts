@@ -12,11 +12,13 @@
  * - A credit note is its own document with negative lines, counted in the
  *   period it was issued (AVL 136 §: a credit reduces the sales of the month
  *   in which it is given). Crediting never rewrites an earlier period.
- * - Approved receipts count by their date.
+ * - Approved receipts count by their date, signed as the ledger posts them (`buildProfitLoss`).
  * - A purchase invoice's VAT is deductible (field 307) in the period of its
  *   invoice date, once it is recorded (open or paid, never cancelled) (F39).
  *   One purchase must count once: the rule for that is written in
  *   `classifyPurchaseInvoices` below, and only there.
+ * - A purchase invoice that counts on its own is also an expense of its invoice
+ *   month in the profit and loss, as the ledger posts it (`purchaseInBooks`).
  * - A receipt drafted from, or matched to, a bank row that already settled a
  *   sales invoice is left out: that money is the invoice, not new income.
  * - A payment recorded by hand has no bank row, so the rule above cannot see
@@ -29,8 +31,8 @@ import { prisma } from "./db";
 import { centsToEuros } from "./money";
 import { formatReference } from "./finnish-reference";
 import { computeInvoiceTotals } from "./invoices";
-import { computeAlvReport, parseVatDetails, type AlvReport, type InvoiceVatSource, type PurchaseVatSource, type ReceiptLike } from "./alv";
-import type { ReportInvoice, ReportReceipt } from "./reports";
+import { computeAlvReport, parseVatDetails, splitsDocumentVat, type AlvReport, type InvoiceVatSource, type PurchaseVatSource, type ReceiptLike } from "./alv";
+import { buildProfitLoss, type ProfitLossResult, type ReportInvoice, type ReportPurchaseInvoice, type ReportReceipt } from "./reports";
 
 /** Ordinary invoices that are part of the books: sent, paid, or later credited. */
 export const REPORTED_INVOICE_STATUSES = ["sent", "paid", "credited"];
@@ -44,6 +46,8 @@ export interface AlvPeriodSources {
   reportInvoices: ReportInvoice[];
   /** F39: purchase invoices whose VAT is deductible in this period, and not already counted through a receipt. */
   purchaseInvoices: PurchaseVatSource[];
+  /** The purchase invoices the ledger posts on their own, in the shape the P&L needs (see `purchaseInBooks`). */
+  reportPurchaseInvoices: ReportPurchaseInvoice[];
   /** Recorded purchase invoices of the period left out because a receipt already counts that purchase. */
   skippedPurchaseInvoiceCount: number;
   /** Counted purchase invoices that look like a receipt that is also counted (same amount, close date). */
@@ -152,6 +156,7 @@ export interface PurchaseVatRow {
   issueDate: Date;
   supplierName: string;
   invoiceNumber: string | null;
+  category: string | null;
   grossCents: number;
   vatCents: number;
   status: string;
@@ -162,6 +167,11 @@ export interface PurchaseVatRow {
   suspected: boolean;
   /** Counted although a receipt is linked, because that receipt has no date or no VAT breakdown. */
   receiptUnusable: boolean;
+  /**
+   * The receipt linked to the invoice is itself an expense of the books (loadCountedReceipts), whether or
+   * not the return can use its VAT breakdown. Separate from `treatment`, which only decides the VAT return.
+   */
+  receiptInBooks: boolean;
 }
 
 type PurchaseReceiptEvidence = {
@@ -243,6 +253,7 @@ export async function classifyPurchaseInvoices(userId: string, start: Date, end:
       grossCents: true,
       issueDate: true,
       vatTreatment: true,
+      category: true,
       receipt: { select: PURCHASE_RECEIPT_SELECT },
       payments: { select: { transactionId: true } },
     },
@@ -273,6 +284,7 @@ export async function classifyPurchaseInvoices(userId: string, start: Date, end:
       issueDate: invoice.issueDate,
       supplierName: invoice.supplierName,
       invoiceNumber: invoice.invoiceNumber,
+      category: invoice.category,
       grossCents: invoice.grossCents,
       vatCents: invoice.vatCents,
       status: invoice.status,
@@ -280,6 +292,12 @@ export async function classifyPurchaseInvoices(userId: string, start: Date, end:
       treatment: "counted",
       suspected: false,
       receiptUnusable: false,
+      // A supplier credit note is not documented by its receipt (loadCountedReceipts leaves that receipt out).
+      receiptInBooks:
+        invoice.receipt?.reviewStatus === "approved" &&
+        invoice.receipt.type === "meno" &&
+        invoice.receipt.date !== null &&
+        invoice.grossCents >= 0,
     };
     rows.set(invoice.id, row);
     // "credited": a credited invoice keeps counting where it was; its credit note counts, negative, in its own period.
@@ -368,6 +386,17 @@ export async function classifyPurchaseInvoices(userId: string, start: Date, end:
 }
 
 /**
+ * The purchase invoices the books post on their own: the ones the return counts, and those with no
+ * VAT of their own that it skips. Both are expenses, so the ledger and the profit and loss read
+ * this and never differ on which purchase invoices exist (S1: the P&L had left them out).
+ * An invoice whose linked receipt is in the books is that receipt's expense, whatever the return did
+ * with it: a bill without VAT filed from a receipt would otherwise count twice.
+ */
+export function purchaseInBooks(row: PurchaseVatRow): boolean {
+  return (row.treatment === "counted" || row.treatment === "no_vat") && !row.receiptInBooks;
+}
+
+/**
  * F39: the purchase invoices of the period with what the return did with each.
  * Used by the VAT return and by the accountant package, so the two agree.
  */
@@ -435,6 +464,7 @@ export async function loadAlvPeriodSources(
       totalAmountCents: receipt.totalAmountCents,
       category: receipt.category,
       vatDetails: receipt.vatDetails,
+      vatTreatment: receipt.vatTreatment,
     })),
     reportInvoices: bookedInvoices.map(({ invoice, totals }) => ({
       issueDate: invoice.issueDate,
@@ -444,6 +474,16 @@ export async function loadAlvPeriodSources(
       grossCents: totals.grossCents,
     })),
     purchaseInvoices: purchases.counted,
+    reportPurchaseInvoices: purchases.rows.filter(purchaseInBooks).map(
+      (row): ReportPurchaseInvoice => ({
+        issueDate: row.issueDate,
+        category: row.category,
+        grossCents: row.grossCents,
+        // As the ledger splits it (ledger/posting.ts purchaseSide): only a domestic invoice's own VAT
+        // is taken off the cost; reverse charge and foreign VAT leave the whole amount as the expense.
+        vatCents: splitsDocumentVat(row.vatTreatment) ? row.vatCents : 0,
+      })
+    ),
     skippedPurchaseInvoiceCount: purchases.skipped,
     suspectedPurchaseDuplicateCount: purchases.suspected,
     purchaseReceiptUnusableCount: purchases.receiptUnusable,
@@ -465,6 +505,13 @@ export async function loadAlvPeriodSources(
 /** The VAT return of a period from its sources: the one place that feeds computeAlvReport (F39). */
 export function alvReportOf(sources: Pick<AlvPeriodSources, "receipts" | "invoices" | "purchaseInvoices">): AlvReport {
   return computeAlvReport(sources.receipts, sources.invoices, sources.purchaseInvoices);
+}
+
+/** The profit and loss of a period from its sources: the one place that feeds buildProfitLoss, as alvReportOf does for the return. */
+export function profitLossOf(
+  sources: Pick<AlvPeriodSources, "reportReceipts" | "reportInvoices" | "reportPurchaseInvoices">
+): ProfitLossResult {
+  return buildProfitLoss(sources.reportReceipts, sources.reportInvoices, sources.reportPurchaseInvoices);
 }
 
 /** How far apart a hand-entered payment date and the bank row may be. */

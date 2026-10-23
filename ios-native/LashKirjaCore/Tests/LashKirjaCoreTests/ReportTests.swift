@@ -33,6 +33,14 @@ import Foundation
     #expect(oneCreditNote.hasFigures)
 }
 
+/// S1: rent and other bills with no receipt are expenses now, so a year holding only those has figures.
+@Test func aYearWithOnlyPurchaseInvoicesHasFigures() throws {
+    let total = #"{"month":null,"incomeNet":0,"incomeVat":0,"incomeGross":0,"expenseNet":800,"expenseVat":0,"expenseGross":800,"profitNet":-800,"incomeByCategory":[],"expenseByCategory":[{"category":"vuokra","gross":800,"vat":0,"net":800,"count":1}],"receiptCount":0,"invoiceCount":0,"creditNoteCount":0,"purchaseInvoiceCount":1}"#
+    let report = try JSONDecoder().decode(ProfitLoss.self, from: Data(#"{"from":"2026-01","to":"2026-12","total":\#(total),"months":[]}"#.utf8))
+    #expect(report.total.purchaseInvoiceCount == 1)
+    #expect(report.hasFigures)
+}
+
 /// X085: Kausi names its periods as the rest of the app does; the keys the package route reads stay.
 @Test func packagePeriodsAreNamedAsElsewhere() {
     let options = ReportPackage.options(year: 2026)

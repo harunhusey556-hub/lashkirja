@@ -86,9 +86,6 @@ struct PurchaseLinkConfirmView: View {
                     Text(PurchaseBankLink.outcome(amount: amount, open: pair.open))
                 }
             }
-            if let failure {
-                Section { Text(failure).foregroundStyle(Theme.danger) }.transition(.opacity)
-            }
             Section {
                 Button { Task { await save() } } label: {
                     // Both laid out, one shown: the button keeps its size while the payment is sent.
@@ -106,8 +103,8 @@ struct PurchaseLinkConfirmView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
-        // The failure and the outcome line under the amount come and go without a jump.
-        .motion(.snappy, value: failure)
+        .failureToast($failure)
+        // The outcome line under the amount comes and goes without a jump.
         .motion(.snappy, value: (Money.parse(amountText) ?? 0) > 0)
         .formKeyboard()
         .navigationTitle("Vahvista kohdistus")
@@ -269,7 +266,15 @@ struct BankRowPickerList<Header: View, Footer: View>: View {
         if list.candidates.isEmpty {
             Section {
                 ContentUnavailableView {
-                    Label(search.isEmpty ? "Ei sopivia pankkitapahtumia" : "Ei osumia", systemImage: "building.columns")
+                    // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                    Label {
+                        Text(search.isEmpty ? "Ei sopivia pankkitapahtumia" : "Ei osumia")
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "building.columns")
+                    }
                 } description: {
                     Text(search.isEmpty ? emptyText : "Kokeile toista hakusanaa tai summaa.")
                 }
@@ -430,7 +435,15 @@ struct PurchaseRowLinkView: View {
                 if list.candidates.isEmpty {
                     Section {
                         ContentUnavailableView {
-                            Label(search.isEmpty ? "Ei avoimia ostolaskuja" : "Ei osumia", systemImage: "doc.text")
+                            // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                            Label {
+                                Text(search.isEmpty ? "Ei avoimia ostolaskuja" : "Ei osumia")
+                                    .lineLimit(nil)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } icon: {
+                                Image(systemName: "doc.text")
+                            }
                         } description: {
                             Text(search.isEmpty
                                  ? "Lisää ostolasku ensin Ostolaskut-näkymässä."
@@ -562,9 +575,6 @@ struct PurchaseSuggestionsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if let failure {
-                    Section { Text(failure).foregroundStyle(Theme.danger) }.transition(.opacity)
-                }
                 Section {
                     ForEach(suggestions) { suggestion in row(suggestion) }
                 } footer: {
@@ -573,11 +583,11 @@ struct PurchaseSuggestionsSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .navigationTitle("Maksuehdotukset")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Valmis") { dismiss() } } }
             .motion(.snappy, value: suggestions.map(\.id))
-            .motion(.snappy, value: failure)
         }
         .presentationDetents([.medium, .large])
     }
@@ -679,13 +689,12 @@ struct ReceiptBankPickerSheet: View {
                 LabeledContent(receipt.title) {
                     if let amount = receipt.shownAmount { MoneyText(amount: amount).fontWeight(.semibold) }
                 }
-                if let failure { Text(failure).font(.subheadline).foregroundStyle(Theme.danger).transition(.opacity) }
             } footer: { _ in
                 Text("Valitse pankkitapahtuma, jolla tämä kuitti maksettiin. Parhaat osumat ovat ylimpänä.")
             } pick: { candidate in
                 picked = candidate
             }
-            .motion(.snappy, value: failure)
+            .failureToast($failure)
             .navigationTitle("Valitse pankkitapahtuma")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -361,18 +361,35 @@ final class P0Tests: WalkTestCase {
     // U004 X146 (P4): a field's name stays in its row once typed into. The placeholder was the only
     // name and went with the first character: a filled profile read as bare values, and three rows of
     // dots in Vaihda salasana read alike. Asserted.
+    // F004: and a tap on a field's name, not on the field, gives the field the cursor. The name is its
+    // own text drawn beside the field, and only the password rows took the tap. Asserted on every
+    // named field of Profiili, Laskuttajan tiedot, Uusi malli, Vaihda salasana and Sovelluslukitus.
     func testK_SellerFieldsKeepLabels() {
         openSettings()
         // Top to bottom of Asetukset: tapLabel scrolls down only, and a pop keeps the list's offset.
+        // Profiili is the list's first row, by the symbol its row draws (the title is the owner's name).
+        if tapLabel("identifier == %@", "setting-person.crop.circle") {
+            for name in ["Etunimi", "Sukunimi"] {
+                assertNameFocuses(name, in: app.textFields)
+                assertNameStays(name, in: app.textFields)
+            }
+            shot("k0-profile-typed")
+            leaveDiscarding("Profiili")
+        } else { XCTFail("Asetukset has no Profiili row") }
         if tap("Laskuttajan tiedot") {
-            for name in ["Yrityksen nimi", "Y-tunnus", "Puhelin", "Katuosoite", "Postinumero", "Kaupunki", "IBAN", "BIC", "Maksuehdot laskulla"] {
+            for name in ["Yrityksen nimi", "Y-tunnus", "Puhelin", "Katuosoite", "Postinumero", "Kaupunki", "IBAN", "BIC", "Maksuehdot laskulla",
+                         "Viivästyskorko % / v", "Muistutusmaksu (€)"] {
+                assertNameFocuses(name, in: app.textFields)
                 assertNameStays(name, in: app.textFields)
             }
             shot("k1-seller-typed")
             leaveDiscarding("Laskuttajan tiedot")
         } else { XCTFail("Asetukset has no Laskuttajan tiedot") }
         if tap("Sähköpostimallit"), tap("Uusi malli") {
-            for name in ["Mallin nimi", "Aihe"] { assertNameStays(name, in: app.textFields) }
+            for name in ["Mallin nimi", "Aihe"] {
+                assertNameFocuses(name, in: app.textFields)
+                assertNameStays(name, in: app.textFields)
+            }
             shot("k2-template-typed")
             closeSheet("Uusi malli")
             backToSettings(from: "Sähköpostimallit")
@@ -389,6 +406,11 @@ final class P0Tests: WalkTestCase {
             shot("k3-password-typed")
             leaveDiscarding("Vaihda salasana")
         } else { XCTFail("Asetukset has no Vaihda salasana") }
+        if tap("Sovelluslukitus") {
+            for name in ["Uusi PIN", "PIN uudelleen"] { assertNameFocuses(name, in: app.secureTextFields) }
+            shot("k4-pin-focused")
+            backToSettings(from: "Sovelluslukitus")
+        } else { XCTFail("Asetukset has no Sovelluslukitus") }
     }
 
     // X123 X124: a refused sign-in is said under the password, as the web says it, without moving the

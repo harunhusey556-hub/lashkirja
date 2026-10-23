@@ -7,7 +7,11 @@ public struct ProfitLoss: Decodable, Sendable {
         public let gross: Decimal
         public let vat: Decimal
         public let net: Decimal
+        /// Receipts and purchase invoices together.
         public let count: Int
+        /// How many of `count` are purchase invoices, which Kuitit does not list but Ostolaskut does;
+        /// nil from a server that does not count them.
+        public var purchaseInvoiceCount: Int?
         public var id: String { category }
     }
     public struct Period: Decodable, Sendable, Identifiable {
@@ -27,6 +31,9 @@ public struct ProfitLoss: Decodable, Sendable {
         public let creditNoteCount: Int?
         /// Receipts with no VAT breakdown; nil from a server that does not count them.
         public var missingVatCount: Int?
+        /// Purchase invoices no receipt documents (rent, a typed-in bill), counted in the expenses;
+        /// nil from a server that does not count them.
+        public var purchaseInvoiceCount: Int?
         public var id: String { month ?? "total" }
 
         static func empty(_ month: String) -> Period {
@@ -43,10 +50,11 @@ public struct ProfitLoss: Decodable, Sendable {
     /// Receipts with no date (they cannot be placed in a month).
     public let undatedCount: Int?
 
-    /// False when the period holds no receipt, invoice or credit note: Raportit then says so once
-    /// instead of a blank chart and a December of 0,00 € (M048).
+    /// False when the period holds no receipt, invoice, credit note or purchase invoice: Raportit then
+    /// says so once instead of a blank chart and a December of 0,00 € (M048).
     public var hasFigures: Bool {
         total.receiptCount > 0 || total.invoiceCount > 0 || (total.creditNoteCount ?? 0) > 0
+            || (total.purchaseInvoiceCount ?? 0) > 0
     }
 
     /// All twelve months of `year`, empty ones included, for a steady chart.

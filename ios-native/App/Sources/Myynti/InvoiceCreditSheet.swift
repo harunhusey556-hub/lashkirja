@@ -46,10 +46,10 @@ struct InvoiceCreditSheet: View {
                 } footer: {
                     Text(InvoiceCredit.confirmNote)
                 }
-                if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            .failureToast($failure)
             .formKeyboard()
             .navigationTitle("Hyvitä laskua")
             .navigationBarTitleDisplayMode(.inline)

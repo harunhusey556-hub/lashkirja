@@ -4,7 +4,7 @@
  */
 
 import type { RankedItem } from "@/components/ds/charts/geometry";
-import { receiptDrillHref } from "@/lib/report-drill";
+import { expenseCategoryHref } from "@/lib/report-drill";
 
 export interface ChartPeriod {
   month: string | null;
@@ -119,11 +119,12 @@ export function sentenceCase(text: string): string {
 }
 
 /**
- * Expenses by category as ranked rows. A row opens the receipts of that category and year; the
- * uncategorised row has no list of its own to open, so it is plain text.
+ * Expenses by category as ranked rows. A row opens the receipts of that category and year, or the
+ * purchase invoices when it holds nothing else; the uncategorised row has no receipts list of its
+ * own to open, so it is plain text.
  */
 export function expenseRankedItems(
-  rows: readonly { category: string; net: number }[],
+  rows: readonly { category: string; net: number; count?: number; purchaseInvoiceCount?: number }[],
   year: number,
 ): { items: RankedItem[]; totalCents: number } {
   const items: RankedItem[] = [];
@@ -136,10 +137,7 @@ export function expenseRankedItems(
       key: row.category,
       label: sentenceCase(row.category),
       valueCents,
-      href:
-        row.category === "Luokittelematon"
-          ? undefined
-          : receiptDrillHref({ month: String(year), type: "meno", category: row.category }),
+      href: expenseCategoryHref(row, year),
     });
   }
   return { items, totalCents };

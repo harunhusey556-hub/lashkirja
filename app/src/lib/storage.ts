@@ -17,16 +17,30 @@ export const MAX_STATEMENT_BYTES = 20 * 1024 * 1024;
  * normally a few hundred bytes -- but cheap to allow.
  *
  * MAX_RECEIPT_REQUEST_BYTES is the single source of truth for "how big can
- * the whole POST /api/receipts(/inbox) request be": both the proxy's
- * `experimental.proxyClientMaxBodySize` (next.config.ts) and the route's own
- * pre-parse `rejectOversizedContentLength` check use this constant, so a
- * future change to MAX_RECEIPT_BYTES only has to happen once. Final review
- * I2: the proxy's default 10 MB buffer silently truncated any receipt photo
- * between 10 and 15 MB, which then failed to parse as multipart and
- * produced a 500 instead of the intended 413/415/400.
+ * the whole POST /api/receipts(/inbox) request be": the receipt routes' own
+ * pre-parse `rejectOversizedContentLength` check uses it, so a future change
+ * to MAX_RECEIPT_BYTES only has to happen once. Final review I2: the proxy's
+ * default 10 MB buffer silently truncated any receipt photo between 10 and
+ * 15 MB, which then failed to parse as multipart and produced a 500 instead
+ * of the intended 413/415/400.
  */
 export const RECEIPT_MULTIPART_HEADROOM_BYTES = uploadLimits.receiptMultipartHeadroomBytes;
 export const MAX_RECEIPT_REQUEST_BYTES = MAX_RECEIPT_BYTES + RECEIPT_MULTIPART_HEADROOM_BYTES;
+
+/** The statement route's pre-parse limit: the same multipart headroom on top of the product rule. */
+export const MAX_STATEMENT_REQUEST_BYTES = MAX_STATEMENT_BYTES + RECEIPT_MULTIPART_HEADROOM_BYTES;
+
+/**
+ * What the proxy must buffer whole (`experimental.proxyClientMaxBodySize`,
+ * next.config.ts). proxy.ts matches every /api route, so one cap stands in
+ * front of the receipt photo and the bank statement alike. Sized for the
+ * receipt alone (17 MB) it cut a 17-20 MB statement short without an error,
+ * `req.formData()` threw on the truncated multipart, and the owner got
+ * "Tiedoston käsittely epäonnistui" instead of an import (beta audit
+ * 2026-10). next.config.ts holds this as a literal, kept equal by
+ * next-config-body-cap.test.ts.
+ */
+export const MAX_UPLOAD_REQUEST_BYTES = Math.max(MAX_RECEIPT_REQUEST_BYTES, MAX_STATEMENT_REQUEST_BYTES);
 
 export type UploadPurpose = "receipt" | "statement";
 
@@ -99,7 +113,10 @@ export function validateUploadBuffer(
 ): DetectedFile {
   const maximum = purpose === "receipt" ? MAX_RECEIPT_BYTES : MAX_STATEMENT_BYTES;
   if (buffer.length === 0 || buffer.length > maximum) {
-    throw new UploadValidationError(buffer.length === 0 ? "Tiedosto on tyhjä" : "Tiedosto on liian suuri", 413);
+    throw new UploadValidationError(
+      buffer.length === 0 ? "Tiedosto on tyhjä" : `Tiedosto on liian suuri (enintään ${maximum / 1024 / 1024} Mt)`,
+      413
+    );
   }
   const detected = detectFile(buffer);
   const allowed = purpose === "receipt" ? RECEIPT_KINDS : STATEMENT_KINDS;

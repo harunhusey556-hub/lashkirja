@@ -113,7 +113,9 @@ public enum NextPrefetch {
     /// Pankkiyhteys), the month-close checklist and lock, the ALV return the screen opens on
     /// (`alvPeriod`, known once the profile tells the VAT period's kind), and Ostolaskut's list with
     /// the three answers above it. Ostolaskut paints from the cache only with all four: without
-    /// them its first visit was a spinner the page then replaced (M072).
+    /// them its first visit was a spinner the page then replaced (M072). Kohdista ostolaskujen maksut
+    /// paints from the open ostolaskut and the proposals: the proposals are among the four, the open
+    /// list is its own request.
     public static func kirjanpito(month: String, alvPeriod: String?) -> [PrefetchRequest] {
         var requests = [
             PrefetchRequest(path: "/api/statements", query: CursorPaging.firstQuery(BankFeed.query(month: nil)), persist: false),
@@ -124,6 +126,7 @@ public enum NextPrefetch {
             PrefetchRequest(path: "/api/purchase-invoices/counts", persist: false),
             PrefetchRequest(path: "/api/recurring-purchases", persist: false),
             PrefetchRequest(path: "/api/purchase-invoices/match", persist: false),
+            PrefetchRequest(path: "/api/purchase-invoices", query: ["status": PurchaseFilter.open.rawValue], persist: false),
         ]
         if let alvPeriod, !alvPeriod.isEmpty {
             requests.append(PrefetchRequest(path: "/api/alv", query: ["period": alvPeriod], persist: false))

@@ -114,11 +114,15 @@ struct AddSheet: View {
             } else {
                 Button { Task { await fetchEmail() } } label: { Label("Hae sähköpostista", systemImage: "envelope") }
             }
-            // UI tests only (Debug + `-LKUITest`): a test cannot pick a file in the system's picker.
+            // UI tests only (Debug + `-LKUITest`): a test cannot pick a file in the system's picker,
+            // so these hand `upload` a file as the picker would.
             if UITestHooks.active {
                 Button {
-                    Task { await importStatement(UITestHooks.fixtureStatement(day: APIDate.dayString(Date())), name: UITestHooks.statementFixtureName) }
+                    Task { await upload(UITestHooks.fixtureStatementFile(day: APIDate.dayString(Date()))) }
                 } label: { Label("Testitiliote", systemImage: "testtube.2") }
+                Button {
+                    Task { await upload(UITestHooks.missingStatementFile) }
+                } label: { Label("Testitiliote (ei luettavissa)", systemImage: "testtube.2") }
             }
         } label: {
             ZStack {
@@ -153,14 +157,26 @@ struct AddSheet: View {
 
     private func upload(_ url: URL) async {
         guard !busy else { return }
-        guard url.startAccessingSecurityScopedResource() else { return }
-        defer { url.stopAccessingSecurityScopedResource() }
-        guard let data = try? Data(contentsOf: url) else {
-            notice = "Tiedostoa ei voitu lukea."
+        // Busy from the first moment: the file is read before the request, and the spinner and the
+        // swipe guard must cover the read too.
+        busy = true
+        // Not a gate: a file the app already owns reads without the scope, and a refused one fails
+        // the read, which then says so (as Tiliotteet does).
+        let scoped = url.startAccessingSecurityScopedResource()
+        // Sized first (the server's statement limit), then read off the main actor.
+        let read = await LocalFile.read(url, maxBytes: LocalFile.statementMaxBytes)
+        if scoped { url.stopAccessingSecurityScopedResource() }
+        // importStatement takes busy itself; nothing suspends between the two, so no frame shows the gap.
+        busy = false
+        switch read {
+        case .success(let data):
+            await importStatement(data, name: url.lastPathComponent)
+        case .failure(let problem):
+            // The mailbox link would hide the notice.
+            mailboxMissing = false
+            notice = problem.message(maxBytes: LocalFile.statementMaxBytes)
             noticeOpensRows = false
-            return
         }
-        await importStatement(data, name: url.lastPathComponent)
     }
 
     private func importStatement(_ data: Data, name: String) async {

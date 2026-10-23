@@ -217,11 +217,11 @@ class WalkTestCase: XCTestCase {
         _ = q.firstMatch.waitForExistence(timeout: 12)
         for _ in 0...maxScrolls {
             let e = q.firstMatch
-            if e.exists && e.frame.minY > 30 && e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 {
+            if e.exists && e.frame.minY > 30 && e.frame.maxY < foot(of: e) {
                 // A list still gliding after a swipe takes the tap as a stop, not a choice: the row was
                 // tapped mid-glide and nothing opened (OwnerScreens testJ and testM, run 39528413225).
                 waitStill(e)
-                guard e.frame.minY > 30, e.frame.maxY < app.windows.firstMatch.frame.maxY - 60 else { continue }
+                guard e.frame.minY > 30, e.frame.maxY < foot(of: e) else { continue }
                 e.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap(); taps += 1; return true
             }
             app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1
@@ -237,24 +237,71 @@ class WalkTestCase: XCTestCase {
     /// (the CI seed puts documents and matches before it) the overdue row is behind "Näytä enemmän",
     /// which is then tapped first, as the owner would. The tasks lead Koti (N5), so the button is
     /// looked for before any scroll: a row behind it is not drawn, and searching for it first
-    /// scrolled the whole screen in vain.
-    func openOverdueFromKoti() -> Bool {
+    /// scrolled the whole screen in vain. `scrolls` is how far each of the two searches may go; at
+    /// the largest text size a task is a screen tall (P5, F005: 20 swipes for the row went past the
+    /// button, which then lay above the window), so the default stays the reach of an ordinary size.
+    func openOverdueFromKoti(scrolls maxScrolls: Int? = nil) -> Bool {
         let overdue = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "· myöhässä")).firstMatch
         let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä enemmän")).firstMatch
         let deadline = Date().addingTimeInterval(20)
         while !overdue.exists && !more.exists && Date() < deadline { usleep(250_000) }
         if !overdue.exists && more.exists {
             // Its centre, where the tap lands, clear of the floating tab bar, which took a tap meant
-            // for the button (N1 run 39187969883).
+            // for the button (N1 run 39187969883), and of the navigation bar over the list's top.
             let bar = app.tabBars.firstMatch
-            for _ in 0..<4 where !(more.isHittable && (!bar.exists || more.frame.midY < bar.frame.minY)) {
-                app.windows.firstMatch.swipeUp(velocity: .slow); scrolls += 1
+            let title = app.navigationBars.firstMatch
+            let window = app.windows.firstMatch
+            func placed() -> Bool {
+                guard more.exists, more.isHittable else { return false }
+                return (!bar.exists || more.frame.midY < bar.frame.minY) && (!title.exists || more.frame.midY > title.frame.maxY)
             }
-            guard more.isHittable else { note("MISS Näytä enemmän on Koti"); return false }
+            for _ in 0..<(maxScrolls ?? 4) where !placed() {
+                // Koti keeps where it was left: a button above the window is reached by scrolling back.
+                if more.exists, title.exists, more.frame.midY <= title.frame.maxY {
+                    window.swipeDown(velocity: .slow)
+                } else {
+                    window.swipeUp(velocity: .slow)
+                }
+                scrolls += 1
+            }
+            guard placed() else { note("MISS Näytä enemmän on Koti"); return false }
             more.tap(); taps += 1
             _ = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä vähemmän")).firstMatch.waitForExistence(timeout: 5)
         }
-        return tapLabel("label CONTAINS %@", "· myöhässä")
+        // At the largest text size a task card is about 430 pt tall and one slow swipe scrolls further
+        // than the band tapLabel waits for, so the card can jump from under the window to above it and
+        // the search runs on to Koti's foot (P5 testA, run 39868674592: the row at y -3575 after 20
+        // swipes). Koti lays out every task, so the row has a frame off screen: bring it to the middle.
+        // Only a card that tall: at the default size the row takes one swipe, and P1 test03 pins that.
+        if overdue.exists, overdue.frame.height > app.windows.firstMatch.frame.height * 0.3 {
+            centre(overdue, steps: maxScrolls ?? 6)
+        }
+        return tapLabel("label CONTAINS %@", "· myöhässä", scrolls: maxScrolls ?? 6)
+    }
+    /// Drags the screen until `element`, laid out but off screen, sits at the window's middle. Each drag
+    /// is at most 0.6 of the window, counted as a scroll, and ends with a hold so the list stops there.
+    func centre(_ element: XCUIElement, steps: Int = 6) {
+        let window = app.windows.firstMatch
+        for _ in 0..<steps {
+            guard element.exists else { return }
+            let offset = element.frame.midY - window.frame.midY
+            if abs(offset) < 40 { return }
+            let step = max(-window.frame.height * 0.6, min(window.frame.height * 0.6, offset))
+            let from = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: -step)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+            scrolls += 1
+        }
+    }
+    /// The lowest a tap target may reach: above what covers the window's foot (`bottomBar`) and above
+    /// a list's own pinned bar. Kuitit's "Kohdista varmat" sits over the last rows; a row under it
+    /// still reads hittable, and the tap linked the sure pairs instead of opening the row (testJ,
+    /// runs 39525838486 and 39796084791: same-day rows come in random order, so only some runs).
+    func foot(of element: XCUIElement, bottomBar: CGFloat = 60) -> CGFloat {
+        let edge = app.windows.firstMatch.frame.maxY - bottomBar
+        let sure = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kohdista varmat")).firstMatch
+        guard sure.exists, !element.label.hasPrefix("Kohdista varmat") else { return edge }
+        return min(edge, sure.frame.minY - 8)
     }
     /// Scrolls the screen (each swipe counted) until `element` sits inside the window, as tapLabel
     /// does before it taps, and taps nothing: a task can end on the button that does it.
@@ -264,7 +311,7 @@ class WalkTestCase: XCTestCase {
         let window = app.windows.firstMatch
         for attempt in 0...maxScrolls {
             if element.waitForExistence(timeout: attempt == 0 ? 3 : 1), element.isHittable,
-               element.frame.minY > 30, element.frame.maxY < window.frame.maxY - bottomBar { return true }
+               element.frame.minY > 30, element.frame.maxY < foot(of: element, bottomBar: bottomBar) { return true }
             if attempt < maxScrolls { window.swipeUp(velocity: .slow); scrolls += 1 }
         }
         return false

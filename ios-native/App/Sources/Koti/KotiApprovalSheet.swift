@@ -117,9 +117,6 @@ private struct KotiApprovalForm: View {
                          : "Tiedot on luettu kuitista. Tarkista ne ennen hyväksyntää.")
                 }
             }
-            if let failure {
-                Section { Text(failure).foregroundStyle(Theme.danger) }
-            }
             Section {
                 Button { Task { await save() } } label: {
                     Group {
@@ -139,6 +136,7 @@ private struct KotiApprovalForm: View {
             }
         }
         .scrollContentBackground(.hidden)
+        .failureToast($failure)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Peruuta") { if dirty { confirmDiscard = true } else { dismiss() } }

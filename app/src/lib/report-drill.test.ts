@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   drillFromSearch,
+  expenseCategoryHref,
   expenseDrillTarget,
+  expenseDrillTargets,
   incomeDrillTargets,
   invoiceDrillHref,
+  kotiExpenseHref,
   receiptDrillHref,
   statementDrillHref,
 } from "./report-drill";
@@ -80,6 +83,46 @@ describe("income drill targets (F71)", () => {
       "/kuitit?month=2026-09&type=meno&drill=1"
     );
     expect(expenseDrillTarget({ month: "2026-09", expenseByCategory: [] })).toBeNull();
+  });
+
+  it("sends purchase invoices to their own list, never to an empty receipts list", () => {
+    // Four expense rows, one of them a purchase invoice: the receipts list holds three.
+    const mixed = { month: "2026-09", purchaseInvoiceCount: 1, expenseByCategory: [{ category: "tarvikkeet", count: 3 }, { category: "vuokra", count: 1 }] };
+    expect(expenseDrillTargets(mixed).map((target) => target.id)).toEqual(["expense-receipts", "purchase-invoices"]);
+    expect(expenseDrillTargets(mixed).map((target) => target.href)).toEqual(["/kuitit?month=2026-09&type=meno&drill=1", "/kirjanpito/ostolaskut"]);
+    // Rent and nothing else: no receipts to open.
+    const rentOnly = { month: "2026-09", purchaseInvoiceCount: 1, expenseByCategory: [{ category: "vuokra", count: 1 }] };
+    expect(expenseDrillTarget(rentOnly)).toBeNull();
+    expect(expenseDrillTargets(rentOnly).map((target) => target.id)).toEqual(["purchase-invoices"]);
+    // An older cached report has no purchase invoice count: receipts as before.
+    expect(expenseDrillTargets({ month: "2026-09", expenseByCategory: [{ category: "vuokra", count: 1 }] }).map((target) => target.id)).toEqual(["expense-receipts"]);
+    expect(expenseDrillTargets({ month: "2026-09", expenseByCategory: [] })).toEqual([]);
+  });
+
+  it("opens a category made of purchase invoices alone in Ostolaskut, one with receipts in Kuitit", () => {
+    // Rent: one row, one purchase invoice. Kuitit filtered by vuokra would list nothing.
+    expect(expenseCategoryHref({ category: "vuokra", count: 2, purchaseInvoiceCount: 2 }, 2026)).toBe("/kirjanpito/ostolaskut");
+    // Receipts and a bill: the receipts list, whose rows are the receipts of the count.
+    expect(expenseCategoryHref({ category: "tarvikkeet", count: 4, purchaseInvoiceCount: 2 }, 2026)).toBe(
+      "/kuitit?month=2026&type=meno&category=tarvikkeet&drill=1"
+    );
+    // Receipts only, and an older report without the count: as before.
+    expect(expenseCategoryHref({ category: "sähkö", count: 3, purchaseInvoiceCount: 0 }, "2026")).toBe("/kuitit?month=2026&type=meno&category=s%C3%A4hk%C3%B6&drill=1");
+    expect(expenseCategoryHref({ category: "vuokra", count: 1 }, 2026)).toBe("/kuitit?month=2026&type=meno&category=vuokra&drill=1");
+    // The uncategorised row has no receipts list of its own, but its bills do.
+    expect(expenseCategoryHref({ category: "Luokittelematon", count: 3, purchaseInvoiceCount: 1 }, 2026)).toBeUndefined();
+    expect(expenseCategoryHref({ category: "Luokittelematon", count: 1, purchaseInvoiceCount: 1 }, 2026)).toBe("/kirjanpito/ostolaskut");
+  });
+
+  it("opens Koti's Kulut in the list its figure is made of", () => {
+    expect(kotiExpenseHref({ source: "tiliote", purchaseInvoiceCount: 2, expenseReceiptCount: 0 }, "2026-09")).toBe("/pankki/tapahtumat?month=2026-09");
+    // Purchase invoices and nothing else: Kuitit would be empty.
+    expect(kotiExpenseHref({ source: "kuitit", purchaseInvoiceCount: 2, expenseReceiptCount: 0 }, "2026-09")).toBe("/kirjanpito/ostolaskut");
+    // Any receipt, or a server that does not count them: Kuitit, as before.
+    expect(kotiExpenseHref({ source: "kuitit", purchaseInvoiceCount: 2, expenseReceiptCount: 3 }, "2026-09")).toBe("/kuitit?month=2026-09&type=meno&drill=1");
+    expect(kotiExpenseHref({ source: "kuitit", purchaseInvoiceCount: 2 }, "2026-09")).toBe("/kuitit?month=2026-09&type=meno&drill=1");
+    expect(kotiExpenseHref({ source: "kuitit", purchaseInvoiceCount: 0, expenseReceiptCount: 0 }, "2026-09")).toBe("/kuitit?month=2026-09&type=meno&drill=1");
+    expect(kotiExpenseHref(null, "2026-09")).toBe("/kuitit?month=2026-09&type=meno&drill=1");
   });
 
   it("lets the invoice list reset a remembered status tab", () => {

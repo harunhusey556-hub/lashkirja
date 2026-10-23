@@ -216,7 +216,7 @@ struct RaportitView: View {
                 drillFigure(ReportDrill.incomeTargets(report.total, key: yearKey)) {
                     LabeledContent("Tulot") { MoneyText(amount: report.total.incomeNet) }
                 }
-                drillFigure([ReportDrill.expenseTarget(report.total, key: yearKey)].compactMap { $0 }) {
+                drillFigure(ReportDrill.expenseTargets(report.total, key: yearKey)) {
                     LabeledContent("Menot") { MoneyText(amount: report.total.expenseNet) }
                 }
                 LabeledContent("Tulos") { MoneyText(amount: report.total.profitNet).fontWeight(.semibold) }
@@ -225,7 +225,17 @@ struct RaportitView: View {
             categorySection(report.total)
         } else {
             Section {
-                ContentUnavailableView("Ei kirjauksia vuodelta \(yearKey)", systemImage: "chart.bar")
+                ContentUnavailableView {
+                    // Takes the lines it needs in a list row, as EmailInboxView's does (M073, G004).
+                    Label {
+                        Text("Ei kirjauksia vuodelta \(yearKey)")
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "chart.bar")
+                    }
+                }
             }
             .listRowBackground(Color.clear)
             if !quality.isEmpty {
@@ -277,7 +287,7 @@ struct RaportitView: View {
     /// Each category opens the receipts (or invoices) that make it up, for the year on screen.
     private func categories(_ rows: [ProfitLoss.Category], kind: ReportCategoryKind) -> some View {
         ForEach(rows) { row in
-            NavigationLink(value: Route.forDrill(ReportDrill.target(kind: kind, category: row.category, year: String(year)))) {
+            NavigationLink(value: Route.forDrill(ReportDrill.target(kind: kind, row: row, year: String(year)))) {
                 LabeledContent { MoneyText(amount: row.net) } label: {
                     VStack(alignment: .leading) {
                         // The label Kuitit shows ("Tarvikkeet & ostot", X081); the drill above keeps the id.
@@ -473,11 +483,11 @@ struct RaportitView: View {
         guard let report = state.value, !swapping else { return [] }
         let key = String(year)
         var drills = ReportDrill.incomeTargets(report.total, key: key)
-        drills += [ReportDrill.expenseTarget(report.total, key: key)].compactMap { $0 }
+        drills += ReportDrill.expenseTargets(report.total, key: key)
         drills += ReportDrill.dataQuality(missingVat: report.total.missingVatCount, undated: report.undatedCount, year: key).map(\.drill)
         if let kind = ReportCategoryKind.resolve(categoryChoice, in: report.total) {
             let rows = kind.rows(report.total)
-            drills += rows.prefix(categoryLimit.visible(rows.count)).map { ReportDrill.target(kind: kind, category: $0.category, year: key) }
+            drills += rows.prefix(categoryLimit.visible(rows.count)).map { ReportDrill.target(kind: kind, row: $0, year: key) }
         }
         return ReportDrillWarm.requests(drills)
     }

@@ -66,6 +66,14 @@ scripts/sim/motion-audit.sh --collect test01_Koti # a run already started: wait,
   fine jank. Jank is for Instruments: signposts `Motion/settle` and `Screens/first-paint` on a device.
 - Checks and thresholds are in the analyzer's docstring; the calibration (known good and known bad
   steps in `test00_Calibration`) is stated at the top of every report.
+- Each suite's launch is also a row, `prebuild-freed`: the tab copies the app builds and throws away
+  after launch (`Shell/TabPrebuild.swift`) must be gone 2 s later (`MARK prebuild-<tab>-freed=...`
+  in `probe.log`; `MARK prebuild-<tab>-late=` is the same look 10 s on). A tab the baseline built and
+  released but both PR walks kept fails the gate job; a tab kept before and after (the open M086) or
+  one the baseline never built (whether a tab is prebuilt depends on timing) is listed only. With `LK_RETAIN_TRACE=1` (the workflow's `retain_trace` input) `run-ui.sh`
+  also saves `retain-prebuild-<tab>-window.txt`, the `leaks --traceTree --noContent` of what holds
+  the copy's window, and `retain-autoreleasepools.txt`. `LK_CONFIGURATION=Release-UITest` walks the
+  optimized app instead of Debug (the probe is Debug only).
 - Limits seen on the first runs (2026-10-15): `xctrace --template 'Animation Hitches'` answers
   "Hitches is not supported on this platform" on the simulator. Each suite starts from a fresh
   launch and opens screens seconds later, while the launch prefetch is still waiting on the

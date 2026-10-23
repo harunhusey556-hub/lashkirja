@@ -1,5 +1,6 @@
 /**
- * Profit and loss (tuloslaskelma) built from receipts and sales invoices.
+ * Profit and loss (tuloslaskelma) built from receipts, sales invoices and
+ * purchase invoices.
  *
  * Documents, not bank rows, are the source: only a receipt or an invoice
  * carries the VAT breakdown. A receipt whose VAT is unknown is counted at its
@@ -8,8 +9,17 @@
  *
  * Sales invoices count by invoice date, the same basis as the VAT return
  * (see ./alv-period). A credit note is negative income in its own month.
+ *
+ * A purchase invoice no receipt documents (rent, a bill typed in by hand) is an
+ * expense of its invoice month, as the ledger posts it. The rule for which
+ * purchase invoices those are lives in ./alv-period; a supplier credit note is
+ * a negative expense.
+ *
+ * A receipt is read as the ledger posts it (./ledger/posting): signed, so a refund or a
+ * credit note stored negative takes its amount off, and for a purchase only a domestic
+ * receipt's VAT lines are split off the cost (splitsDocumentVat).
  */
-import { parseVatDetails } from "./alv";
+import { parseVatDetails, splitsDocumentVat } from "./alv";
 import { monthKey } from "./bank-balances";
 import { centsToEuros } from "./money";
 
@@ -19,6 +29,8 @@ export interface ReportReceipt {
   totalAmountCents: number | null;
   category: string | null;
   vatDetails: string | null;
+  /** Purchases only; absent means domestic. */
+  vatTreatment?: string | null;
 }
 
 /** A booked sales invoice or credit note; totals are signed (credit note < 0). */
@@ -30,6 +42,15 @@ export interface ReportInvoice {
   grossCents: number;
 }
 
+/** A purchase invoice the books count on its own, with no receipt standing in for it; signed (a supplier credit note < 0). */
+export interface ReportPurchaseInvoice {
+  issueDate: Date | string;
+  category: string | null;
+  grossCents: number;
+  /** The VAT the ledger splits off the cost: none under reverse charge or foreign VAT, where the whole amount is the expense. */
+  vatCents: number;
+}
+
 /** Category rows the invoices land in, so the drill-down can tell them apart. */
 export const INVOICE_CATEGORY = "Myyntilaskut";
 export const CREDIT_NOTE_CATEGORY = "Hyvityslaskut";
@@ -39,7 +60,10 @@ export interface CategoryRow {
   grossCents: number;
   vatCents: number;
   netCents: number;
+  /** Receipts and purchase invoices together. */
   count: number;
+  /** How many of `count` are purchase invoices, which Kuitit does not list but Ostolaskut does. */
+  purchaseInvoiceCount: number;
 }
 
 export interface ProfitLossPeriod {
@@ -61,6 +85,8 @@ export interface ProfitLossPeriod {
   invoiceCount: number;
   /** Credit notes counted (negative) in the period. */
   creditNoteCount: number;
+  /** Purchase invoices counted in the period, supplier credit notes included. */
+  purchaseInvoiceCount: number;
   missingVatCount: number;
   uncategorisedCount: number;
 }
@@ -87,6 +113,7 @@ function emptyPeriod(month: string | null): ProfitLossPeriod {
     receiptCount: 0,
     invoiceCount: 0,
     creditNoteCount: 0,
+    purchaseInvoiceCount: 0,
     missingVatCount: 0,
     uncategorisedCount: 0,
   };
@@ -106,7 +133,8 @@ function addToCategory(
   target: Map<string, CategoryRow>,
   category: string,
   grossCents: number,
-  vatCents: number
+  vatCents: number,
+  purchaseInvoice = false
 ): void {
   const row = target.get(category) ?? {
     category,
@@ -114,11 +142,13 @@ function addToCategory(
     vatCents: 0,
     netCents: 0,
     count: 0,
+    purchaseInvoiceCount: 0,
   };
   row.grossCents += grossCents;
   row.vatCents += vatCents;
   row.netCents += grossCents - vatCents;
   row.count += 1;
+  if (purchaseInvoice) row.purchaseInvoiceCount += 1;
   target.set(category, row);
 }
 
@@ -143,7 +173,8 @@ export interface ProfitLossResult {
 
 export function buildProfitLoss(
   receipts: ReportReceipt[],
-  invoices: ReportInvoice[] = []
+  invoices: ReportInvoice[] = [],
+  purchaseInvoices: ReportPurchaseInvoice[] = []
 ): ProfitLossResult {
   const total = newAccumulator(null);
   const byMonth = new Map<string, Accumulator>();
@@ -169,17 +200,32 @@ export function buildProfitLoss(
     }
   }
 
+  for (const purchase of purchaseInvoices) {
+    const category = purchase.category?.trim() || UNCATEGORISED;
+    for (const target of [total, monthAccumulator(purchase.issueDate)]) {
+      target.period.purchaseInvoiceCount += 1;
+      if (category === UNCATEGORISED) target.period.uncategorisedCount += 1;
+      // Signed: a supplier credit note reduces expenses, it is never income.
+      target.period.expenseGrossCents += purchase.grossCents;
+      target.period.expenseVatCents += purchase.vatCents;
+      addToCategory(target.expense, category, purchase.grossCents, purchase.vatCents, true);
+    }
+  }
+
   for (const receipt of receipts) {
     const grossCents = receipt.totalAmountCents;
     if (grossCents === null || grossCents === undefined) continue;
-    const gross = Math.abs(grossCents);
 
     const vatLines = parseVatDetails(receipt.vatDetails);
-    const vatCents = vatLines
-      ? vatLines.reduce((sum, line) => sum + Math.abs(line.amountCents), 0)
-      : 0;
     const category = receipt.category?.trim() || UNCATEGORISED;
     const isIncome = receipt.type === "tulo";
+    // Signed, as the ledger takes them: a refund or credit note is stored negative, with negative
+    // VAT lines, and reduces the figure. Income never reads a treatment; a purchase's VAT is split
+    // off only when it is domestic.
+    const vatCents =
+      vatLines && (isIncome || splitsDocumentVat(receipt.vatTreatment))
+        ? vatLines.reduce((sum, line) => sum + line.amountCents, 0)
+        : 0;
 
     const targets: Accumulator[] = [total];
     if (receipt.date) {
@@ -193,13 +239,13 @@ export function buildProfitLoss(
       if (!vatLines) target.period.missingVatCount += 1;
       if (category === UNCATEGORISED) target.period.uncategorisedCount += 1;
       if (isIncome) {
-        target.period.incomeGrossCents += gross;
+        target.period.incomeGrossCents += grossCents;
         target.period.incomeVatCents += vatCents;
-        addToCategory(target.income, category, gross, vatCents);
+        addToCategory(target.income, category, grossCents, vatCents);
       } else {
-        target.period.expenseGrossCents += gross;
+        target.period.expenseGrossCents += grossCents;
         target.period.expenseVatCents += vatCents;
-        addToCategory(target.expense, category, gross, vatCents);
+        addToCategory(target.expense, category, grossCents, vatCents);
       }
     }
   }
@@ -222,6 +268,7 @@ export function periodToEuros(period: ProfitLossPeriod) {
       vat: centsToEuros(row.vatCents),
       net: centsToEuros(row.netCents),
       count: row.count,
+      purchaseInvoiceCount: row.purchaseInvoiceCount,
     }));
 
   return {
@@ -239,6 +286,7 @@ export function periodToEuros(period: ProfitLossPeriod) {
     receiptCount: period.receiptCount,
     invoiceCount: period.invoiceCount,
     creditNoteCount: period.creditNoteCount,
+    purchaseInvoiceCount: period.purchaseInvoiceCount,
     missingVatCount: period.missingVatCount,
     uncategorisedCount: period.uncategorisedCount,
   };

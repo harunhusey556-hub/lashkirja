@@ -19,6 +19,15 @@ enum UITestHooks {
     static let launchPhase = false
     #endif
 
+    /// `-LKNoVersionPoll` keeps the 30 s version poll off (`AppModel.startVersionPolling`), so a
+    /// screen that reloads when the connection returns can be told from one the poll reloaded
+    /// anyway (P3 testA, F006). Its own argument, so every other walk keeps the poll.
+    #if DEBUG || LK_UITEST_HOOKS
+    static let versionPollOff = ProcessInfo.processInfo.arguments.contains("-LKNoVersionPoll")
+    #else
+    static let versionPollOff = false
+    #endif
+
     #if DEBUG || LK_UITEST_HOOKS
     /// Milliseconds since this process was started (by the kernel's clock), for launch timings
     /// that include what happens before `main`.
@@ -91,6 +100,20 @@ enum UITestHooks {
     /// server keeps a day, an amount and a counterparty once and refuses a file of rows it has.
     static func fixtureStatement(day: String) -> Data {
         Data("Kirjauspäivä;Summa;Saaja/Maksaja;Viesti\n\(day);-3,17;Tiliotetesti \(UUID().uuidString.prefix(4));Testitiliote\n".utf8)
+    }
+
+    /// The statement as a file in the app's temporary folder, which Lisää's import reads as it reads
+    /// a picked one.
+    static func fixtureStatementFile(day: String) -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(statementFixtureName)
+        // A write that fails leaves no file, and the import then says the file could not be read.
+        try? fixtureStatement(day: day).write(to: url, options: .atomic)
+        return url
+    }
+
+    /// A statement file that is not there: its read fails as a refused pick's does.
+    static var missingStatementFile: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("puuttuva-\(statementFixtureName)")
     }
 }
 

@@ -42,6 +42,9 @@ jobs:
           # Compile errors and failed expectations become annotations, readable without a log download.
           grep -E "error:|✘" test.log | sed -E 's/\x1b\[[0-9;]*m//g' | sort -u | head -40 | while IFS= read -r line; do echo "::error::${line}"; done
           exit $status
+      # 389 warnings sat in this log unseen (N002): one in the repo's own sources now fails the job.
+      - name: No compiler warnings
+        run: python3 scripts/compiler-warnings.py ios-native/LashKirjaCore/test.log
 
   ios-build:
     name: iOS build and tests
@@ -66,9 +69,31 @@ jobs:
           print(ids[0] if ids else "")')
           echo "Simulator: $DEST"
           echo "SIM_UDID=$DEST" >> "$GITHUB_ENV"
-          xcodebuild test -project LashKirja.xcodeproj -scheme LashKirja \
+          # Ad-hoc signed, as the UI tests below: an unsigned simulator host has no Keychain, and
+          # KeychainTokenStoreTests skipped on every run (N001). LK_REQUIRE_KEYCHAIN makes the test
+          # fail instead of skip when the host still has none.
+          TEST_RUNNER_LK_REQUIRE_KEYCHAIN=1 xcodebuild test -project LashKirja.xcodeproj -scheme LashKirja \
             -destination "id=$DEST" -derivedDataPath build -resultBundlePath TestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO | xcbeautify --renderer github-actions
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO | tee xcodebuild.log | xcbeautify --renderer github-actions
+      # xcbeautify drops the file and line of a warning; the raw log names them (N002).
+      - name: No compiler warnings
+        run: python3 scripts/compiler-warnings.py ios-native/App/xcodebuild.log
+      # N001: the only unit test that skipped here was the Keychain round trip, so any skip means
+      # the Keychain tests did not run. The test's own skip stays for a host that has no Keychain.
+      - name: Unit tests ran, none skipped
+        working-directory: ios-native/App
+        run: |
+          set -euo pipefail
+          xcrun xcresulttool get test-results summary --path TestResults.xcresult --compact > unit-summary.json
+          python3 - unit-summary.json <<'PY'
+          import json, sys
+          s = json.load(open(sys.argv[1]))
+          skipped = s.get("skippedTests", 0)
+          print(f"Unit tests: {s.get('totalTestCount', 0)} total, {s.get('passedTests', 0)} passed, {s.get('failedTests', 0)} failed, {skipped} skipped")
+          if s.get("totalTestCount", 0) == 0 or skipped:
+              print(f"::error::{skipped} unit test(s) skipped, or none ran: KeychainTokenStoreTests must run on the ad-hoc signed host (N001)")
+              sys.exit(1)
+          PY
       # The owner's screens (OwnerScreensTests) are driven against a throwaway demo API on this
       # runner's loopback, as docs/quality/SIMULATOR.md does by hand: a fresh SQLite file, the demo
       # seed, no cloud AI, no mail. Nothing here reaches a real server.
@@ -225,10 +250,13 @@ jobs:
         run: |
           set -o pipefail
           xcodegen generate
+          # dwarf-with-dsym is named here, not left to the project's Release preset: the dSYMs below are
+          # the only way to read a MetricKit crash report from this IPA.
           xcodebuild -project LashKirja.xcodeproj -scheme LashKirja -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             API_BASE_URL="$API_URL" CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | xcbeautify --renderer github-actions
+            DEBUG_INFORMATION_FORMAT=dwarf-with-dsym \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tee xcodebuild.log | xcbeautify --renderer github-actions
           # A Release IPA must talk to a real https server and carry a build number that names this run.
           PLIST=build/Build/Products/Release-iphoneos/LashKirja.app/Info.plist
           BASE=$(/usr/libexec/PlistBuddy -c "Print :LKAPIBaseURL" "$PLIST")
@@ -247,3 +275,36 @@ jobs:
           name: LashKirja-native-unsigned-ipa
           path: ios-native/App/LashKirja-native-unsigned.ipa
           retention-days: 30
+      # MetricKit reports name the binary and an offset; these bundles turn them into symbols. They match
+      # only this run's build (same UUIDs), so they are kept per run, beside its IPA, and longer: a build
+      # stays installed after its IPA artifact has expired.
+      - name: Collect dSYMs
+        working-directory: ios-native/App
+        run: |
+          set -eu
+          PRODUCTS=build/Build/Products/Release-iphoneos
+          rm -rf dsyms LashKirja-native-dsyms.zip
+          mkdir dsyms
+          # The app's and its frameworks' bundles (LashKirjaStripe); the Swift package is linked into the app's.
+          for d in "$PRODUCTS"/*.dSYM; do
+            if [ -d "$d" ]; then cp -R "$d" dsyms/; fi
+          done
+          echo "dSYMs: $(ls dsyms | tr '\n' ' ')"
+          [ -n "$(ls dsyms)" ] || { echo "::error::No .dSYM bundle under $PRODUCTS: crash reports from this IPA could not be symbolicated"; exit 1; }
+          [ -d dsyms/LashKirja.app.dSYM ] || { echo "::error::LashKirja.app.dSYM is missing: the app's own crashes could not be symbolicated"; exit 1; }
+          # A dSYM that does not carry the IPA binary's UUID symbolicates nothing.
+          EXEC=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$PRODUCTS/LashKirja.app/Info.plist")
+          APP_UUIDS=$(dwarfdump --uuid "$PRODUCTS/LashKirja.app/$EXEC" | awk '{print $2}' | sort)
+          DSYM_UUIDS=$(dwarfdump --uuid dsyms/LashKirja.app.dSYM | awk '{print $2}' | sort)
+          echo "App UUID: $APP_UUIDS, dSYM UUID: $DSYM_UUIDS"
+          [ -n "$APP_UUIDS" ] && [ "$APP_UUIDS" = "$DSYM_UUIDS" ] || { echo "::error::LashKirja.app.dSYM does not match the app binary's UUID"; exit 1; }
+          ditto -c -k dsyms LashKirja-native-dsyms.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LashKirja-native-dsyms
+          path: ios-native/App/LashKirja-native-dsyms.zip
+          retention-days: 90
+          if-no-files-found: error
+      # After the upload: the device build compiles what the simulator's skips, and a warning there must not cost the IPA.
+      - name: No compiler warnings
+        run: python3 scripts/compiler-warnings.py ios-native/App/xcodebuild.log

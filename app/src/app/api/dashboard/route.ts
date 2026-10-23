@@ -8,12 +8,12 @@ import { parseBusinessDetails, deriveVatProfile } from "@/lib/onboarding";
 import { bankEverConnected, getBankPosition, loadBalanceTrend, type BalancePoint, type BankPosition, type PositionConnection } from "@/lib/bank-position";
 import { loadCashflow, type CashflowMonth } from "@/lib/koti-cashflow";
 import { buildAging, buildAgingReport, creditedCentsOf, openPosition, type InvoiceStatus } from "@/lib/invoices";
-import { alvReportOf, loadAlvPeriodSources, type AlvPeriodSources } from "@/lib/alv-period";
+import { alvReportOf, loadAlvPeriodSources, profitLossOf, type AlvPeriodSources } from "@/lib/alv-period";
 import { cachedForStamp, readBooksStamp } from "@/lib/books-cache";
 import { getBankOverview } from "@/lib/bank-accounts";
 import { monthKey } from "@/lib/bank-balances";
 import { computeYearTurnover } from "@/lib/alv-threshold";
-import { buildProfitLoss } from "@/lib/reports";
+import type { ProfitLossPeriod } from "@/lib/reports";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { buildDashboardItems, loadSharedMatchData, type DashboardItems } from "./items";
 import { MONTH_ROW_FACTS, monthProgress } from "@/lib/month-rows";
@@ -33,7 +33,7 @@ function previousMonthKey(month: string): string {
 
 /** What Koti shows from the month's books; plain numbers, so a cached copy cannot be mutated. */
 type MonthFigures = {
-  total: ReturnType<typeof buildProfitLoss>["total"];
+  total: ProfitLossPeriod;
   estimatedVat: number;
   receiptCount: number;
 };
@@ -41,7 +41,7 @@ type MonthFigures = {
 function monthFiguresOf(books: AlvPeriodSources): MonthFigures {
   const alvReport = alvReportOf(books);
   return {
-    total: buildProfitLoss(books.reportReceipts, books.reportInvoices).total,
+    total: profitLossOf(books).total,
     estimatedVat: alvReport.field308.isRefund ? -alvReport.field308.amount : alvReport.field308.amount,
     receiptCount: books.receiptCount,
   };
@@ -134,6 +134,11 @@ export async function GET(req: NextRequest) {
   const monthBooks = monthFigures?.total ?? null;
   const documentIncome = monthBooks ? centsToEuros(monthBooks.incomeGrossCents) : 0;
   const documentExpenses = monthBooks ? centsToEuros(monthBooks.expenseGrossCents) : 0;
+  // Kulut counts purchase invoices too, which Kuitit does not list: Koti opens the list that holds its rows.
+  const purchaseInvoiceCount = monthBooks?.purchaseInvoiceCount ?? 0;
+  const expenseReceiptCount = monthBooks
+    ? monthBooks.expenseByCategory.reduce((sum, row) => sum + row.count, 0) - purchaseInvoiceCount
+    : 0;
   const estimatedVat = monthFigures?.estimatedVat ?? 0;
   const hasBankData = transactions.length > 0;
 
@@ -381,6 +386,8 @@ export async function GET(req: NextRequest) {
     txCount: transactions.length,
     receiptCount: monthFigures?.receiptCount ?? 0,
     invoiceCount: monthBooks ? monthBooks.invoiceCount + monthBooks.creditNoteCount : 0,
+    purchaseInvoiceCount,
+    expenseReceiptCount,
     matching: { matchable, matched, suggested },
     events,
     handled: handled && handled.count > 0 ? handled : null,

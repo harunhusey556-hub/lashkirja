@@ -127,12 +127,14 @@ export async function createReceipt(
     vendor: string;
     vatDetails: string | null;
     reviewStatus: string;
+    vatTreatment: string;
   }> = {}
 ) {
   return prisma.receipt.create({
     data: {
       userId,
       type: overrides.type ?? "meno",
+      ...(overrides.vatTreatment ? { vatTreatment: overrides.vatTreatment } : {}),
       date:
         overrides.date === null
           ? null

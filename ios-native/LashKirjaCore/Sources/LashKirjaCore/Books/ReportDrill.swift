@@ -49,6 +49,16 @@ public enum ReportDrill: Hashable, Sendable {
         return .receipts(period: year, tab: tab, category: category == "Luokittelematon" ? "" : category)
     }
 
+    /// A category row's list (web `expenseCategoryHref`). The row counts purchase invoices with the
+    /// receipts, but Kuitit lists only receipts: a category made of purchase invoices alone opens
+    /// Ostolaskut, never an empty list. A category of both opens its receipts; its bills are behind
+    /// the Menot figure's own Ostolaskut link (`expenseTargets`).
+    public static func target(kind: ReportCategoryKind, row: ProfitLoss.Category, year: String) -> ReportDrill {
+        let bills = row.purchaseInvoiceCount ?? 0
+        if kind == .expense && bills > 0 && row.count - bills <= 0 { return .purchaseInvoices }
+        return target(kind: kind, category: row.category, year: year)
+    }
+
     // MARK: Report periods (web `incomeDrillTargets`, `expenseDrillTarget`)
 
     /// Income lives in two lists: invoices (sales and credit notes are not receipts) and the
@@ -64,16 +74,28 @@ public enum ReportDrill: Hashable, Sendable {
         return targets
     }
 
-    /// Expenses are receipts only: the Kuitit list, the bills filed as ostolaskut included, as the
-    /// figure counts them (`ReceiptListQuery.drill`).
+    /// The expense rows that are receipts: the Kuitit list, the bills filed as ostolaskut included, as
+    /// the figure counts them (`ReceiptListQuery.drill`). Purchase invoices no receipt documents are
+    /// expense rows too, but Kuitit does not list them (`purchaseInvoiceTarget`).
     public static func expenseTarget(_ period: ProfitLoss.Period, key: String) -> ReportDrill? {
-        period.expenseByCategory.reduce(0) { $0 + $1.count } == 0 ? nil : .receipts(period: key, tab: "meno", category: "")
+        let receiptRows = period.expenseByCategory.reduce(0) { $0 + $1.count } - (period.purchaseInvoiceCount ?? 0)
+        return receiptRows <= 0 ? nil : .receipts(period: key, tab: "meno", category: "")
     }
 
-    /// Every list a month's result is made of: its income lists, then its expense receipts.
+    /// Purchase invoices no receipt documents (rent, a typed-in bill): the Ostolaskut list.
+    public static func purchaseInvoiceTarget(_ period: ProfitLoss.Period) -> ReportDrill? {
+        (period.purchaseInvoiceCount ?? 0) > 0 ? .purchaseInvoices : nil
+    }
+
+    /// Every list an expense figure is made of: its receipts, then its purchase invoices.
+    public static func expenseTargets(_ period: ProfitLoss.Period, key: String) -> [ReportDrill] {
+        [expenseTarget(period, key: key), purchaseInvoiceTarget(period)].compactMap { $0 }
+    }
+
+    /// Every list a month's result is made of: its income lists, then its expense lists.
     public static func monthTargets(_ period: ProfitLoss.Period) -> [ReportDrill] {
         guard let key = period.month else { return [] }
-        return incomeTargets(period, key: key) + [expenseTarget(period, key: key)].compactMap { $0 }
+        return incomeTargets(period, key: key) + expenseTargets(period, key: key)
     }
 
     /// The month the Raportit chart selects first: the latest one with figures, else the last.
@@ -84,10 +106,16 @@ public enum ReportDrill: Hashable, Sendable {
     // MARK: Koti (web `DashboardClient` tulotHref / menotHref)
 
     /// Koti's Myynti and Kulut cards: on a bank-statement basis the month's bank rows; otherwise
-    /// the month's invoices when it has any (sales are invoices), else its receipts.
-    public static func koti(income: Bool, source: String, invoiceCount: Int, month: String) -> ReportDrill {
+    /// the month's invoices when it has any (sales are invoices), else its receipts. Kulut counts
+    /// purchase invoices too, so a month whose costs are purchase invoices alone opens Ostolaskut
+    /// (any receipt keeps Kuitit); a server that does not count them leaves the receipts.
+    public static func koti(income: Bool, source: String, invoiceCount: Int, month: String,
+                            purchaseInvoiceCount: Int? = nil, expenseReceiptCount: Int? = nil) -> ReportDrill {
         if source == "tiliote" { return .bankFeed(month: month) }
         if income && invoiceCount > 0 { return .invoices(period: month, status: .all) }
+        if !income, (purchaseInvoiceCount ?? 0) > 0, let receipts = expenseReceiptCount, receipts <= 0 {
+            return .purchaseInvoices
+        }
         return .receipts(period: month, tab: income ? "tulo" : "meno", category: "")
     }
 

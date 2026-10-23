@@ -5,8 +5,9 @@ name: iOS motion gate
 # instrument laid on (baseline) once, then on this branch twice. Before every walk the demo DB is
 # seeded afresh, the app is uninstalled and the API is warmed, so no walk inherits another's data
 # or cache. scripts/sim/motion-gate.py: a row is NEW FAIL when it PASSes in the baseline and FAILs
-# in both branch runs, and NEW MISS when the baseline judged it and neither branch run did; a NEW
-# MISS fails the job, a NEW FAIL is listed for the PR's review.
+# in both branch runs (a stall row also needs the margin the script names), and NEW MISS when the
+# baseline judged it and neither branch run did (a step the recording did not film is not judged);
+# a NEW MISS fails the job, a NEW FAIL is listed for the PR's review.
 # Artifact motion-gate-<suite>: {baseline,pr-run1,pr-run2}/motion-report.{json,md} and gate.md.
 on:
   push:
@@ -22,6 +23,11 @@ on:
         description: 'JSON list: "all" (one run of the whole class) or MotionAuditTests method names, one runner each'
         required: false
         default: '["all"]'
+      retain_trace:
+        description: "Save who holds a tab copy still alive after launch (M086): leaks on the app, once per copy"
+        type: boolean
+        required: false
+        default: false
 
 env:
   # Only the audit instrument (walk, probe, analyzer), no fixes: laid on the baseline so it can be walked.
@@ -104,6 +110,8 @@ jobs:
         env:
           SUITE: ${{ matrix.suite }}
           LK_DEDICATED_MAC: "1"
+          # A prebuilt tab copy still alive after launch (M086): run-ui.sh saves who holds it.
+          LK_RETAIN_TRACE: ${{ inputs.retain_trace && '1' || '' }}
         run: |
           # Errors are handled where they matter: a walk that fails some steps still has a report.
           set +e -u
@@ -165,6 +173,7 @@ jobs:
             motion-gate/*/*/notes.txt
             motion-gate/*/*/steps.json
             motion-gate/*/*/probe.log
+            motion-gate/*/*/retain-*.txt
             motion-gate/*/*/xcui.log
             motion-gate/*/*/sheet-*.png
       - uses: actions/upload-artifact@v4

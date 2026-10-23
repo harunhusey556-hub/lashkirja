@@ -71,6 +71,49 @@ struct TabPrebuild: UIViewRepresentable {
         private func build(_ root: AnyView, size: CGSize, name: String, in scene: UIWindowScene?) {
             guard let scene else { return }
             let start = ContinuousClock.now
+            let copy = Self.render(root, size: size, in: scene)
+            Task { [copy] in
+                try? await Task.sleep(for: .seconds(2))
+                MotionProbe.shared.mark("prebuild-\(name)-freed=\(copy.host == nil && copy.window == nil)")
+                MotionProbe.shared.mark("prebuild-\(name)-host-freed=\(copy.host == nil)")
+                MotionProbe.shared.mark("prebuild-\(name)-window-freed=\(copy.window == nil)")
+                // For `leaks --traceTree` (scripts/sim/run-ui.sh, LK_RETAIN_TRACE): what holds it.
+                if let host = copy.host { MotionProbe.shared.mark("prebuild-\(name)-host-address=\(Self.address(host))") }
+                if let window = copy.window { MotionProbe.shared.mark("prebuild-\(name)-window-address=\(Self.address(window))") }
+                // Still there at 2 s is a leak only if it stays: released by 10 s says it was late.
+                try? await Task.sleep(for: .seconds(8))
+                MotionProbe.shared.mark("prebuild-\(name)-late=\(copy.host == nil && copy.window == nil)")
+            }
+            let elapsed = ContinuousClock.now - start
+            let ms = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+            MotionProbe.shared.mark("prebuild-\(name)-built ms=\(ms)")
+            Self.logger.log("prebuild \(name, privacy: .public) \(ms, privacy: .public) ms \(copy.mode, privacy: .public) views=\(copy.views, privacy: .public) lists=\(copy.lists, privacy: .public)")
+        }
+
+        private static func address(_ object: AnyObject) -> String {
+            "0x" + String(UInt(bitPattern: Unmanaged.passUnretained(object).toOpaque()), radix: 16)
+        }
+
+        /// What a copy came to, and handles that tell whether it was released afterwards.
+        struct Rendered {
+            let views: Int
+            let lists: Int
+            let mode: String
+            weak var host: UIViewController?
+            weak var window: UIWindow?
+        }
+
+        static func render(_ root: AnyView, size: CGSize, in scene: UIWindowScene) -> Rendered {
+            // UIKit and SwiftUI autorelease references to the copy's controller and window while
+            // they lay it out. Left to the caller's pool, the copy lives until that pool drains
+            // (TabPrebuildFreedTests: both alive 2 s on, called from a method whose pool does not);
+            // drained here, it is gone when this returns. Whether that is all M086 held (the Myynti
+            // copy's window alive 2 s on in every CI launch; it never was on the iMac) only a CI
+            // walk shows: the probe's `-freed` and `-late` marks.
+            autoreleasepool { layout(root, size: size, in: scene) }
+        }
+
+        private static func layout(_ root: AnyView, size: CGSize, in scene: UIWindowScene) -> Rendered {
             // SwiftUI renders a hosting view only in a window (w58 perf walk: windowless, the copy
             // was one empty view). Its own window, never key and closed again in this turn; hidden
             // first, and if SwiftUI builds nothing there, shown under the app's window and off its
@@ -85,29 +128,20 @@ struct TabPrebuild: UIViewRepresentable {
             host.view.frame = CGRect(origin: .zero, size: size)
             host.view.layoutIfNeeded()
             var mode = "hidden"
-            if Self.count(host.view) < 10 {
+            if count(host.view) < 10 {
                 mode = "shown"
                 window.isHidden = false
                 host.view.setNeedsLayout()
                 host.view.layoutIfNeeded()
             }
-            let views = Self.count(host.view), lists = Self.lists(host.view)
+            let views = count(host.view), listCount = lists(host.view)
             window.isHidden = true
             window.rootViewController = nil
             // Out of the scene too, so no part of the copy stays among the windows a later
             // presentation goes through; the probe lines tell whether the copy was freed (w65),
             // the controller and the window each, as M086 needs to know which one stays.
             window.windowScene = nil
-            Task { [weak host, weak window] in
-                try? await Task.sleep(for: .seconds(2))
-                MotionProbe.shared.mark("prebuild-\(name)-freed=\(host == nil && window == nil)")
-                MotionProbe.shared.mark("prebuild-\(name)-host-freed=\(host == nil)")
-                MotionProbe.shared.mark("prebuild-\(name)-window-freed=\(window == nil)")
-            }
-            let elapsed = ContinuousClock.now - start
-            let ms = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
-            MotionProbe.shared.mark("prebuild-\(name)-built ms=\(ms)")
-            Self.logger.log("prebuild \(name, privacy: .public) \(ms, privacy: .public) ms \(mode, privacy: .public) views=\(views, privacy: .public) lists=\(lists, privacy: .public)")
+            return Rendered(views: views, lists: listCount, mode: mode, host: host, window: window)
         }
 
         private static func count(_ view: UIView) -> Int { 1 + view.subviews.reduce(0) { $0 + count($1) } }

@@ -42,11 +42,14 @@ export function invoiceDrillHref(filter: { month?: string | null; status?: strin
   return query ? `/laskut?${query}` : "/laskut";
 }
 
+/** The purchase invoices list; it takes no period or category of its own. */
+const PURCHASE_INVOICES_HREF = "/kirjanpito/ostolaskut";
+
 /** Category rows the profit and loss puts sales invoices and credit notes in (lib/reports.ts). */
 const INVOICE_CATEGORIES = new Set(["Myyntilaskut", "Hyvityslaskut"]);
 
 export interface DrillTarget {
-  id: "invoices" | "income-receipts" | "expense-receipts";
+  id: "invoices" | "income-receipts" | "expense-receipts" | "purchase-invoices";
   /** Short visible label of the destination. */
   label: string;
   href: string;
@@ -58,6 +61,8 @@ interface DrillPeriod {
   month?: string | null;
   invoiceCount?: number;
   creditNoteCount?: number;
+  /** Purchase invoices counted in the expenses; they are not receipts, so Kuitit does not list them. */
+  purchaseInvoiceCount?: number;
   incomeByCategory?: Array<{ category: string; count: number }>;
   expenseByCategory?: Array<{ category: string; count: number }>;
 }
@@ -98,15 +103,61 @@ export function incomeDrillTargets(period: DrillPeriod): DrillTarget[] {
   return targets;
 }
 
-/** Expenses are receipts only. */
+/** The expense receipts: every expense row that is not a purchase invoice. */
 export function expenseDrillTarget(period: DrillPeriod): DrillTarget | null {
-  if (sumCounts(period.expenseByCategory ?? []) === 0) return null;
+  if (sumCounts(period.expenseByCategory ?? []) - (period.purchaseInvoiceCount ?? 0) <= 0) return null;
   return {
     id: "expense-receipts",
     label: "Menokuitit",
     href: receiptDrillHref({ month: period.month, type: "meno" }),
     ariaLabel: "Avaa menokuitit",
   };
+}
+
+/** Purchase invoices no receipt documents (rent, a typed-in bill) have their own list. */
+export function purchaseInvoiceDrillTarget(period: DrillPeriod): DrillTarget | null {
+  if ((period.purchaseInvoiceCount ?? 0) <= 0) return null;
+  return {
+    id: "purchase-invoices",
+    label: "Ostolaskut",
+    href: PURCHASE_INVOICES_HREF,
+    ariaLabel: "Avaa ostolaskut",
+  };
+}
+
+/** Where a report expense figure lives: the receipts and the purchase invoices, whichever hold rows for it. */
+export function expenseDrillTargets(period: DrillPeriod): DrillTarget[] {
+  return [expenseDrillTarget(period), purchaseInvoiceDrillTarget(period)].filter((target): target is DrillTarget => target !== null);
+}
+
+/**
+ * Where an expense category row lives. The row counts the purchase invoices with the receipts, but
+ * Kuitit lists only receipts: a category made of purchase invoices alone opens Ostolaskut, never an
+ * empty list. A category of both opens its receipts; its bills are behind the Menot figure's own
+ * Ostolaskut link (`expenseDrillTargets`). The uncategorised row has no receipts list to open.
+ */
+export function expenseCategoryHref(
+  row: { category: string; count?: number; purchaseInvoiceCount?: number },
+  month: string | number
+): string | undefined {
+  const bills = row.purchaseInvoiceCount ?? 0;
+  if (bills > 0 && (row.count ?? 0) - bills <= 0) return PURCHASE_INVOICES_HREF;
+  if (row.category === "Luokittelematon") return undefined;
+  return receiptDrillHref({ month: String(month), type: "meno", category: row.category });
+}
+
+/**
+ * Koti's Kulut figure. On the document basis it counts purchase invoices too, so a month whose costs
+ * are purchase invoices alone opens Ostolaskut instead of an empty Kuitit; any receipt keeps Kuitit.
+ */
+export function kotiExpenseHref(
+  data: { source?: string; purchaseInvoiceCount?: number; expenseReceiptCount?: number } | null | undefined,
+  month: string
+): string {
+  if (data?.source === "tiliote") return statementDrillHref(month);
+  const onlyBills =
+    (data?.purchaseInvoiceCount ?? 0) > 0 && data?.expenseReceiptCount !== undefined && data.expenseReceiptCount <= 0;
+  return onlyBills ? PURCHASE_INVOICES_HREF : receiptDrillHref({ month, type: "meno" });
 }
 
 export function alvDrillHref(period: string): string {

@@ -300,6 +300,7 @@ struct AlvView: View {
         } header: {
             Text("Ilmoita ja maksa")
         } footer: {
+            // inline failure kept: the footer's own line, which a failure replaces, so no row is added
             if let failure {
                 Text(failure).foregroundStyle(Theme.danger)
             } else if let notice {
