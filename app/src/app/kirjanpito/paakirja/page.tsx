@@ -67,7 +67,17 @@ export default function LedgerPage() {
 
   return (
     <div className="space-y-5">
-      <PageTitle title="Kirjanpito" subtitle="Tuloslaskelma, tase ja tositteet kahdenkertaisena kirjanpitona" />
+      <PageTitle
+        title="Kirjanpito"
+        subtitle={
+          <>
+            Tuloslaskelma, tase ja tositteet kahdenkertaisena kirjanpitona
+            {/* The books come from the documents only (no owner draws, no opening balance), so the
+                page says so from its first frame, before the figures load. */}
+            <span className="mt-1 block text-caption">Alustava – laskettu tositteista. Kirjanpitäjä tekee tilinpäätöksen.</span>
+          </>
+        }
+      />
       <FilterChips label="Tilikausi" items={years} value={String(year)} onChange={(id) => startTransition(() => setYear(Number(id)))} />
       <FilterChips label="Näkymä" items={VIEWS} value={view} onChange={setView} wrap />
 
