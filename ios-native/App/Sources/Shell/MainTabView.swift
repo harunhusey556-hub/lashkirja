@@ -34,6 +34,10 @@ struct MainTabView: View {
                     }
                     // Over the tab's every screen, just above the tab bar (B4): see OfflineBanner.
                     .overlay(alignment: .bottom) { OfflineBanner() }
+                    // A deleted receipt's Kumoa, and why the server refused the delete: the app's, so
+                    // they outlive the receipt screen that closes at the delete.
+                    .overlay(alignment: .bottom) { ReceiptDeleteToast() }
+                    .failureToast(Bindable(app).receiptDeleteFailure)
                     .environment(\.openRoute, openRoute(item))
                 }
             }

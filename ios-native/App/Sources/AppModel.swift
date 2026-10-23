@@ -47,6 +47,16 @@ final class AppModel {
     private(set) var removedIds: Set<String> = []
     /// A delete that failed after its screen had closed; the tab view shows it.
     var removalFailure: String?
+    /// The receipts the owner just deleted, off every list while "Kumoa" is on offer. The server is
+    /// asked when the toast ends, the app leaves the foreground, or another delete takes the toast
+    /// (`deleteWithUndo`). Here and not on a screen: the receipt's own screen closes at once, and
+    /// Kuitit may be left before the toast ends.
+    private(set) var receiptDelete = PendingReceiptDelete()
+    /// A delete the server refused once its window had ended (a closed month, no connection), said
+    /// in a failure toast over the tabs. The rows are back.
+    var receiptDeleteFailure: String?
+    @ObservationIgnored private var receiptDeleteTimer: Task<Void, Never>?
+    @ObservationIgnored private var receiptDeleteSend: (@MainActor () async -> Void)?
     /// The owner's profile, loaded once and kept: forms and the ALV screen read VAT settings from
     /// it instead of asking the server each time. Settings screens hand back what they save.
     private(set) var profile: Profile?
@@ -346,6 +356,8 @@ final class AppModel {
 
     func background() {
         backgroundedAt = Date()
+        // The app may be suspended before the toast ends: the delete goes now.
+        flushReceiptDelete()
         UsageClock.touchUnlessLocked()
         // Nothing to keep fresh while the app is not on screen; `foreground()` asks at once.
         stopVersionPolling()
@@ -790,6 +802,99 @@ final class AppModel {
         }
     }
 
+    /// Hides `ids` and offers "Kumoa" for `PendingReceiptDelete.window` seconds. The server is asked
+    /// only when that has passed, so an undo is not a server call. `send` makes the request and says
+    /// what the server did; the rows it refused come back with the reason in a failure toast.
+    func deleteWithUndo(_ ids: [String], send: @escaping @MainActor () async -> ReceiptDeleteOutcome) {
+        guard !ids.isEmpty else { return }
+        receiptDeleteFailure = nil
+        // A newer delete does not undo an older one: that one goes now.
+        flushReceiptDelete()
+        withMotion { hide(ids) }
+        Haptics.selection()
+        receiptDelete.begin(ids)
+        let started = session.current
+        receiptDeleteSend = { [weak self] in
+            let outcome = await send()
+            self?.receiptDeleteSent(outcome, session: started)
+        }
+        let token = receiptDelete.waiting?.token
+        receiptDeleteTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(UITestHooks.undoWindow(PendingReceiptDelete.window)))
+            guard !Task.isCancelled else { return }
+            self?.flushReceiptDelete(token: token)
+        }
+    }
+
+    /// Kuitit's swipe and "Valitse" delete: `POST /api/receipts/batch-delete`, 50 ids to a call.
+    func deleteReceipts(_ ids: [String]) {
+        let api = self.api
+        deleteWithUndo(ids) {
+            var outcome = ReceiptDeleteOutcome()
+            for chunk in BulkBatch.chunks(ids, size: BulkBatch.deleteLimit) {
+                do {
+                    let result: BatchDeleteResult = try await api.send("POST", "/api/receipts/batch-delete", body: ReceiptIdsBody(receiptIds: chunk))
+                    outcome.add(result, asked: chunk)
+                } catch {
+                    outcome.fail(chunk, reason: error.userMessage)
+                }
+            }
+            return outcome
+        }
+    }
+
+    /// The receipt screen's delete: `DELETE /api/receipts/{id}`, which also takes the ostolasku the
+    /// receipt filed (the batch route does not).
+    func deleteReceipt(_ id: String) {
+        let api = self.api
+        deleteWithUndo([id]) {
+            do {
+                let _: Ignored = try await api.send("DELETE", "/api/receipts/\(id)", body: Optional<EmptyBody>.none)
+                return ReceiptDeleteOutcome(deleted: 1)
+            } catch {
+                var outcome = ReceiptDeleteOutcome()
+                outcome.fail([id], reason: error.userMessage)
+                return outcome
+            }
+        }
+    }
+
+    /// "Kumoa": the rows come back where they were and the server never hears of the delete.
+    func undoReceiptDelete() {
+        let ids = receiptDelete.undo()
+        receiptDeleteTimer?.cancel()
+        receiptDeleteTimer = nil
+        receiptDeleteSend = nil
+        guard !ids.isEmpty else { return }
+        Haptics.selection()
+        withMotion { unhide(ids) }
+    }
+
+    /// Sends the waiting delete now, once: its window ended (`token`), the app is leaving the
+    /// foreground, or a newer delete takes the toast.
+    func flushReceiptDelete(token: Int? = nil) {
+        guard receiptDelete.release(token: token) != nil else { return }
+        receiptDeleteTimer?.cancel()
+        receiptDeleteTimer = nil
+        guard let send = receiptDeleteSend else { return }
+        receiptDeleteSend = nil
+        Task { await send() }
+    }
+
+    private func receiptDeleteSent(_ outcome: ReceiptDeleteOutcome, session started: Int) {
+        // Signed out meanwhile: the next session never saw these rows hidden.
+        guard session.isCurrent(started) else { return }
+        // Lists reload after the write; the ids stay hidden until then, as after any delete.
+        if outcome.deleted > 0 { dataVersion += 1 }
+        guard !outcome.refused.isEmpty else {
+            Haptics.success()
+            return
+        }
+        withMotion { unhide(outcome.refused) }
+        receiptDeleteFailure = outcome.message
+        Haptics.error()
+    }
+
     /// What every way out of a session leaves behind: nothing of this owner's on screen or in
     /// flight. Run before the sign-in screen shows.
     private func endLocalSession() {
@@ -819,6 +924,12 @@ final class AppModel {
         SpotlightIndexer.clear()
         profile = nil
         removedIds = []
+        // A delete still waiting out "Kumoa" is dropped, not sent: the receipt stays on the server.
+        receiptDeleteTimer?.cancel()
+        receiptDeleteTimer = nil
+        receiptDeleteSend = nil
+        receiptDelete = PendingReceiptDelete()
+        receiptDeleteFailure = nil
         pendingRoute = nil
         pendingCapture = nil
         // A shortcut tapped by the previous owner must not open on the next one's account.

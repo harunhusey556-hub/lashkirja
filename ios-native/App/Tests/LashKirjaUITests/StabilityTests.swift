@@ -722,6 +722,127 @@ final class StabilityTests: WalkTestCase {
         XCTAssertFalse(app.buttons["load-failure-retry"].firstMatch.exists, "offline, the failed refresh replaced the rows with a failure page")
     }
 
+    /// The number in Kuitit's "Kaikki" chip ("Kaikki, 28"): the server's own count, which a hidden row
+    /// does not change. Nil until the counts have come.
+    private func receiptsInAll(timeout: TimeInterval = 20) -> Int? {
+        let chip = app.buttons["receipt-tab-all"].firstMatch
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if chip.exists, let count = Int(chip.label.filter(\.isNumber)) { return count }
+            usleep(250_000)
+        } while Date() < deadline
+        return nil
+    }
+
+    /// Kuitit keeps its tab between visits, and an earlier test of the class (14, 15, 30) leaves it on
+    /// Ei kohdistettu: back on Kaikki, where the seed receipts are listed.
+    private func showAllReceipts() {
+        let chip = app.buttons["receipt-tab-all"].firstMatch
+        guard chip.waitForExistence(timeout: 15) else { return }
+        if !chip.isSelected { chip.tap(); taps += 1 }
+    }
+
+    /// The cell of a seed receipt on Kuitit, found as P0 testM finds it for its swipe.
+    private func receiptCell(_ vendor: String) -> XCUIElement {
+        app.cells.containing(NSPredicate(format: "label CONTAINS %@", vendor)).firstMatch
+    }
+
+    /// Beta round 1, S6 (owner 2026-10-23): deleting a receipt leaves a Kumoa at the bottom. Poista asks
+    /// first (F009); the row then goes at once, Kumoa puts it back in its place, and the server never
+    /// hears of it: the row and the server's count are still there after the window has passed.
+    /// Launched with `-LKUndoWindow 12`, so a slow runner still finds the button.
+    func test37_ReceiptDeleteKumoaPutsTheRowBack() {
+        app.terminate()
+        // First, as in WalkTestCase.setUp: setUp left the value-less -LKLaunchPhase last, which would take
+        // the next key for its value, and UserDefaults would never see the 12 s.
+        app.launchArguments.insert(contentsOf: ["-LKUndoWindow", "12"], at: 0)
+        launchSignedIn()
+        dismissSystemPrompts()
+        openHubRow("Kuitit")
+        showAllReceipts()
+        let vendor = "ABC Prisma Kotka"
+        let row = receiptCell(vendor)
+        guard row.waitForExistence(timeout: 20), reveal(row), let before = receiptsInAll() else {
+            dump(app, "stability-37-no-row"); XCTFail("Kuitit lists no \(vendor) row, or no count"); return
+        }
+
+        let question = app.staticTexts["confirm-sheet-title"].firstMatch
+        row.swipeLeft()
+        // The row's own action; a long swipe can run it at once, with the question already up.
+        let poista = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Poista", "confirm-sheet-confirm")).firstMatch
+        if poista.waitForExistence(timeout: 5), !question.exists { poista.tap(); taps += 1 }
+        guard question.waitForExistence(timeout: 5) else {
+            dump(app, "stability-37-no-question"); XCTFail("the swipe's Poista asked nothing"); return
+        }
+        app.buttons["confirm-sheet-confirm"].firstMatch.tap(); taps += 1
+
+        // Nothing but queries until Kumoa is pressed: the toast is up for the window only.
+        let toast = app.staticTexts["Kuitti poistettu"].firstMatch
+        let undo = app.buttons["Kumoa"].firstMatch
+        guard toast.waitForExistence(timeout: 10), undo.exists else {
+            dump(app, "stability-37-no-toast"); XCTFail("Poista showed no Kuitti poistettu toast with Kumoa"); return
+        }
+        let listedUnderToast = row.exists
+        undo.tap(); taps += 1
+        XCTAssertFalse(listedUnderToast, "the deleted receipt was still listed under its toast")
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "Kumoa did not put the receipt back in the list")
+        XCTAssertTrue(toast.waitForNonExistence(timeout: 5), "the toast stayed after Kumoa")
+        shot("stability-37-kumoa")
+
+        // The window runs out: the server must not have been asked, so the row stays listed.
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: row)
+        gone.isInverted = true
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 14), .completed, "the row left the list after Kumoa, though nothing was deleted")
+        XCTAssertEqual(receiptsInAll(), before, "the server's count moved after Kumoa")
+    }
+
+    /// Beta round 1, S6: a receipt deleted from its own Toiminnot closes its screen onto Kuitit, where the
+    /// toast stands; when the toast has ended the server has deleted it, as the chip's count (the
+    /// server's, not the list's) and a fresh launch's list show. The default six seconds, nothing to press.
+    func test38_ReceiptDeleteIsSentWhenTheToastEnds() {
+        openHubRow("Kuitit")
+        showAllReceipts()
+        let vendor = "K-Market 1"
+        let row = receiptCell(vendor)
+        guard row.waitForExistence(timeout: 20), let before = receiptsInAll() else {
+            dump(app, "stability-38-no-row"); XCTFail("Kuitit lists no \(vendor) row, or no count"); return
+        }
+        XCTAssertTrue(tapLabel("label CONTAINS %@", vendor), "\(vendor) did not open")
+        let actions = app.buttons["Toiminnot"].firstMatch
+        guard actions.waitForExistence(timeout: 20) else { dump(app, "stability-38-no-detail"); XCTFail("the receipt did not load"); return }
+        actions.tap(); taps += 1
+        let delete = app.buttons["Poista kuitti"].firstMatch
+        guard delete.waitForExistence(timeout: 5) else { dump(app, "stability-38-menu"); XCTFail("Toiminnot has no Poista kuitti"); return }
+        delete.tap(); taps += 1
+        let confirm = app.buttons["confirm-sheet-confirm"].firstMatch
+        guard confirm.waitForExistence(timeout: 5) else { dump(app, "stability-38-no-sheet"); XCTFail("Poista kuitti asked nothing"); return }
+        confirm.tap(); taps += 1
+
+        // The screen closed onto Kuitit, and the toast is there with the row gone.
+        let toast = app.staticTexts["Kuitti poistettu"].firstMatch
+        XCTAssertTrue(toast.waitForExistence(timeout: 10), "the delete showed no Kuitti poistettu toast")
+        XCTAssertTrue(app.navigationBars["Kuitit"].waitForExistence(timeout: 10), "the delete did not close the receipt onto Kuitit")
+        XCTAssertFalse(row.exists, "the deleted receipt is still listed")
+        XCTAssertTrue(app.buttons["Kumoa"].firstMatch.exists, "the toast has no Kumoa")
+
+        // The toast ends by itself; the server then deletes and the chip's count follows.
+        XCTAssertTrue(toast.waitForNonExistence(timeout: 20), "the toast did not end")
+        var after = receiptsInAll()
+        let deadline = Date().addingTimeInterval(30)
+        while after != before - 1, Date() < deadline { usleep(500_000); after = receiptsInAll(timeout: 1) }
+        XCTAssertEqual(after, before - 1, "the server's count did not drop once the toast ended: the delete was never sent")
+        shot("stability-38-sent")
+
+        // A fresh launch lists the other seed rows but not this one: gone on the server, not only hidden.
+        app.terminate()
+        launchSignedIn()
+        dismissSystemPrompts()
+        openHubRow("Kuitit")
+        showAllReceipts()
+        XCTAssertTrue(receiptCell("Prisma 2").waitForExistence(timeout: 30), "a fresh launch lists no seed receipt")
+        XCTAssertFalse(receiptCell(vendor).exists, "a fresh launch lists the receipt the server deleted")
+    }
+
     /// The seed's overdue invoice from the demo API: its number, its customer, and its due and
     /// invoice days as the app prints them. Test values from app/scripts/demo-seed.ts; only ever
     /// against the throwaway local server (the runner shares the Mac's loopback).
