@@ -237,6 +237,29 @@ describe("ops scripts: contracts read from the source", () => {
     const missingDb = text.slice(text.indexOf("does not exist"));
     expect(missingDb.indexOf("Notify")).toBeLessThan(missingDb.indexOf("exit 1"));
   });
+
+  it("registers the tasks Interactive unless -RunWhenLoggedOff asks for S4U", () => {
+    for (const name of ["install-tasks.ps1", "install-watchdog-task.ps1"]) {
+      const text = read(name);
+      expect(text, name).toContain("[switch]$RunWhenLoggedOff");
+      // One place picks the logon type: a second -LogonType would let a task skip the switch.
+      expect(count(text, "-LogonType"), name).toBe(1);
+      expect(text, name).toContain("$logonType = if ($LoggedOff) { 'S4U' } else { 'Interactive' }");
+    }
+  });
+
+  it("relies on the second-start guard once 'LashKirja prod' also starts at boot", () => {
+    const text = read("install-tasks.ps1");
+    const prodSettings = text.slice(text.indexOf("$prodSettings ="), text.indexOf("Register-LkTask -Name 'LashKirja prod'"));
+    expect(prodSettings).toContain("-MultipleInstances IgnoreNew");
+    expect(read("run-prod.ps1")).toContain("supervisor already running");
+  });
+
+  it("documents the switch next to the tasks it changes", () => {
+    const doc = readFileSync(path.join(process.cwd(), "docs/ops-windows.md"), "utf8");
+    expect(doc).toContain("install-tasks.ps1 -RunWhenLoggedOff");
+    expect(doc).toContain("install-watchdog-task.ps1 -RunWhenLoggedOff");
+  });
 });
 
 describe.skipIf(powershell === null)("ops scripts: the PowerShell parser", () => {
@@ -758,5 +781,213 @@ describe.skipIf(!canRun)("run-cron.ps1", () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+// install-tasks.ps1 and install-watchdog-task.ps1 register the real Scheduled Tasks, so they only run
+// here with every ScheduledTasks command that changes or reads a task replaced by a stand-in. The New-*
+// builders stay real (they only build objects in memory); Register-/Set-ScheduledTask record what they
+// get through a copy of the real parameter block, so a wrong parameter still fails; every other command
+// of the module throws, and so does schtasks.exe. The driver refuses to start the installer unless all
+// of that holds, so nothing here can reach a task on this PC.
+const canRunTasks =
+  canRun &&
+  spawnSync(
+    powershell as string,
+    ["-NoProfile", "-NonInteractive", "-Command", "if (Get-Command New-ScheduledTaskPrincipal -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"],
+    { stdio: "ignore" }
+  ).status === 0;
+
+const taskGuard = [
+  "$ErrorActionPreference = 'Stop'",
+  "$global:LkCalls = New-Object System.Collections.ArrayList",
+  "$global:LkPowercfg = New-Object System.Collections.ArrayList",
+  "$global:LkTasks = @{}",
+  "$global:LkProdTriggers = @()",
+  "foreach ($kind in ($env:LK_PROD_TRIGGERS -split ',')) {",
+  "  switch ($kind) {",
+  "    'logon' { $global:LkProdTriggers += New-ScheduledTaskTrigger -AtLogOn -User 'PC\\owner' }",
+  "    'boot' { $global:LkProdTriggers += New-ScheduledTaskTrigger -AtStartup }",
+  "    'repeat' { $global:LkProdTriggers += New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddMinutes(1)) -RepetitionInterval (New-TimeSpan -Minutes 5) }",
+  "  }",
+  "}",
+  // The body runs inside a copy of the real parameter block, which has -Principal: a local named
+  // $principal would be that validated parameter, and assigning $null to it throws.
+  "$recorder = @'",
+  "$entry = [ordered]@{ command = '__NAME__'; taskName = [string]$PSBoundParameters['TaskName']; bound = @($PSBoundParameters.Keys) }",
+  "$given = $PSBoundParameters['Principal']",
+  "$entry.logon = if ($given) { [string]$given.LogonType } else { '' }",
+  "$entry.runLevel = if ($given) { [string]$given.RunLevel } else { '' }",
+  "$entry.triggers = @($PSBoundParameters['Trigger'] | ForEach-Object { $_.CimClass.CimClassName })",
+  "$entry.repetitions = @($PSBoundParameters['Trigger'] | ForEach-Object { if ($_.Repetition -and $_.Repetition.Interval) { [string]$_.Repetition.Interval } else { '' } })",
+  "[void]$global:LkCalls.Add([pscustomobject]$entry)",
+  "if ('__NAME__' -eq 'Register-ScheduledTask') { $global:LkTasks[[string]$PSBoundParameters['TaskName']] = $given }",
+  "if ('__NAME__' -eq 'Set-ScheduledTask' -and $PSBoundParameters['TaskName'] -eq 'LashKirja prod') { $global:LkProdTriggers = @($PSBoundParameters['Trigger']) }",
+  "'@",
+  "$names = @(Get-Command -Module ScheduledTasks | ForEach-Object { $_.Name })",
+  "foreach ($name in $names) {",
+  "  if ($name -like 'New-*' -or $name -eq 'Get-ScheduledTask' -or $name -eq 'Get-ScheduledTaskInfo') { continue }",
+  "  if ($name -eq 'Register-ScheduledTask' -or $name -eq 'Set-ScheduledTask') {",
+  "    $meta = New-Object System.Management.Automation.CommandMetadata (Get-Command $name)",
+  "    $binding = [System.Management.Automation.ProxyCommand]::GetCmdletBindingAttribute($meta)",
+  "    $params = [System.Management.Automation.ProxyCommand]::GetParamBlock($meta)",
+  "    $source = $binding + [char]10 + 'param(' + $params + ')' + [char]10 + $recorder.Replace('__NAME__', $name)",
+  "    Set-Item -Path \"function:global:$name\" -Value ([scriptblock]::Create($source))",
+  "  } else {",
+  "    Set-Item -Path \"function:global:$name\" -Value ([scriptblock]::Create(\"throw 'blocked in test: $name'\"))",
+  "  }",
+  "}",
+  // The two reads the watchdog installer makes: a prod task whose logon type and triggers the test sets,
+  // and the task the installer just registered, with the principal it was given.
+  "function global:Get-ScheduledTask {",
+  "  param([string]$TaskName)",
+  "  $principal = $global:LkTasks[$TaskName]",
+  "  $logon = if ($principal) { [string]$principal.LogonType } elseif ($TaskName -eq 'LashKirja prod') { $env:LK_PROD_LOGON } else { 'Interactive' }",
+  "  $triggers = if ($TaskName -eq 'LashKirja prod') { $global:LkProdTriggers } else { @() }",
+  "  [pscustomobject]@{ State = 'Ready'; Triggers = $triggers; Principal = [pscustomobject]@{ UserId = 'PC\\owner'; LogonType = $logon } }",
+  "}",
+  "function global:Get-ScheduledTaskInfo { param([string]$TaskName) [pscustomobject]@{ NextRunTime = 'never'; LastTaskResult = 0 } }",
+  "Set-Item -Path 'function:global:powercfg.exe' -Value { [void]$global:LkPowercfg.Add(($args -join ' ')); $global:LASTEXITCODE = 0 }",
+  "Set-Item -Path 'function:global:schtasks.exe' -Value { throw 'blocked in test: schtasks.exe' }",
+  "foreach ($name in $names) {",
+  "  if ($name -notlike 'New-*' -and (Get-Command $name).ModuleName) { throw \"refusing to run the installer: $name is still the real command\" }",
+  "}",
+  "foreach ($name in 'powercfg.exe', 'schtasks.exe') {",
+  "  if ((Get-Command $name).CommandType -ne 'Function') { throw \"refusing to run the installer: $name is still the real command\" }",
+  "}",
+].join("\n");
+
+const taskRun = [
+  "$params = @{}",
+  "if ($env:LK_ROOT) { $params.Root = $env:LK_ROOT }",
+  "if ($env:LK_LOGGED_OFF) { $params.RunWhenLoggedOff = $true }",
+  "$lines = @(& $env:LK_SCRIPT @params *>&1 | ForEach-Object { if ($_ -is [System.Management.Automation.WarningRecord]) { 'WARNING: ' + $_.Message } else { [string]$_ } })",
+  "[pscustomobject]@{ lines = $lines; calls = @($global:LkCalls); powercfg = @($global:LkPowercfg) } | ConvertTo-Json -Depth 6 -Compress",
+].join("\n");
+
+interface TaskCall {
+  command: string;
+  taskName: string;
+  bound: string[];
+  logon: string;
+  runLevel: string;
+  triggers: string[];
+  repetitions: string[];
+}
+
+interface InstallerRun {
+  lines: string[];
+  calls: TaskCall[];
+  powercfg: string[];
+}
+
+interface InstallerOptions {
+  loggedOff?: boolean;
+  // What the stand-in 'LashKirja prod' task reports: its logon type and its triggers (logon, boot, repeat).
+  prodLogon?: string;
+  prodTriggers?: string;
+}
+
+describe.skipIf(!canRunTasks)("install-tasks.ps1 and install-watchdog-task.ps1 (the task commands replaced, nothing registered)", () => {
+  const taskNames = ["LashKirja prod", "LashKirja backup", "LashKirja cron"];
+
+  async function install(script: string, options: InstallerOptions = {}): Promise<InstallerRun> {
+    const root = tempRoot();
+    // install-tasks.ps1 checks that the production checkout has the scripts it registers.
+    const ops = path.join(root, "prod", "app", "scripts", "ops");
+    mkdirSync(ops, { recursive: true });
+    for (const name of ["run-prod.ps1", "backup-local.ps1", "run-cron.ps1"]) writeFileSync(path.join(ops, name), "");
+    const driver = path.join(root, `driver-${script}`);
+    writeFileSync(driver, `${taskGuard}\n${taskRun}\n`);
+    const result = await runPowerShell(["-File", driver], root, {
+      LK_SCRIPT: path.join(opsDir, script),
+      LK_ROOT: script === "install-tasks.ps1" ? root : "",
+      LK_LOGGED_OFF: options.loggedOff ? "1" : "",
+      LK_PROD_LOGON: options.prodLogon ?? "Interactive",
+      LK_PROD_TRIGGERS: options.prodTriggers ?? "logon",
+    });
+    expect(result.code, result.stderr).toBe(0);
+    return JSON.parse(result.stdout.trim()) as InstallerRun;
+  }
+
+  const registered = (run: InstallerRun) => run.calls.filter((call) => call.command === "Register-ScheduledTask");
+  const updated = (run: InstallerRun) => run.calls.filter((call) => call.command === "Set-ScheduledTask");
+  const warnings = (run: InstallerRun) => run.lines.filter((line) => line.startsWith("WARNING: "));
+
+  it("registers prod, backup and cron Interactive, with the logon trigger only, when the switch is absent", async () => {
+    const run = await install("install-tasks.ps1");
+    expect(run.calls).toHaveLength(3);
+    expect(registered(run).map((call) => call.taskName)).toEqual(taskNames);
+    for (const call of registered(run)) {
+      expect(call.logon, call.taskName).toBe("Interactive");
+      expect(call.runLevel, call.taskName).toBe("Limited");
+    }
+    expect(registered(run)[0].triggers).toEqual(["MSFT_TaskLogonTrigger"]);
+    expect(run.lines.join("\n")).not.toContain("S4U");
+    expect(run.powercfg).toEqual(["/change standby-timeout-ac 0"]);
+  });
+
+  it("registers the same three tasks S4U with -RunWhenLoggedOff, and prod also starts at boot", async () => {
+    const plain = await install("install-tasks.ps1");
+    const run = await install("install-tasks.ps1", { loggedOff: true });
+    expect(run.calls).toHaveLength(3);
+    expect(registered(run).map((call) => call.taskName)).toEqual(taskNames);
+    for (const call of registered(run)) {
+      expect(call.logon, call.taskName).toBe("S4U");
+      expect(call.runLevel, call.taskName).toBe("Limited");
+      // S4U is the logon type that stores no password: none may be passed.
+      expect(call.bound, call.taskName).not.toContain("Password");
+      expect(call.bound, call.taskName).not.toContain("User");
+    }
+    expect(registered(run)[0].triggers).toEqual(["MSFT_TaskLogonTrigger", "MSFT_TaskBootTrigger"]);
+    expect(run.lines.join("\n")).toContain("S4U:");
+    // Nothing else differs from the default install: same parameters, same triggers (prod's apart), same run level.
+    const unchanged = (call: TaskCall) => ({ ...call, logon: "" });
+    expect(registered(run).slice(1).map(unchanged)).toEqual(registered(plain).slice(1).map(unchanged));
+    expect({ ...unchanged(registered(run)[0]), triggers: [], repetitions: [] }).toEqual({ ...unchanged(registered(plain)[0]), triggers: [], repetitions: [] });
+    expect(run.powercfg).toEqual(plain.powercfg);
+  });
+
+  it("registers the watchdog as before without the switch: no principal is passed", async () => {
+    const run = await install("install-watchdog-task.ps1");
+    const [watchdog] = registered(run);
+    expect(registered(run)).toHaveLength(1);
+    expect(watchdog.taskName).toBe("LashKirja watchdog");
+    expect(watchdog.bound).not.toContain("Principal");
+    expect(watchdog.triggers).toEqual(["MSFT_TaskTimeTrigger", "MSFT_TaskLogonTrigger"]);
+    const [prod] = updated(run);
+    expect(updated(run)).toHaveLength(1);
+    expect(prod.taskName).toBe("LashKirja prod");
+    expect(prod.triggers).toEqual(["MSFT_TaskLogonTrigger", "MSFT_TaskTimeTrigger"]);
+    expect(prod.repetitions).toEqual(["", "PT5M"]);
+    expect(warnings(run)).toEqual([]);
+    expect(run.lines.join("\n")).not.toContain("principal:");
+  });
+
+  it("registers the watchdog S4U with -RunWhenLoggedOff, and keeps prod's boot trigger when it adds the repetition", async () => {
+    const run = await install("install-watchdog-task.ps1", { loggedOff: true, prodLogon: "S4U", prodTriggers: "logon,boot" });
+    const [watchdog] = registered(run);
+    expect(watchdog.logon).toBe("S4U");
+    expect(watchdog.runLevel).toBe("Limited");
+    expect(watchdog.bound).not.toContain("Password");
+    expect(watchdog.triggers).toEqual(["MSFT_TaskTimeTrigger", "MSFT_TaskLogonTrigger"]);
+    const [prod] = updated(run);
+    expect(prod.triggers).toEqual(["MSFT_TaskLogonTrigger", "MSFT_TaskBootTrigger", "MSFT_TaskTimeTrigger"]);
+    expect(prod.repetitions).toEqual(["", "", "PT5M"]);
+    expect(warnings(run)).toEqual([]);
+    expect(run.lines.filter((line) => line.includes("logon=S4U"))).toHaveLength(2);
+  });
+
+  it("warns when prod would still stop at sign-out, so the order of the two installers is not a guess", async () => {
+    const run = await install("install-watchdog-task.ps1", { loggedOff: true, prodLogon: "Interactive", prodTriggers: "logon" });
+    expect(warnings(run)).toHaveLength(1);
+    expect(warnings(run)[0]).toContain("install-tasks.ps1 -RunWhenLoggedOff");
+    expect(warnings(run)[0]).toContain("Interactive");
+  });
+
+  it("adds no second 5-minute repetition to prod", async () => {
+    const run = await install("install-watchdog-task.ps1", { loggedOff: true, prodLogon: "S4U", prodTriggers: "logon,boot,repeat" });
+    expect(updated(run)).toEqual([]);
+    expect(run.lines).toContain("LashKirja prod already has a 5-minute repetition");
   });
 });
