@@ -1917,8 +1917,7 @@ final class StabilityTests: WalkTestCase {
 
     /// Lisää > Uusi myyntilasku from the tab showing, once the form has risen.
     private func openInvoiceFromAdd(_ step: String) -> Bool {
-        app.tabBars.buttons["Lisää"].firstMatch.tap(); taps += 1
-        guard app.navigationBars["Lisää"].waitForExistence(timeout: 10),
+        guard openAdd(),
               let new = hittable(app.buttons.matching(NSPredicate(format: "label == %@", "Uusi myyntilasku")), timeout: 10) else {
             dump(app, "stability-24-no-lisaa"); XCTFail("\(step): Lisää did not open with Uusi myyntilasku"); return false
         }
@@ -1976,6 +1975,54 @@ final class StabilityTests: WalkTestCase {
         note("INFO stability 24 \(step): \(samples) samples, Lisää on top in \(seen), the tab bar back \(reached)")
         XCTAssertTrue(reached, "\(step): the tab bar was not back within \(Int(seconds)) s", file: file, line: line)
         XCTAssertEqual(seen, 0, "\(step): Lisää showed again while the form closed (\(seen) of \(samples) samples)", file: file, line: line)
+    }
+
+    /// M015: Lisää is an action, not a tab, so the tab bar's selection lens stays on the tab showing.
+    /// On iOS 26 UIKit moved the lens to the touched item before it asked the delegate, and AddTabGuard
+    /// only refused the selection: the lens flew to "+" and back across the other tabs while the
+    /// sheet rose. The probe's LENS lines are the tab bar's layers moving sideways: a tab switch must
+    /// show some (else the check proves nothing), Lisää none, up to the sheet's rise: as the launch's
+    /// first touch, before any tab was visited, and from two tabs.
+    func test34_LisaaLeavesTheTabBarLens() {
+        let log = relaunchWithProbe("test34")
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 15), "no tab bar after the relaunch")
+        func lensMoves(since: Double) -> [String] {
+            ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").split(separator: "\n").filter {
+                let parts = $0.split(separator: " ")
+                return parts.count >= 3 && parts[0] == "LENS" && (Double(parts[1]) ?? 0) >= since
+            }.map(String.init)
+        }
+        func tapAdd(from current: String, _ name: String) -> Bool {
+            let sheet = app.navigationBars["Lisää"]
+            shot("stability-34-bar-\(name)")
+            let tapped = Date().timeIntervalSince1970
+            app.tabBars.buttons["Lisää"].firstMatch.tap(); taps += 1
+            guard sheet.waitForExistence(timeout: 10) else { dump(app, "stability-34-no-lisaa"); XCTFail("\(name): Lisää did not open"); return false }
+            // Past the 0.8 s the lens took on the slow simulator to leave and come back.
+            sleep(3)
+            let moves = lensMoves(since: tapped)
+            note("INFO stability 34: \(name): Lisää moved the lens \(moves.count) times: \(moves.first ?? "-")")
+            XCTAssertEqual(moves.count, 0, "\(name): the tab bar's lens moved when Lisää was tapped: \(moves.first ?? "")")
+            XCTAssertTrue(app.tabBars.buttons[current].isSelected, "\(name): the tab changed under Lisää")
+            shot("stability-34-\(name)")
+            swipeSheetDown("Lisää")
+            XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "\(name): Lisää did not close")
+            return true
+        }
+
+        guard tapAdd(from: "Koti", "launch") else { return }
+
+        let switched = Date().timeIntervalSince1970
+        XCTAssertTrue(selectTab("Myynti"), "Myynti is not selected")
+        sleep(2)
+        let control = lensMoves(since: switched)
+        note("INFO stability 34: the switch to Myynti moved the lens \(control.count) times: \(control.first ?? "-")")
+        XCTAssertFalse(control.isEmpty, "the probe saw no lens move for the switch to Myynti: its LENS lines prove nothing")
+
+        guard tapAdd(from: "Myynti", "myynti") else { return }
+        XCTAssertTrue(selectTab("Koti"), "Koti is not selected")
+        sleep(2)
+        _ = tapAdd(from: "Koti", "koti")
     }
 }
 

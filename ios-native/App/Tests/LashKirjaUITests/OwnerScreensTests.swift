@@ -632,7 +632,7 @@ final class OwnerScreensTests: WalkTestCase {
         // As an owner would: a moment on Koti, while the warm after Koti fetches what the form opens on
         // (NextPrefetch.afterKoti: customers and catalog).
         sleep(6)
-        app.tabBars.buttons["Lisää"].firstMatch.tap()
+        openAdd()
         let new = app.buttons["Uusi myyntilasku"].firstMatch
         guard new.waitForExistence(timeout: 10) else { capture("e0-no-add-sheet"); XCTFail("Lisää did not open"); return }
         new.tap()

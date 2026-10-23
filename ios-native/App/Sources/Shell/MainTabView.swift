@@ -46,7 +46,7 @@ struct MainTabView: View {
         // Less gap between sections, so more fits on a phone. Rows keep the system's 44 pt minimum,
         // the smallest comfortable touch target.
         .listSectionSpacing(.compact)
-        .background(AddTabGuard { select(.add) })
+        .background(AddTabGuard(title: AppTab.add.title) { select(.add) })
         .background(TabPrebuild(
             ready: Self.places.map { item -> @MainActor () -> Bool in { hasFirstFrame(item) } } + [{ @MainActor () -> Bool in true }],
             // Without `motionProbe`: the copy is not on screen, so its layers are not the audit's.
