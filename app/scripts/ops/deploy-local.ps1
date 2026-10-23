@@ -25,9 +25,10 @@
     7. start the supervisor (the "LashKirja prod" Scheduled Task when registered)
     8. poll http://127.0.0.1:3300/api/health for up to 60 s. The app counts
        as up when the database answers and the disk is writable: a 503 caused
-       only by the bank-job or mail checks (a user's failed bank sync in the
-       last 24 h, say) or by the disk's low-space is logged as degraded, not
-       treated as a failed deploy.
+       only by the bank-job, mail or worker checks (a user's failed bank sync
+       in the last 24 h, say, or a worker that has not written its heartbeat
+       yet) or by the disk's low-space is logged as degraded, not treated as
+       a failed deploy.
 
   run\deploy.lock holds this script's PID for the whole run. watchdog-prod.ps1 reads it and neither
   probes nor restarts anything while it is held (2026-10-21: the watchdog restarted the app in the
@@ -176,14 +177,15 @@ function Test-Health([int]$TimeoutSeconds) {
       $status = $_.Exception.Response.StatusCode.value__
       $last = if ($status) { "HTTP $status" } else { 'unreachable' }
       # 503 with the database answering and the disk writable means the app
-      # serves; only the bank-job or mail checks are red (a user's failed bank
-      # sync keeps bankJobs red for 24 h), or the disk is low on space (that
+      # serves; only the bank-job, mail or worker checks are red (a user's failed
+      # bank sync keeps bankJobs red for 24 h; the worker's first heartbeat can
+      # come after this poll's first answer), or the disk is low on space (that
       # warning is health.ts LOW_SPACE_BYTES; a rollback frees nothing). None of
       # that must roll a good deploy back.
       if ($status -eq 503) {
         $body = Get-HealthErrorBody $_
         if ($body -and $body.checks -and $body.checks.db.ok -and ($body.checks.disk.ok -or $body.checks.disk.detail -eq 'low-space')) {
-          $red = @('disk', 'bankJobs', 'mail') | Where-Object { -not $body.checks.$_.ok }
+          $red = @('disk', 'bankJobs', 'mail', 'worker') | Where-Object { ($null -ne $body.checks.$_) -and (-not $body.checks.$_.ok) }
           Log ("health: HTTP 503 but the database answers and the disk is writable; serving, degraded: " + ($red -join ', '))
           return $true
         }

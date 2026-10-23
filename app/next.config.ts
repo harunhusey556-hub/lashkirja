@@ -6,9 +6,9 @@ import path from "node:path";
 // whose relative requires resolve against the process cwd, and production
 // runs from C:\LashKirja, not app/. Importing ./src/lib/storage (and then a
 // JSON file) crashed the production start twice. This literal must equal
-// MAX_RECEIPT_REQUEST_BYTES in src/lib/storage.ts; next-config-body-cap.test.ts
+// MAX_UPLOAD_REQUEST_BYTES in src/lib/storage.ts; next-config-body-cap.test.ts
 // enforces that.
-const MAX_RECEIPT_REQUEST_BYTES = 17 * 1024 * 1024;
+const MAX_UPLOAD_REQUEST_BYTES = 22 * 1024 * 1024;
 
 function gitCommit(): string {
   const fromEnv = process.env.GIT_COMMIT?.trim();
@@ -182,10 +182,13 @@ const webNextConfig: NextConfig = {
     // Default is 10 MB (proxyClientMaxBodySize.md): proxy.ts's matcher
     // covers every /api/:path*, so Next buffers and truncates every API
     // request body at that default, silently, with no error to the
-    // client. A receipt photo up to MAX_RECEIPT_BYTES (15 MB) must survive
-    // that buffering whole, or `req.formData()` in receipt-inbox.ts throws
-    // on the truncated multipart body. Final review I2.
-    proxyClientMaxBodySize: MAX_RECEIPT_REQUEST_BYTES,
+    // client. A receipt photo up to MAX_RECEIPT_BYTES (15 MB) and a bank
+    // statement up to MAX_STATEMENT_BYTES (20 MB) must survive that
+    // buffering whole, or `req.formData()` in receipt-inbox.ts and the
+    // statements route throws on the truncated multipart body. Final review
+    // I2; sized for the receipt alone (17 MB) it also cut a 17-20 MB
+    // statement short (beta audit 2026-10).
+    proxyClientMaxBodySize: MAX_UPLOAD_REQUEST_BYTES,
   },
   // pdfkit reads its .afm metric files from node_modules at runtime and
   // nodemailer resolves transports dynamically; bundling either one turns
