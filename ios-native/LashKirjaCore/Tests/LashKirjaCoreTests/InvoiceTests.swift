@@ -29,6 +29,16 @@ private func fixture(_ name: String) throws -> Data {
     #expect(i.lines[1].unitPrice == Decimal(string: "35.86"))
 }
 
+@Test func aCopysAnswerCanOpenTheDetail() throws {
+    // `POST /api/invoices/{id}/duplicate` answers `{ invoice }`; the copy opens on it, as on the detail
+    // route's answer, instead of a spinner page while the detail is fetched again (motion lasku-copy).
+    let answer = try JSONDecoder().decode(InvoiceResponse.self, from: fixture("invoice-detail.json"))
+    let opened = InvoiceDetailResponse(invoice: answer.invoice)
+    #expect(opened.invoice == answer.invoice)
+    #expect(opened.invoice.lines.count == 2)
+    #expect(opened.paymentDuplicates == nil)
+}
+
 @Test func statusLabels() {
     #expect(InvoiceStatus.draft.label == "Luonnos")
     #expect(InvoiceStatus.sent.label == "Odottaa maksua")

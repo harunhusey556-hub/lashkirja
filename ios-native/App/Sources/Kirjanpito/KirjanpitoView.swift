@@ -74,8 +74,15 @@ struct KirjanpitoView: View {
                 // list always has them (Ostolaskut paints from the cache only with them).
                 _ = try? await app.cachedGet("/api/purchase-invoices/counts") as PurchaseInvoiceCountsResponse
                 _ = try? await app.cachedGet("/api/recurring-purchases") as RecurringPurchaseList
-                _ = try? await app.cachedGet("/api/purchase-invoices/match") as PurchaseSuggestionList
+                // The proposals are Kohdista's too: kept in `lastPainted` with the open ostolaskut beside them
+                // (asked for below), so Kohdista ostolaskujen maksut opens on its rows (F011).
+                if let pending: PurchaseSuggestionList = try? await app.cachedGet(PurchaseMatchView.suggestionsPath) {
+                    app.rememberPainted(pending, PurchaseMatchView.suggestionsPath)
+                }
                 _ = try? await app.cachedGet("/api/purchase-invoices", persist: true) as PurchaseInvoiceTaggedList
+                if let open: PurchaseInvoiceList = try? await app.cachedGet(PurchaseMatchView.listPath, query: PurchaseMatchView.openQuery) {
+                    app.rememberPainted(open, PurchaseMatchView.listPath, query: PurchaseMatchView.openQuery)
+                }
             }
             guard counts == nil || gate.isDue(version: app.dataVersion) else { return }
             // Marked only after a load that finished: a cancelled one must not count as fresh.

@@ -234,7 +234,7 @@ struct RouteScreen: View {
         case .recurringInvoices: RecurringInvoicesView(preview: app.lastPainted("/api/recurring-invoices"))
         case .periods: PeriodsView(preview: app.periodsPreview(month: PeriodClose.startMonth(nil, current: MonthKey.current())))
         case .ledger: LedgerView()
-        case .workQueue: WorkQueueView()
+        case .workQueue: WorkQueueView(opening: app.lastPainted(WorkQueueView.path))
         case .privacy: PrivacyView()
         case .help: HelpView()
         case .passkeys: PasskeysView(preview: app.lastPainted(PasskeyScreen.listPath))
@@ -266,7 +266,7 @@ struct RouteScreen: View {
             MyyntiView(scope: scope, status: filter, preview: app.salesPreview(scope: scope, filter: filter))
         case .purchaseInvoicesFiltered(let status): PurchaseInvoicesView(status: PurchaseFilter(rawValue: status))
         case .recurringPurchases: RecurringPurchasesView()
-        case .purchaseMatch: PurchaseMatchView()
+        case .purchaseMatch: PurchaseMatchView(opening: app.purchaseMatchPreview())
         }
     }
 }
