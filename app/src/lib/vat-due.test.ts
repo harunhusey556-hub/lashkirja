@@ -10,6 +10,7 @@ import {
   vatDueDate,
   vatDueSecondary,
   vatFileStepText,
+  vatFiledConfirmation,
   vatFiledNote,
   vatFilingState,
   vatNothingToPay,
@@ -119,6 +120,17 @@ describe("filing card sentences (F73)", () => {
     expect(vatPayStepText(0, "2026-07-13")).toBeNull();
     expect(vatFiledNote("5.10.2026", 0, "2026-10-12", true)).toBe("Ilmoitettu 5.10.2026.");
     expect(plain(vatFiledNote("5.10.2026", 159.38, "2026-10-12", false))).toBe("Ilmoitettu 5.10.2026. Maksa 159,38 € viimeistään 12.10.");
+  });
+
+  it("tells the owner when marking the return filed closed the books, and where to open them (S5)", () => {
+    expect(vatFiledConfirmation("ALV-ilmoitus merkitty annetuksi", "2026-09")).toBe(
+      "ALV-ilmoitus merkitty annetuksi. Kirjanpito lukittu syyskuu 2026 asti. Voit avata sen kohdassa Kirjanpito > Suljetut kaudet."
+    );
+    // The first-return sentence already ends in a full stop.
+    expect(vatFiledConfirmation("ALV-ilmoitus on merkitty tehdyksi.", "2026-09")).toContain("tehdyksi. Kirjanpito lukittu");
+    // A lock that was already as late (or later) is not announced.
+    expect(vatFiledConfirmation("ALV-ilmoitus merkitty annetuksi", null)).toBe("ALV-ilmoitus merkitty annetuksi");
+    expect(vatFiledConfirmation("ALV-ilmoitus merkitty annetuksi", undefined)).toBe("ALV-ilmoitus merkitty annetuksi");
   });
 
   it("a filed zero return is done, not waiting for a payment that cannot be made", () => {

@@ -5,6 +5,8 @@
  */
 import { prisma } from "./db";
 import { alvReportOf, loadAlvPeriodSources } from "./alv-period";
+import { addMonths, monthKey } from "./bank-balances";
+import { closeBooksThrough } from "./period-lock";
 import { centsToEuros } from "./money";
 import { ConflictError, ValidationError } from "./api-errors";
 import { helsinkiCalendarDate, isoDateToUtc } from "./validation";
@@ -29,6 +31,11 @@ export function filingPeriodBoundsUtc(period: string): { start: Date; end: Date 
     };
   }
   return { start: new Date(Date.UTC(year, 0, 1)), end: new Date(Date.UTC(year + 1, 0, 1)) };
+}
+
+/** The last calendar month of the period ("2026-Q3" is "2026-09"): the month the books close through. */
+export function filingPeriodLastMonth(period: string): string {
+  return addMonths(monthKey(filingPeriodBoundsUtc(period).end), -1);
 }
 
 export function isFilingPeriod(value: unknown): value is string {
@@ -73,12 +80,23 @@ export interface FilingChange {
   paid?: boolean;
 }
 
+export interface FilingUpdate {
+  filing: VatFilingRecord | null;
+  /** The month marking the return as filed closed the books through; null when the lock stayed as it was. */
+  closedThrough: string | null;
+}
+
+/**
+ * Marking a period as filed also closes the books through its last month (S5),
+ * so the numbers behind the return stop moving. Undoing the filing does not
+ * reopen them: that is the owner's call, in Kirjanpito > Suljetut kaudet.
+ */
 export async function updateVatFiling(
   userId: string,
   period: string,
   change: FilingChange,
   now: Date = new Date()
-): Promise<VatFilingRecord | null> {
+): Promise<FilingUpdate> {
   const { end } = filingPeriodBoundsUtc(period);
   const today = isoDateToUtc(helsinkiCalendarDate(now));
   if (end.getTime() > today.getTime() && (change.filed || change.paid)) {
@@ -90,7 +108,9 @@ export async function updateVatFiling(
   let filedAmountCents = current?.filedAmountCents ?? null;
   let paidAt = current?.paidAt ?? null;
 
-  if (change.filed === true && !filedAt) {
+  // A filing that is already recorded does not close the books again: the owner may have reopened them to correct it.
+  const newlyFiled = change.filed === true && !filedAt;
+  if (newlyFiled) {
     filedAt = now;
     filedAmountCents = await signedVatCents(userId, period);
   }
@@ -106,13 +126,18 @@ export async function updateVatFiling(
   }
   if (change.paid === false) paidAt = null;
 
-  const row = await prisma.vatFiling.upsert({
-    where: { userId_period: { userId, period } },
-    create: { userId, period, filedAt, filedAmountCents, paidAt },
-    update: { filedAt, filedAmountCents, paidAt },
-    select: { filedAt: true, paidAt: true, filedAmountCents: true },
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.vatFiling.upsert({
+      where: { userId_period: { userId, period } },
+      create: { userId, period, filedAt, filedAmountCents, paidAt },
+      update: { filedAt, filedAmountCents, paidAt },
+      select: { filedAt: true, paidAt: true, filedAmountCents: true },
+    });
+    const closedThrough = newlyFiled
+      ? await closeBooksThrough(tx, userId, filingPeriodLastMonth(period), "ALV-ilmoitus merkitty annetuksi", now)
+      : null;
+    return { filing: toFilingRecord(row), closedThrough };
   });
-  return toFilingRecord(row);
 }
 
 /** Pending receipts dated in the period: approving them changes the VAT (TF-11). */

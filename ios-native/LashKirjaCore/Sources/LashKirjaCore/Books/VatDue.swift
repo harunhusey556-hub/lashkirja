@@ -245,6 +245,12 @@ public enum VatDue {
     }
 }
 
+/// `PATCH /api/alv/filing`: `closedThrough` is the month that marking the return as filed closed the
+/// books through, nil when the lock stayed as it was (an undo, a payment, or a later lock already).
+public struct VatFilingResult: Decodable, Sendable, Equatable {
+    public let closedThrough: String?
+}
+
 /// "Ilmoita ja maksa" and the ALV page's notes (web `lib/vat-due.ts`, `components/VatFilingCard.tsx`).
 public enum VatFiling {
     public static func stateLabel(_ state: PeriodClose.VatState, nothingToPay: Bool) -> String {
@@ -285,6 +291,13 @@ public enum VatFiling {
         let filed = filedOn.isEmpty ? "Ilmoitettu." : "Ilmoitettu \(filedOn)."
         guard !nothingToPay, let pay = payStepText(amount: amount, dueIso: dueIso, periodYear: periodYear) else { return filed }
         return "\(filed) \(pay)"
+    }
+
+    /// The confirmation after "Merkitse ilmoitetuksi" (web `vatFiledConfirmation`): when marking the
+    /// return filed closed the books it says so and where to open them again.
+    public static func filedConfirmation(_ text: String, closedThrough: String?) -> String {
+        guard let closedThrough else { return text }
+        return "\(endSentence(text)) Kirjanpito lukittu \(PeriodLock.formatMonth(closedThrough)) asti. Voit avata sen kohdassa Kirjanpito > Suljetut kaudet."
     }
 
     /// Which mark the undo button clears: the payment first, then the filing (which clears both).

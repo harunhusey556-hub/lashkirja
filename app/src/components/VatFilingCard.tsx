@@ -8,13 +8,14 @@ import { apiFetch, errorMessage, isUnauthorized, readJson, redirectToLogin } fro
 import { formatDate } from "@/lib/format";
 import { firstVatFiledMoment } from "@/lib/quiet-moments";
 import { showToast } from "@/lib/toast";
-import { alvSummaryKey, readCached, storeCached } from "@/lib/cached-resource";
+import { PERIOD_LOCK_KEY, alvSummaryKey, readCached, storeCached } from "@/lib/cached-resource";
 import {
   vatAmountToPay,
   vatChangedNote,
   vatChangedSinceFiling,
   vatChooseStepText,
   vatFileStepText,
+  vatFiledConfirmation,
   vatFiledNote,
   vatFilingState,
   vatDueDate,
@@ -72,20 +73,24 @@ export function VatFilingCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ period: periodKey, ...change }),
       });
-      const result = await readJson<{ filing: VatFilingRecord | null; firstFiled?: boolean }>(response, "Merkinnän tallennus epäonnistui");
+      const result = await readJson<{ filing: VatFilingRecord | null; firstFiled?: boolean; closedThrough?: string | null }>(response, "Merkinnän tallennus epäonnistui");
       onChanged(result.filing);
       // Koti and Kirjanpito read the same cache entry (FP-4): update it in place.
       const cached = readCached<VatDueFigures>(alvSummaryKey(periodKey));
       if (cached) storeCached(alvSummaryKey(periodKey), { ...cached, filing: result.filing });
+      // Filing closed the books: the Kirjanpito hub and Suljetut kaudet read the lock from this entry.
+      if (result.closedThrough) storeCached(PERIOD_LOCK_KEY, { lockedThrough: result.closedThrough });
       // ToastHost buzzes for a success toast. The first return ever gets its own quiet sentence.
       showToast({
         tone: "success",
         text:
           which === "filed"
-            ? firstVatFiledMoment(result.firstFiled) ?? "ALV-ilmoitus merkitty annetuksi"
+            ? vatFiledConfirmation(firstVatFiledMoment(result.firstFiled) ?? "ALV-ilmoitus merkitty annetuksi", result.closedThrough)
             : which === "paid"
               ? "ALV merkitty maksetuksi"
               : "Merkintä peruttiin",
+        // Two sentences and a place to look need longer than the default 4 s.
+        durationMs: result.closedThrough ? 8000 : undefined,
       });
     } catch (error) {
       if (isUnauthorized(error)) {

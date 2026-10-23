@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { helsinkiMonthKey } from "@/lib/validation";
 import { GET as lockState, PUT as setLock } from "@/app/api/period-lock/route";
+import { GET as getAlv } from "@/app/api/alv/route";
+import { PATCH as fileVat } from "@/app/api/alv/filing/route";
 import { POST as createInvoice } from "@/app/api/invoices/route";
 import { PATCH as patchInvoice, DELETE as deleteInvoice } from "@/app/api/invoices/[id]/route";
 import { POST as setStatus } from "@/app/api/invoices/[id]/status/route";
@@ -416,5 +418,127 @@ describe("a closed period refuses changes", () => {
       )
     );
     expect(response.status).toBe(201);
+  });
+});
+
+describe("marking a VAT period as filed closes the books through its last month (S5)", () => {
+  async function markFiled(period: string, change: { filed?: boolean; paid?: boolean } = { filed: true }) {
+    const response = await fileVat(buildRequest("PATCH", "/api/alv/filing", { period, ...change }, { cookie }));
+    return { status: response.status, body: await readJson(response) };
+  }
+  async function storedLock() {
+    return (await readJson(await lockState(buildRequest("GET", "/api/period-lock", undefined, { cookie }))))
+      .lockedThrough;
+  }
+  async function deleteReceiptRow(id: string) {
+    return deleteReceipt(
+      buildRequest("DELETE", `/api/receipts/${id}`, undefined, { cookie }),
+      routeContext({ id })
+    );
+  }
+
+  it.each([
+    ["a month", "2025-08", "2025-08"],
+    ["a quarter", "2025-Q3", "2025-09"],
+    ["a year", "2024", "2024-12"],
+  ])("closes %s through its last month and says so", async (_kind, period, lastMonth) => {
+    const filed = await markFiled(period);
+    expect(filed.status).toBe(200);
+    expect(filed.body.closedThrough).toBe(lastMonth);
+    expect(await storedLock()).toBe(lastMonth);
+
+    const events = await prisma.automationEvent.findMany({ where: { userId: user.id, kind: "lock" } });
+    expect(events.map((event) => [event.previousValue, event.newValue, event.reason])).toEqual([
+      [null, lastMonth, "ALV-ilmoitus merkitty annetuksi"],
+    ]);
+  });
+
+  it("moves an earlier lock forward to the period's last day", async () => {
+    await lockThrough("2025-06");
+    const filed = await markFiled("2025-Q3");
+    expect(filed.body.closedThrough).toBe("2025-09");
+    expect(await storedLock()).toBe("2025-09");
+  });
+
+  it("never moves a later lock backwards", async () => {
+    await lockThrough("2025-11");
+    const filed = await markFiled("2025-Q3");
+    expect(filed.status).toBe(200);
+    expect(filed.body.filing.filedAt).toBeTruthy();
+    expect(filed.body.closedThrough).toBeNull();
+    expect(await storedLock()).toBe("2025-11");
+    // Only the manual lock left a trace; the filing changed nothing.
+    expect(await prisma.automationEvent.count({ where: { userId: user.id, kind: "lock" } })).toBe(1);
+  });
+
+  it("leaves the books and the filing alone when the period has not ended", async () => {
+    const refused = await markFiled(helsinkiMonthKey(new Date()));
+    expect(refused.status).toBe(409);
+    expect(await storedLock()).toBeNull();
+    expect(await prisma.vatFiling.count({ where: { userId: user.id } })).toBe(0);
+  });
+
+  it("does not close the books for marking a return paid", async () => {
+    await markFiled("2025-08");
+    await lockThrough(null, true);
+    const paid = await markFiled("2025-08", { paid: true });
+    expect(paid.status).toBe(200);
+    expect(paid.body.closedThrough).toBeNull();
+    expect(await storedLock()).toBeNull();
+  });
+
+  it("refuses edits in the filed period until the books are reopened, and reopening keeps the filing", async () => {
+    const receipt = await createReceipt(user.id, { date: "2025-08-10" });
+    expect((await markFiled("2025-08")).status).toBe(200);
+
+    const refused = await deleteReceiptRow(receipt.id);
+    expect(refused.status).toBe(409);
+    expect((await readJson(refused)).error.code).toBe("PERIOD_LOCKED");
+    expect(await prisma.receipt.count()).toBe(1);
+
+    // The Suljetut kaudet screen: reopen from the lock it showed, down to the month before the period.
+    const reopened = await setLock(
+      buildRequest(
+        "PUT",
+        "/api/period-lock",
+        { month: "2025-07", reopen: true, expectedLockedThrough: "2025-08" },
+        { cookie }
+      )
+    );
+    expect(reopened.status).toBe(200);
+    expect((await readJson(reopened)).lockedThrough).toBe("2025-07");
+
+    // The filing record survives, with the figure it was filed with.
+    const row = await prisma.vatFiling.findUniqueOrThrow({
+      where: { userId_period: { userId: user.id, period: "2025-08" } },
+    });
+    expect(row.filedAt).not.toBeNull();
+    expect(row.filedAmountCents).not.toBeNull();
+    const report = await readJson(
+      await getAlv(buildRequest("GET", "/api/alv?period=2025-08", undefined, { cookie }))
+    );
+    expect(report.filing.filedAt).toBeTruthy();
+
+    expect((await deleteReceiptRow(receipt.id)).status).toBe(200);
+    expect(await prisma.receipt.count()).toBe(0);
+  });
+
+  it("does not reopen the books when the filing is undone", async () => {
+    await markFiled("2025-08");
+    const undone = await markFiled("2025-08", { filed: false });
+    expect(undone.status).toBe(200);
+    expect(undone.body.filing).toBeNull();
+    expect(undone.body.closedThrough).toBeNull();
+    expect(await storedLock()).toBe("2025-08");
+  });
+
+  it("does not close the books again for a filing that is already recorded", async () => {
+    await markFiled("2025-08");
+    await lockThrough(null, true);
+    // A second tap, or a stale screen, on a return the owner reopened to correct.
+    const again = await markFiled("2025-08");
+    expect(again.status).toBe(200);
+    expect(again.body.closedThrough).toBeNull();
+    expect(await storedLock()).toBeNull();
   });
 });
