@@ -338,8 +338,12 @@ test("the books open from Kirjanpito and show a balanced income statement and ba
   await expect(page).toHaveURL(/\/kirjanpito\/paakirja$/);
   await expect(page.getByText(/^Tuloslaskelma \d{4}$/)).toBeVisible();
   await expect(page.getByText("Tilikauden tulos")).toBeVisible();
+  // The books come from the documents only, so the page says it is preliminary, whichever view is open.
+  const preliminary = page.getByText("Alustava – laskettu tositteista. Kirjanpitäjä tekee tilinpäätöksen.", { exact: true });
+  await expect(preliminary).toBeVisible();
   await page.getByRole("button", { name: "Tase" }).click();
   await expect(page.getByText("Vastaavaa yhteensä")).toBeVisible();
+  await expect(preliminary).toBeVisible();
   await expect(page.getByText("Tase ei täsmää")).toHaveCount(0);
   await page.screenshot({ path: "test-results/paakirja-tase.png", fullPage: true });
 });
