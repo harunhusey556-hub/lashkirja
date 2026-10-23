@@ -39,7 +39,7 @@ All four are in `app/scripts/ops/`. Run them with `powershell -NoProfile -Execut
 | `run-cron.ps1` | Calls the `recurring-invoices` and `cleanup` cron routes on `127.0.0.1:3300` with `CRON_SECRET` read from `.env` at run time. `sync-bank` and `sync-email` are not called here -- the always-on worker already covers them. A failing run exits 1 and sends a Telegram line, at most one per 12 hours while it keeps failing. |
 | `watchdog-prod.ps1` | Every 5 minutes (`install-watchdog-task.ps1`): probes `/api/health` and restarts the app only when it stops answering. It exits at once, without probing or restarting, while `run\deploy.lock` is held by a live deploy. A lock whose process is gone, or that is older than 2 hours, is stale: the owner gets one Telegram line and the watchdog carries on. It also sends a Telegram line (at most one per 24 hours) when the newest backup zip is over 36 hours old, and when health reports `low-space` or a worker that has stopped writing `data/worker-heartbeat` (`worker` stale or never-started), which are warnings and never a reason to restart: a restart of the web server does not bring the worker back. |
 | `lk-common.ps1` | Not run on its own. `Read-DotEnv` and `Notify` (the Telegram line, token read from the hermes `.env` at run time) for the watchdog, `backup-local.ps1`, `run-cron.ps1` and `deploy-local.ps1`. It has to sit next to them. |
-| `install-tasks.ps1` | Registers the three per-user Scheduled Tasks and turns off sleep on AC power. It is idempotent. |
+| `install-tasks.ps1` | Registers the three per-user Scheduled Tasks and turns off sleep on AC power. It is idempotent. `-RunWhenLoggedOff` registers them to run while nobody is signed in (see "Running while nobody is signed in"). |
 
 ## Start, stop, status
 
@@ -56,7 +56,26 @@ Start-ScheduledTask -TaskName 'LashKirja prod'                                  
 
 `/api/health` needs `Authorization: Bearer <HEALTH_TOKEN>` in production. `-Status` reads the token from `.env` without printing it.
 
-The tasks run only while the owner is logged on. A locked screen is fine; signing out stops the server. After a reboot the server comes back when the owner logs in. For unattended restarts, turn on automatic sign-in, or re-register the prod task from an elevated prompt with a "run whether user is logged on or not" principal.
+By default the tasks run only while the owner is logged on. A locked screen is fine; signing out stops the server. After a reboot the server comes back when the owner logs in.
+
+### Running while nobody is signed in
+
+`-RunWhenLoggedOff` (owner decision 2026-10-23, beta audit S9: on 2026-10-21 nothing ran for 270 minutes) registers the same tasks with the S4U logon type, "run whether the user is logged on or not", with no password stored. From an elevated prompt, as the account that owns `C:\LashKirja`, in this order:
+
+```powershell
+$ops = 'C:\LashKirja\prod\app\scripts\ops'
+powershell -NoProfile -ExecutionPolicy Bypass -File $ops\install-tasks.ps1 -RunWhenLoggedOff
+powershell -NoProfile -ExecutionPolicy Bypass -File $ops\install-watchdog-task.ps1 -RunWhenLoggedOff
+```
+
+The order matters: `install-tasks.ps1` registers "LashKirja prod" again, which drops the 5-minute repetition that `install-watchdog-task.ps1` adds. To go back, run both without the switch.
+
+- "LashKirja prod" starts at boot as well as at logon. A second start does nothing: the task is `IgnoreNew`, and `run-prod.ps1` exits while a supervisor is alive.
+- The account needs the "Log on as a batch job" right (Administrators have it). If the task then fails with `0x80070569`, the account lacks it.
+- An S4U task has no network credentials, no EFS or DPAPI/Credential Manager secrets and no window. None of the tasks uses a UNC path, a mapped drive or a credential store, so nothing stops working for that reason.
+- Two features read the environment the S4U token gets: the Telegram alerts (`%LOCALAPPDATA%\hermes\.env`, via `Notify`) and the OneDrive backup mirror (`%OneDrive%`). If a variable is missing there, the alert is only logged (`notify failed`) and the backup logs `no OneDrive folder; off-machine copy skipped`. After the first 03:00 run, check that `logs\backup-*.log` says `mirrored to`. The OneDrive client itself syncs only while the owner is signed in, so the mirror is uploaded at the next sign-in.
+- The public address works through Tailscale Funnel, and Tailscale keeps running after sign-out only in unattended mode (`tailscale set --unattended`; `tailscale debug prefs` shows `ForceDaemon` true). Without it the server runs but cannot be reached until someone signs in.
+- Windows Update may still restart the PC. With the boot trigger that is a gap of about a minute, not an outage until someone signs in; set active hours anyway (Settings > Windows Update > Advanced options > Active hours).
 
 ## Deploy
 
