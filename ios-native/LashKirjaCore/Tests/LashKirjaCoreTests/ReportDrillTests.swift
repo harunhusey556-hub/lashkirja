@@ -35,6 +35,10 @@ private func row(_ name: String, count: Int) -> ProfitLoss.Category {
     ProfitLoss.Category(category: name, gross: 0, vat: 0, net: 0, count: count)
 }
 
+private func row(_ name: String, count: Int, purchaseInvoices: Int?) -> ProfitLoss.Category {
+    ProfitLoss.Category(category: name, gross: 0, vat: 0, net: 0, count: count, purchaseInvoiceCount: purchaseInvoices)
+}
+
 private func period(_ month: String?, income: [ProfitLoss.Category] = [], expense: [ProfitLoss.Category] = [],
                     invoices: Int = 0, creditNotes: Int? = 0, incomeNet: Decimal = 0, expenseNet: Decimal = 0,
                     purchaseInvoices: Int? = nil) -> ProfitLoss.Period {
@@ -82,6 +86,42 @@ private func period(_ month: String?, income: [ProfitLoss.Category] = [], expens
     #expect(ReportDrill.expenseTargets(older, key: "2026-09") == [.receipts(period: "2026-09", tab: "meno", category: "")])
 }
 
+/// A category row counts its purchase invoices with its receipts, but Kuitit lists only receipts: rent
+/// (purchase invoices alone) opened an empty Kuitit, and a mixed category listed fewer rows than its count.
+@Test func anExpenseCategoryMadeOfPurchaseInvoicesOpensOstolaskut() {
+    let rent = ReportDrill.target(kind: .expense, row: row("vuokra", count: 2, purchaseInvoices: 2), year: "2026")
+    #expect(rent == .purchaseInvoices)
+    #expect(rent.label == "Ostolaskut")
+    // Receipts and a bill: its receipts, as before; the bill is behind the Menot figure's Ostolaskut link.
+    #expect(ReportDrill.target(kind: .expense, row: row("tarvikkeet", count: 4, purchaseInvoices: 2), year: "2026")
+        == .receipts(period: "2026", tab: "meno", category: "tarvikkeet"))
+    // Receipts only, and a server that does not count the bills: as before.
+    #expect(ReportDrill.target(kind: .expense, row: row("sähkö", count: 3, purchaseInvoices: 0), year: "2026")
+        == .receipts(period: "2026", tab: "meno", category: "sähkö"))
+    #expect(ReportDrill.target(kind: .expense, row: row("vuokra", count: 1, purchaseInvoices: nil), year: "2026")
+        == .receipts(period: "2026", tab: "meno", category: "vuokra"))
+    // The uncategorised row of bills alone opens them; with receipts it opens the year's receipts.
+    #expect(ReportDrill.target(kind: .expense, row: row("Luokittelematon", count: 1, purchaseInvoices: 1), year: "2026") == .purchaseInvoices)
+    #expect(ReportDrill.target(kind: .expense, row: row("Luokittelematon", count: 3, purchaseInvoices: 1), year: "2026")
+        == .receipts(period: "2026", tab: "meno", category: ""))
+    // Income holds no purchase invoice, so a count there changes nothing.
+    #expect(ReportDrill.target(kind: .income, row: row("muut_tulot", count: 2, purchaseInvoices: 2), year: "2026")
+        == .receipts(period: "2026", tab: "tulo", category: "muut_tulot"))
+    // Ostolaskut is not a Kuitit list: Raportit warms nothing for it.
+    #expect(ReportDrillWarm.requests([rent]).isEmpty)
+}
+
+@Test func aProfitLossCategoryCarriesItsPurchaseInvoiceCount() throws {
+    let counted = try JSONDecoder().decode(
+        ProfitLoss.Category.self, from: Data(#"{"category":"vuokra","gross":800,"vat":0,"net":800,"count":2,"purchaseInvoiceCount":2}"#.utf8))
+    #expect(counted.count == 2)
+    #expect(counted.purchaseInvoiceCount == 2)
+    // A server that does not count them.
+    let older = try JSONDecoder().decode(
+        ProfitLoss.Category.self, from: Data(#"{"category":"vuokra","gross":800,"vat":0,"net":800,"count":2}"#.utf8))
+    #expect(older.purchaseInvoiceCount == nil)
+}
+
 @Test func reportChartSelectsTheLatestMonthWithFigures() {
     let months = [period("2026-01", incomeNet: 10), period("2026-02", expenseNet: 5), period("2026-03")]
     #expect(ReportDrill.defaultMonth(months) == "2026-02")
@@ -96,6 +136,25 @@ private func period(_ month: String?, income: [ProfitLoss.Category] = [], expens
     #expect(ReportDrill.koti(income: true, source: "kuitit", invoiceCount: 2, month: "2026-09") == .invoices(period: "2026-09", status: .all))
     #expect(ReportDrill.koti(income: true, source: "kuitit", invoiceCount: 0, month: "2026-09") == .receipts(period: "2026-09", tab: "tulo", category: ""))
     #expect(ReportDrill.koti(income: false, source: "kuitit", invoiceCount: 2, month: "2026-09") == .receipts(period: "2026-09", tab: "meno", category: ""))
+}
+
+/// Koti's Kulut counts the purchase invoices too, so a month whose costs are bills alone opens Ostolaskut.
+@Test func kotiKulutOpensTheListItsFigureIsMadeOf() {
+    #expect(ReportDrill.koti(income: false, source: "kuitit", invoiceCount: 0, month: "2026-09", purchaseInvoiceCount: 2, expenseReceiptCount: 0)
+        == .purchaseInvoices)
+    // Any receipt keeps Kuitit, whose rows are the receipts of the count.
+    #expect(ReportDrill.koti(income: false, source: "kuitit", invoiceCount: 0, month: "2026-09", purchaseInvoiceCount: 2, expenseReceiptCount: 3)
+        == .receipts(period: "2026-09", tab: "meno", category: ""))
+    // A server that does not count them, or a month without bills: as before.
+    #expect(ReportDrill.koti(income: false, source: "kuitit", invoiceCount: 0, month: "2026-09", purchaseInvoiceCount: 2)
+        == .receipts(period: "2026-09", tab: "meno", category: ""))
+    #expect(ReportDrill.koti(income: false, source: "kuitit", invoiceCount: 0, month: "2026-09", purchaseInvoiceCount: 0, expenseReceiptCount: 0)
+        == .receipts(period: "2026-09", tab: "meno", category: ""))
+    // Myynti never opens purchase invoices, and a bank basis opens the bank rows.
+    #expect(ReportDrill.koti(income: true, source: "kuitit", invoiceCount: 0, month: "2026-09", purchaseInvoiceCount: 2, expenseReceiptCount: 0)
+        == .receipts(period: "2026-09", tab: "tulo", category: ""))
+    #expect(ReportDrill.koti(income: false, source: "tiliote", invoiceCount: 0, month: "2026-09", purchaseInvoiceCount: 2, expenseReceiptCount: 0)
+        == .bankFeed(month: "2026-09"))
 }
 
 private func alv(_ sources: String) throws -> AlvReport {

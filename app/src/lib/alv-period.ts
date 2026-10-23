@@ -12,7 +12,7 @@
  * - A credit note is its own document with negative lines, counted in the
  *   period it was issued (AVL 136 §: a credit reduces the sales of the month
  *   in which it is given). Crediting never rewrites an earlier period.
- * - Approved receipts count by their date.
+ * - Approved receipts count by their date, signed as the ledger posts them (`buildProfitLoss`).
  * - A purchase invoice's VAT is deductible (field 307) in the period of its
  *   invoice date, once it is recorded (open or paid, never cancelled) (F39).
  *   One purchase must count once: the rule for that is written in
@@ -31,7 +31,7 @@ import { prisma } from "./db";
 import { centsToEuros } from "./money";
 import { formatReference } from "./finnish-reference";
 import { computeInvoiceTotals } from "./invoices";
-import { computeAlvReport, parseVatDetails, type AlvReport, type InvoiceVatSource, type PurchaseVatSource, type ReceiptLike } from "./alv";
+import { computeAlvReport, parseVatDetails, splitsDocumentVat, type AlvReport, type InvoiceVatSource, type PurchaseVatSource, type ReceiptLike } from "./alv";
 import { buildProfitLoss, type ProfitLossResult, type ReportInvoice, type ReportPurchaseInvoice, type ReportReceipt } from "./reports";
 
 /** Ordinary invoices that are part of the books: sent, paid, or later credited. */
@@ -464,6 +464,7 @@ export async function loadAlvPeriodSources(
       totalAmountCents: receipt.totalAmountCents,
       category: receipt.category,
       vatDetails: receipt.vatDetails,
+      vatTreatment: receipt.vatTreatment,
     })),
     reportInvoices: bookedInvoices.map(({ invoice, totals }) => ({
       issueDate: invoice.issueDate,
@@ -480,7 +481,7 @@ export async function loadAlvPeriodSources(
         grossCents: row.grossCents,
         // As the ledger splits it (ledger/posting.ts purchaseSide): only a domestic invoice's own VAT
         // is taken off the cost; reverse charge and foreign VAT leave the whole amount as the expense.
-        vatCents: row.vatTreatment === "domestic" || row.vatTreatment === "" ? row.vatCents : 0,
+        vatCents: splitsDocumentVat(row.vatTreatment) ? row.vatCents : 0,
       })
     ),
     skippedPurchaseInvoiceCount: purchases.skipped,

@@ -302,8 +302,9 @@ private struct KotiContent: View {
                 let income = metric == .income
                 let amount = income ? d.income : d.expenses
                 // As on the web: the card opens the month's sales (its invoices when it has any) or
-                // costs, from the books' basis.
-                let route = Route.forDrill(.koti(income: income, source: d.source, invoiceCount: d.invoiceCount, month: d.month))
+                // costs (its purchase invoices when it has no receipts), from the books' basis.
+                let route = Route.forDrill(.koti(income: income, source: d.source, invoiceCount: d.invoiceCount, month: d.month,
+                                                 purchaseInvoiceCount: d.purchaseInvoiceCount, expenseReceiptCount: d.expenseReceiptCount))
                 NavigationLink(value: route) {
                     MoneyCard(title: income ? "Myynti \(MonthKey.name(d.month).lowercased())" : "Kulut",
                               amount: amount,

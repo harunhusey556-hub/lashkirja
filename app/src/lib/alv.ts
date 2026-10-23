@@ -21,6 +21,15 @@ export function isPurchaseVatTreatment(value: unknown): value is PurchaseVatTrea
   return typeof value === "string" && (PURCHASE_VAT_TREATMENTS as readonly string[]).includes(value);
 }
 
+/**
+ * Whether a purchase's own VAT is split off its cost. Only a domestic purchase does that; under every
+ * other treatment the whole amount is the expense (reverse charge nets out in the VAT accounts, foreign
+ * VAT is not deductible). The ledger and the profit and loss both read this, so they cannot differ.
+ */
+export function splitsDocumentVat(vatTreatment: string | null | undefined): boolean {
+  return !vatTreatment || vatTreatment === "domestic";
+}
+
 /** The general rate rose from 24 % to 25,5 % on 1.9.2024; reverse charge uses the rate of the purchase date. */
 export function reverseChargeRate(date: Date | string | null | undefined): number {
   if (!date) return 25.5;

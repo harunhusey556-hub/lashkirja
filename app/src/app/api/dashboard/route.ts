@@ -134,6 +134,11 @@ export async function GET(req: NextRequest) {
   const monthBooks = monthFigures?.total ?? null;
   const documentIncome = monthBooks ? centsToEuros(monthBooks.incomeGrossCents) : 0;
   const documentExpenses = monthBooks ? centsToEuros(monthBooks.expenseGrossCents) : 0;
+  // Kulut counts purchase invoices too, which Kuitit does not list: Koti opens the list that holds its rows.
+  const purchaseInvoiceCount = monthBooks?.purchaseInvoiceCount ?? 0;
+  const expenseReceiptCount = monthBooks
+    ? monthBooks.expenseByCategory.reduce((sum, row) => sum + row.count, 0) - purchaseInvoiceCount
+    : 0;
   const estimatedVat = monthFigures?.estimatedVat ?? 0;
   const hasBankData = transactions.length > 0;
 
@@ -381,6 +386,8 @@ export async function GET(req: NextRequest) {
     txCount: transactions.length,
     receiptCount: monthFigures?.receiptCount ?? 0,
     invoiceCount: monthBooks ? monthBooks.invoiceCount + monthBooks.creditNoteCount : 0,
+    purchaseInvoiceCount,
+    expenseReceiptCount,
     matching: { matchable, matched, suggested },
     events,
     handled: handled && handled.count > 0 ? handled : null,

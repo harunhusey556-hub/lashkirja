@@ -51,6 +51,17 @@ private func fixture(_ name: String) throws -> Data {
     #expect(try JSONDecoder().decode(Dashboard.self, from: Data((base + #","itemTotals":null}"#).utf8)).itemTotals == nil)
 }
 
+// Kulut counts purchase invoices too: Koti reads how many of the month's costs are bills and how many receipts.
+@Test func decodesWhatTheCostsAreMadeOf() throws {
+    let base = #"{"month":"2026-10","income":0,"expenses":0,"matching":{"matchable":0,"matched":0,"suggested":0}"#
+    let counted = try JSONDecoder().decode(Dashboard.self, from: Data((base + #","purchaseInvoiceCount":2,"expenseReceiptCount":0}"#).utf8))
+    #expect(counted.purchaseInvoiceCount == 2)
+    #expect(counted.expenseReceiptCount == 0)
+    let older = try JSONDecoder().decode(Dashboard.self, from: Data((base + "}").utf8))
+    #expect(older.purchaseInvoiceCount == nil)
+    #expect(older.expenseReceiptCount == nil)
+}
+
 @Test func monthKeys() {
     #expect(MonthKey.shift("2026-10", by: -1) == "2026-09")
     #expect(MonthKey.shift("2026-01", by: -1) == "2025-12")

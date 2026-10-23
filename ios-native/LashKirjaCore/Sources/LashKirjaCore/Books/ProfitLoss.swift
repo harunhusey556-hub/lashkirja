@@ -7,7 +7,11 @@ public struct ProfitLoss: Decodable, Sendable {
         public let gross: Decimal
         public let vat: Decimal
         public let net: Decimal
+        /// Receipts and purchase invoices together.
         public let count: Int
+        /// How many of `count` are purchase invoices, which Kuitit does not list but Ostolaskut does;
+        /// nil from a server that does not count them.
+        public var purchaseInvoiceCount: Int?
         public var id: String { category }
     }
     public struct Period: Decodable, Sendable, Identifiable {
