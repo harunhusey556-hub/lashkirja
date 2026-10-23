@@ -379,12 +379,13 @@ struct AlvView: View {
         defer { busy = nil }
         let asked = period
         do {
-            let _: Ignored = try await app.api.send("PATCH", "/api/alv/filing", body: Body(period: asked, filed: filed, paid: paid))
+            let result: VatFilingResult = try await app.api.send("PATCH", "/api/alv/filing", body: Body(period: asked, filed: filed, paid: paid))
             // Another period is on screen now: its notes are not this mark's.
             guard asked == period else { return }
             Haptics.success()
             failure = nil
-            notice = done
+            // Marking the return filed closes the books through the period: the note says so and where to reopen.
+            notice = VatFiling.filedConfirmation(done, closedThrough: result.closedThrough)
             await load(force: true)
         } catch is CancellationError {
         } catch {

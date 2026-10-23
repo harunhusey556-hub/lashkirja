@@ -5,7 +5,7 @@
  * from the same `/api/alv` answer (see components/useVatDue.ts), so the two
  * screens show the same period, due date, amount and state by construction.
  */
-import { formatDayMonth, formatEur } from "./format";
+import { formatDayMonth, formatEur, formatMonth } from "./format";
 import type { VatDue } from "./vat-deadline";
 
 export type VatFilingState = "open" | "filed" | "paid";
@@ -98,6 +98,16 @@ export function vatFiledNote(
   const filed = filedOn ? `Ilmoitettu ${filedOn}.` : "Ilmoitettu.";
   const pay = nothingToPay ? null : vatPayStepText(amount, dueIso, periodYear);
   return pay ? `${filed} ${pay}` : filed;
+}
+
+/**
+ * The confirmation after "Merkitse ilmoitetuksi". When marking the return filed
+ * closed the books (S5) it says so and where to open them again, so a closed
+ * month is never a surprise and never a dead end.
+ */
+export function vatFiledConfirmation(text: string, closedThrough: string | null | undefined): string {
+  if (!closedThrough) return text;
+  return `${endSentence(text)} Kirjanpito lukittu ${formatMonth(closedThrough)} asti. Voit avata sen kohdassa Kirjanpito > Suljetut kaudet.`;
 }
 
 export const VAT_ROW_TITLE = "ALV-ilmoitus";

@@ -16,6 +16,9 @@ const bodySchema = z
 /**
  * "Merkitse ilmoitetuksi" / "Merkitse maksetuksi" (FP-13). The owner files in
  * OmaVero; this records that it was done. `filed: false` undoes both.
+ * Marking a period filed also closes the books through its last month
+ * (`closedThrough`, null when the lock stayed as it was); undoing it does not
+ * reopen them.
  */
 export const PATCH = withErrorHandler(async (req: NextRequest) => {
   const blocked = guardWrite(req);
@@ -26,6 +29,6 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   const body = bodySchema.parse(await req.json());
   // Additive: true when this is the account's very first ALV filing record (the quiet "first return" moment).
   const noFilingBefore = body.filed === true ? await hasNoVatFilingYet(session.userId) : false;
-  const filing = await updateVatFiling(session.userId, body.period, { filed: body.filed, paid: body.paid });
-  return noStoreJson({ period: body.period, filing, firstFiled: noFilingBefore && filing?.filedAt != null });
+  const { filing, closedThrough } = await updateVatFiling(session.userId, body.period, { filed: body.filed, paid: body.paid });
+  return noStoreJson({ period: body.period, filing, firstFiled: noFilingBefore && filing?.filedAt != null, closedThrough });
 });
