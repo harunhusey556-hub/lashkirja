@@ -153,6 +153,39 @@ export function checkLockChange(
   }
 }
 
+/**
+ * Closes the books through `month` as the side effect of something else (a VAT
+ * return marked as filed), inside that action's transaction so the two stand
+ * or fall together. Never moves the boundary backwards: a lock that is already
+ * as late or later is left alone, because only an explicit reopen may lower it.
+ * Returns the month closed through, or null when the lock stayed as it was.
+ */
+export async function closeBooksThrough(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  month: string,
+  reason: string,
+  now: Date = new Date()
+): Promise<string | null> {
+  const previous = await getLockedThrough(userId, tx);
+  if (previous !== null && previous >= month) return null;
+  checkLockChange(previous, month, { now });
+
+  await tx.user.update({ where: { id: userId }, data: { booksLockedThrough: month } });
+  await tx.automationEvent.create({
+    data: {
+      userId,
+      kind: "lock",
+      resourceType: "period",
+      resourceId: "books",
+      previousValue: previous,
+      newValue: month,
+      reason,
+    },
+  });
+  return month;
+}
+
 /** Sets or clears the watermark and leaves a trace of the change. */
 export async function setLockedThrough(
   userId: string,

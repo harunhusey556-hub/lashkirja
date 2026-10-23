@@ -127,6 +127,23 @@ import Foundation
     #expect(VatFiling.undoTitle(state: .filed, nothingToPay: false) == "Peru ilmoitettu-merkintä")
 }
 
+@Test func theFilingConfirmationSaysWhenTheBooksWereClosedAndWhereToOpenThem() {
+    #expect(VatFiling.filedConfirmation("ALV-ilmoitus merkitty annetuksi", closedThrough: "2026-09")
+            == "ALV-ilmoitus merkitty annetuksi. Kirjanpito lukittu syyskuu 2026 asti. Voit avata sen kohdassa Kirjanpito > Suljetut kaudet.")
+    // A lock that was already as late (or later), an undo and a payment close nothing and say nothing.
+    #expect(VatFiling.filedConfirmation("ALV-ilmoitus merkitty annetuksi", closedThrough: nil) == "ALV-ilmoitus merkitty annetuksi")
+}
+
+@Test func theFilingAnswerCarriesTheMonthItClosed() throws {
+    let closed = try JSONDecoder().decode(VatFilingResult.self, from: Data(#"{"period":"2026-Q3","filing":{"filedAt":"2026-10-05T08:00:00.000Z","paidAt":null,"filedAmount":159.38},"firstFiled":false,"closedThrough":"2026-09"}"#.utf8))
+    #expect(closed.closedThrough == "2026-09")
+    let kept = try JSONDecoder().decode(VatFilingResult.self, from: Data(#"{"period":"2026-Q3","filing":null,"firstFiled":false,"closedThrough":null}"#.utf8))
+    #expect(kept.closedThrough == nil)
+    // An answer from before filing closed the books has no such key.
+    let before = try JSONDecoder().decode(VatFilingResult.self, from: Data(#"{"period":"2026-Q3","filing":null,"firstFiled":false}"#.utf8))
+    #expect(before.closedThrough == nil)
+}
+
 @Test func alvNotes() {
     #expect(VatFiling.pendingNote(0) == nil)
     #expect(VatFiling.pendingNote(1) == "1 kuitti odottaa hyväksyntää. Se voi muuttaa ALV:tä.")
