@@ -174,12 +174,12 @@ struct ReceiptsView: View {
                     }
                     ForEach(all.prefix(limit.visible(all.count))) { receipt in row(receipt) }
                     // Ten at a time; the next server page is asked for only by the button, never on scroll.
-                    PagedShowMoreButton(limit: $limit, loaded: all.count, total: total, serverHasMore: paging.hasMore, loading: loadingMore) {
+                    PagedShowMoreButton(limit: $limit, loaded: all.count, total: shownTotal, serverHasMore: paging.hasMore, loading: loadingMore) {
                         await loadMore()
                         return shownReceipts.count
                     }
                 } header: {
-                    if !all.isEmpty { Text(query.countHeader(total)) }
+                    if !all.isEmpty { Text(query.countHeader(shownTotal)) }
                 }
             } else if case .failed = receipts.display {
                 ScreenStateView(state: receipts, retry: { await load() }) { (_: [Receipt]) in EmptyView() }.listRowBackground(Color.clear)
@@ -216,7 +216,7 @@ struct ReceiptsView: View {
                         confirmDelete = true
                     }
                 }
-            } else if !selecting, query.tab == .unlinked, let count = sure?.count, count > 0, toast == nil {
+            } else if !selecting, query.tab == .unlinked, let count = sure?.count, count > 0, toast == nil, !app.receiptDelete.isWaiting {
                 // Under the list, not above it: the rows never move when the count arrives.
                 sureBar(count)
             }
@@ -227,7 +227,7 @@ struct ReceiptsView: View {
             }
         }
         .confirmSheet(isPresented: $confirmDelete, title: deleteTitle, message: deleteNote, confirmTitle: "Poista") {
-            Task { await delete(deleteIds) }
+            delete(deleteIds)
         }
         .fullScreenCover(isPresented: $capture, onDismiss: {
             Task {
@@ -330,6 +330,10 @@ struct ReceiptsView: View {
 
     /// The loaded rows minus the ones deleted a moment ago (`app.removedIds`).
     private var shownReceipts: [Receipt] { (receipts.value ?? []).filter { !app.removedIds.contains($0.id) } }
+
+    /// The server's count less the loaded rows hidden by a delete: while "Kumoa" is up the server
+    /// still counts them, and the header and "Näytä enemmän (N)" would be one too many.
+    private var shownTotal: Int { max(0, total - ((receipts.value ?? []).count - shownReceipts.count)) }
 
     /// The ids of the rows on screen, in order: a new answer that changes them is animated.
     private var visibleIds: [String] {
@@ -870,49 +874,18 @@ struct ReceiptsView: View {
         }
     }
 
-    private func delete(_ ids: [String]) async {
-        struct Body: Encodable { let receiptIds: [String] }
+    /// Gone from the list at once, with "Kumoa" over the tabs; the server is asked when that ends
+    /// (`AppModel.deleteReceipts`), and the rows it refuses come back there with the reason.
+    private func delete(_ ids: [String]) {
         guard !ids.isEmpty, !busy else { return }
-        busy = true
         failure = nil
         notice = nil
-        defer { busy = false }
-        // Gone from the list at once; the ones the server refuses come back.
-        withMotion { app.hide(ids) }
-        var deleted: [String] = []
-        var refused: [String] = []
-        var messages: [String] = []
-        // The server takes at most 50 ids per call.
-        var start = 0
-        while start < ids.count {
-            let chunk = Array(ids[start..<min(start + 50, ids.count)])
-            start += 50
-            do {
-                let result: BatchDeleteResult = try await app.api.send("POST", "/api/receipts/batch-delete", body: Body(receiptIds: chunk))
-                deleted += result.succeeded ?? []
-                refused += result.failedIds
-                if let reason = result.failed?.first?.error { messages.append(reason) }
-            } catch {
-                refused += chunk
-                messages.append(error.userMessage)
+        app.deleteReceipts(ids)
+        if selecting {
+            withMotion(.snappy) {
+                selecting = false
+                selected = []
             }
-        }
-        if !deleted.isEmpty {
-            withMotion(visibility.animation(.default)) {
-                receipts.update { rows in rows.removeAll { deleted.contains($0.id) } }
-                total = max(0, total - deleted.count)
-            }
-            app.dataVersion += 1
-        }
-        withMotion(visibility.animation(.default)) { app.unhide(refused) }
-        selected = Set(refused)
-        if selecting && refused.isEmpty { selecting = false }
-        if refused.isEmpty {
-            Haptics.success()
-            notice = deleted.count == 1 ? "Poistettiin 1 kuitti." : "Poistettiin \(deleted.count) kuittia."
-        } else {
-            Haptics.error()
-            failure = "Poistettiin \(deleted.count). \(refused.count) epäonnistui" + (messages.first.map { ": \($0)" } ?? ".")
         }
     }
 }

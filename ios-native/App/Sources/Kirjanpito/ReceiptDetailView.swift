@@ -661,11 +661,10 @@ struct ReceiptDetailView: View {
         }
     }
 
+    /// The receipt leaves the lists and the screen closes; "Kumoa" is over the tabs where it lands,
+    /// and the server is asked when that ends (`AppModel.deleteReceipt`).
     private func delete() async {
-        let api = app.api, id = receiptId
-        app.removeInBackground([id]) {
-            let _: Ignored = try await api.send("DELETE", "/api/receipts/\(id)", body: Optional<EmptyBody>.none)
-        }
+        app.deleteReceipt(receiptId)
         dismiss()
     }
 }
