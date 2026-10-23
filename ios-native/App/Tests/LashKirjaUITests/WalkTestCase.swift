@@ -268,7 +268,30 @@ class WalkTestCase: XCTestCase {
             more.tap(); taps += 1
             _ = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Näytä vähemmän")).firstMatch.waitForExistence(timeout: 5)
         }
+        // At the largest text size a task card is about 430 pt tall and one slow swipe scrolls further
+        // than the band tapLabel waits for, so the card can jump from under the window to above it and
+        // the search runs on to Koti's foot (P5 testA, run 39868674592: the row at y -3575 after 20
+        // swipes). Koti lays out every task, so the row has a frame off screen: bring it to the middle.
+        // Only a card that tall: at the default size the row takes one swipe, and P1 test03 pins that.
+        if overdue.exists, overdue.frame.height > app.windows.firstMatch.frame.height * 0.3 {
+            centre(overdue, steps: maxScrolls ?? 6)
+        }
         return tapLabel("label CONTAINS %@", "· myöhässä", scrolls: maxScrolls ?? 6)
+    }
+    /// Drags the screen until `element`, laid out but off screen, sits at the window's middle. Each drag
+    /// is at most 0.6 of the window, counted as a scroll, and ends with a hold so the list stops there.
+    func centre(_ element: XCUIElement, steps: Int = 6) {
+        let window = app.windows.firstMatch
+        for _ in 0..<steps {
+            guard element.exists else { return }
+            let offset = element.frame.midY - window.frame.midY
+            if abs(offset) < 40 { return }
+            let step = max(-window.frame.height * 0.6, min(window.frame.height * 0.6, offset))
+            let from = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: -step)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+            scrolls += 1
+        }
     }
     /// The lowest a tap target may reach: above what covers the window's foot (`bottomBar`) and above
     /// a list's own pinned bar. Kuitit's "Kohdista varmat" sits over the last rows; a row under it
