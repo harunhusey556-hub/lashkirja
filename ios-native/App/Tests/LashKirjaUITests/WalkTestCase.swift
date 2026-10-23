@@ -348,7 +348,34 @@ class WalkTestCase: XCTestCase {
     /// connection instead of passing the answer on: the work is done and the app cannot know.
     func loseAnswers() { FileManager.default.createFile(atPath: "\(shotDir)/lose-answer.flag", contents: nil) }
     func keepAnswers() { try? FileManager.default.removeItem(atPath: "\(shotDir)/lose-answer.flag") }
-    func tab(_ name: String) { app.tabBars.buttons[name].firstMatch.tap(); taps += 1; sleep(2) }
+    func tab(_ name: String) {
+        // Lisää is an action: nothing is selected, the sheet is what the tap is waited for.
+        if name == "Lisää" { openAdd() } else { app.tabBars.buttons[name].firstMatch.tap(); taps += 1 }
+        sleep(2)
+    }
+    /// Taps Lisää until its sheet is up, as selectTab does for a tab. The first tap after a sign-in can
+    /// be lost (iMac, M015: test23, test24, test05 and P1 02 failed so on the old tab bar code as on the
+    /// new; no touch reached the app, and the password manager's save offer was over the screen in some
+    /// runs): an offer still up is answered, and the tap made again. A lost tap goes into notes.txt, so a
+    /// Lisää that opens only at the second tap is not hidden.
+    @discardableResult
+    func openAdd(timeout: TimeInterval = 10) -> Bool {
+        let sheet = app.navigationBars["Lisää"]
+        let button = app.tabBars.buttons["Lisää"].firstMatch
+        for attempt in 1...3 {
+            button.tap()
+            if attempt == 1 { taps += 1 }
+            if sheet.waitForExistence(timeout: timeout) { return true }
+            var offered = false
+            probe { offered = savePasswordPrompt.exists }
+            note("INFO Lisää's tap \(attempt) opened no sheet, a save offer \(offered ? "was up: answered" : "was not up")")
+            guard offered else { continue }
+            dismissSystemPrompts()
+            let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: savePasswordPrompt)
+            _ = XCTWaiter().wait(for: [gone], timeout: 5)
+        }
+        return false
+    }
     /// Taps a tab until it reports itself selected. The first tap after sign-in can land while the
     /// passkey offer or a system prompt is still leaving, and is then lost (CI round 1: still on Koti).
     func selectTab(_ name: String) -> Bool {

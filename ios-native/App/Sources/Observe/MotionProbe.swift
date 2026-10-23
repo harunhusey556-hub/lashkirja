@@ -18,6 +18,7 @@ import os
 ///   QUIET <t> <screen>                         nothing moved for 0.4 s of ticks: the layout settled
 ///   STALL <t> <screen> ms=<ms>                 the main thread held the ticks back this long
 ///   TOUCH <t> <screen>                         a finger came down in the key window (its own time)
+///   LENS <t> <screen> <key> <from> -> <to>     the tab bar's selection lens changed position or size
 /// scripts/sim/motion-audit.py calls a MOVE after the step's motion went quiet a late layout shift.
 /// Signposts (category `Motion`) mark each screen and how long it took to stop moving.
 @MainActor
@@ -48,6 +49,8 @@ final class MotionProbe: NSObject, UIGestureRecognizerDelegate {
     private var presented: ObjectIdentifier?
     /// Windows that carry the touch listener (`shouldReceive`), so each gets one.
     private var listened: Set<ObjectIdentifier> = []
+    private weak var lensLayer: CALayer?
+    private var lensWatch: [NSKeyValueObservation] = []
 
     func start() {
         guard Self.active, link == nil else { return }
@@ -101,6 +104,7 @@ final class MotionProbe: NSObject, UIGestureRecognizerDelegate {
             write("MARK \(Self.now) windows=\(windows.count)")
         }
         guard let window = windows.first(where: \.isKeyWindow) else { return }
+        watchLens(in: window)
         if listened.insert(ObjectIdentifier(window)).inserted {
             // Never takes a touch (`shouldReceive` says no), so no gesture of the app waits on it.
             let listener = UIGestureRecognizer(target: nil, action: nil)
@@ -149,6 +153,31 @@ final class MotionProbe: NSObject, UIGestureRecognizerDelegate {
         let at = Date().timeIntervalSince1970 - (age >= 0 && age < 30 ? age : 0)
         write("TOUCH \(String(format: "%.3f", at)) \(screen)")
         return false
+    }
+
+    /// The tab bar's selection lens, by KVO: a tick shows only where it is when it lands, and the lens
+    /// lifts, goes and settles again inside the main thread's held turn of a sheet's presentation (M015).
+    private func watchLens(in window: UIWindow) {
+        guard lensLayer?.superlayer == nil, let layer = Self.lens(in: window)?.layer else { return }
+        lensLayer = layer
+        lensWatch = [
+            layer.observe(\.position, options: [.old, .new]) { [weak self] _, change in
+                guard let old = change.oldValue, let new = change.newValue, old != new else { return }
+                MainActor.assumeIsolated { self?.write("LENS \(Self.now) \(self?.screen ?? "-") position \(old) -> \(new)") }
+            },
+            layer.observe(\.bounds, options: [.old, .new]) { [weak self] _, change in
+                guard let old = change.oldValue, let new = change.newValue, old != new else { return }
+                MainActor.assumeIsolated { self?.write("LENS \(Self.now) \(self?.screen ?? "-") bounds \(old) -> \(new)") }
+            },
+        ]
+    }
+
+    /// UIKit's own view for it, found by name inside the tab bar: it has no public type.
+    private static func lens(in view: UIView, inBar: Bool = false) -> UIView? {
+        let inBar = inBar || view is UITabBar
+        if inBar, String(describing: type(of: view)).contains("LiquidLens") { return view }
+        for sub in view.subviews { if let found = lens(in: sub, inBar: inBar) { return found } }
+        return nil
     }
 
     private func walk(_ layer: CALayer, space: CALayer, seen: inout [ObjectIdentifier: CGRect],
