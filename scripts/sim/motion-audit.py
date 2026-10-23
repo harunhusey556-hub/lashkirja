@@ -479,12 +479,15 @@ def prebuild_copies(events):
 
 
 def prebuild_row(suite, copies, probe_seen):
-    """The suite's launch as one row of the report: no step, so the video checks do not apply."""
+    """The suite's launch as one row of the report: no step, so the video checks do not apply.
+    prebuild_freed names the tabs it saw released: which tabs a launch builds depends on timing (a
+    test that reaches its tab first skips that copy), so motion-gate.py compares the walks per tab."""
     kept = [tab for tab, freed in copies if not freed]
     return {"suite": suite, "id": "prebuild-freed", "from": "launch", "to": "launch", "kind": "launch",
             "expect": "every prebuilt tab copy is released", "reached": True, "skipped": False, "crashed": False,
             "probe_shift": [], "probe_settle_ms": None, "app_stall_ms": None, "probe_seen": probe_seen,
-            "prebuild_kept": kept, "checks": {**dict.fromkeys(KS, "n/a"), "prebuild": "FAIL" if kept else "PASS"}}
+            "prebuild_kept": kept, "prebuild_freed": [tab for tab, freed in copies if freed],
+            "checks": {**dict.fromkeys(KS, "n/a"), "prebuild": "FAIL" if kept else "PASS"}}
 
 
 def checks(row, probe_seen, late):
