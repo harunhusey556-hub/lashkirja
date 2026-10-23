@@ -735,7 +735,9 @@ final class OwnerScreensTests: WalkTestCase {
         }
 
         invoice.buttons["Toiminnot"].firstMatch.tap()
-        let menu = ["Avaa PDF", "Lähetä sähköpostilla", "Kirjaa maksu", "Kopioi luonnokseksi"]
+        // The virtual barcode is on the sent invoice because the demo seller has an IBAN (demo-seed.ts);
+        // the server sends it beside the invoice, and the app once read it from inside (R5).
+        let menu = ["Avaa PDF", "Lähetä sähköpostilla", "Kirjaa maksu", "Kopioi luonnokseksi", "Kopioi virtuaaliviivakoodi"]
         let missing = menu.filter { !buttons($0).firstMatch.waitForExistence(timeout: 5) }
         capture("e2-overdue-menu")
         XCTAssertEqual(missing, [], "\(invoice.identifier): Toiminnot lacks them")

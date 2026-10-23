@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
 import { idempotencyKeyFrom, withIdempotentSideEffect } from "@/lib/idempotency";
-import { duplicateInvoice } from "@/lib/sales-invoices";
+import { duplicateInvoice, invoiceBarcodeFields } from "@/lib/sales-invoices";
 
 export const POST = withErrorHandler(
   async (req: NextRequest, context: { params: Promise<{ id: string }> }) => {
@@ -22,6 +22,9 @@ export const POST = withErrorHandler(
       idempotencyKeyFrom(req),
       async () => ({ status: 201, body: { invoice: await duplicateInvoice(session.userId, id) } })
     );
-    return noStoreJson(outcome.body, { status: outcome.status });
+    // The copy opens on this answer, so it carries what the detail route gives next to the invoice.
+    // Read after the key is settled: a failure here must not let a retry make a second draft.
+    const barcode = await invoiceBarcodeFields(session.userId, outcome.body.invoice.id);
+    return noStoreJson({ ...outcome.body, ...barcode }, { status: outcome.status });
   }
 );

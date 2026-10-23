@@ -125,6 +125,16 @@ public struct Invoice: Decodable, Sendable, Identifiable, Hashable {
     public var barcodeIssue: String?
 
     public var isCreditNote: Bool { documentKind == "credit_note" }
+
+    /// A status or payment change answers `{ invoice }` alone, without the barcode fields the detail
+    /// route gives beside it. What the barcode is made of (IBAN, reference, gross, due date) does not
+    /// change with them, so the ones already shown stay instead of vanishing until the next reload.
+    public func keepingBarcode(of shown: Invoice?) -> Invoice {
+        var next = self
+        next.barcode = barcode ?? shown?.barcode
+        next.barcodeIssue = barcodeIssue ?? shown?.barcodeIssue
+        return next
+    }
 }
 
 /// `PATCH /api/invoices/{id}` for a draft: the server wants the version it
@@ -184,6 +194,19 @@ public struct InvoiceDetailResponse: Decodable, Sendable {
     public init(invoice: Invoice, paymentDuplicates: [PaymentDuplicate]? = nil) {
         self.invoice = invoice
         self.paymentDuplicates = paymentDuplicates
+    }
+
+    enum CodingKeys: String, CodingKey { case invoice, paymentDuplicates, barcode, barcodeIssue }
+
+    /// The server sends `barcode` and `barcodeIssue` beside the invoice, not inside it; the screen
+    /// reads them from the invoice, so they are carried in here.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        var invoice = try c.decode(Invoice.self, forKey: .invoice)
+        if let barcode = try c.decodeIfPresent(String.self, forKey: .barcode) { invoice.barcode = barcode }
+        if let issue = try c.decodeIfPresent(String.self, forKey: .barcodeIssue) { invoice.barcodeIssue = issue }
+        self.invoice = invoice
+        paymentDuplicates = try c.decodeIfPresent([PaymentDuplicate].self, forKey: .paymentDuplicates)
     }
 }
 public struct InvoiceResponse: Decodable, Sendable { public let invoice: Invoice }

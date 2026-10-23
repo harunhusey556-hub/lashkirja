@@ -23,19 +23,22 @@ final class FirstFrameSeedTests: XCTestCase {
     func testACopysAnswerIsWhatTheNewInvoiceOpensOn() async throws {
         let app = await signedInApp()
         guard case .signedIn = app.phase else { return XCTFail("the stored session did not open the app") }
-        let answer = try decode(InvoiceResponse.self, """
+        let answer = try decode(InvoiceDetailResponse.self, """
         {"invoice":{"id":"copy-1","number":5,"reference":"0055","status":"draft","displayStatus":"draft","issueDate":"2026-10-22",
          "dueDate":"2026-11-05","sentAt":null,"paidAt":null,"notes":null,"currency":"EUR","net":65,"vat":16.58,"gross":81.58,
          "paid":0,"open":81.58,"closedReason":null,"updatedAt":"2026-10-22T12:00:00.000Z","documentKind":"invoice",
          "customer":{"id":"c1","name":"Anna Asiakas","email":null,"businessId":null},
          "lines":[{"id":"l1","description":"Huoltokäynti","quantity":1,"unit":"kpl","unitPrice":65,"vatRate":25.5,"net":65}],
-         "payments":[],"sends":[],"activity":[]}}
+         "payments":[],"sends":[],"activity":[]},
+         "barcode":"421123456000007850000815800000000000000000000039261101","barcodeIssue":null}
         """)
         XCTAssertNil(app.invoicePreview("copy-1"), "the copy was known before it was made")
-        app.rememberInvoiceDetail(InvoiceDetailResponse(invoice: answer.invoice), reminder: nil)
+        app.rememberInvoiceDetail(answer, reminder: nil)
         let preview = try XCTUnwrap(app.invoicePreview("copy-1"), "the copy's page has nothing to open on")
         XCTAssertEqual(preview.detail.invoice.number, 5)
         XCTAssertEqual(preview.detail.invoice.lines.map(\.description), ["Huoltokäynti"])
+        XCTAssertEqual(preview.detail.invoice.barcode, "421123456000007850000815800000000000000000000039261101",
+                       "the copy opens without the barcode its detail will show")
         XCTAssertNil(preview.reminder, "a new draft is never overdue")
         XCTAssertNil(app.invoicePreview("other"))
     }

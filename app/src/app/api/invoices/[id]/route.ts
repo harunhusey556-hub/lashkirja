@@ -3,8 +3,7 @@ import { z } from "zod";
 import { requireSession } from "@/lib/session";
 import { noStoreJson, rejectCrossSite, rejectOversizedContentLength } from "@/lib/http-security";
 import { AppError, UnauthorizedError, withErrorHandler } from "@/lib/api-errors";
-import { buildInvoicePdfData, deleteInvoice, getInvoice, updateInvoice } from "@/lib/sales-invoices";
-import { barcodeIssue, buildBankBarcode } from "@/lib/bank-barcode";
+import { deleteInvoice, getInvoice, invoiceBarcodeFields, updateInvoice } from "@/lib/sales-invoices";
 import { isoDateSchema, moneySchema } from "@/lib/validation";
 import { findPaymentReceiptDuplicates } from "@/lib/alv-period";
 
@@ -40,14 +39,8 @@ export const GET = withErrorHandler(async (req: NextRequest, context: RouteConte
   // Hand-recorded payments that an income receipt seems to count again.
   const paymentDuplicates = await findPaymentReceiptDuplicates(session.userId, { invoiceId: id });
   // The virtuaaliviivakoodi the PDF prints, for the app to copy; or why the invoice has none.
-  const pdf = await buildInvoicePdfData(session.userId, id);
-  const isCreditNote = pdf.documentKind === "credit_note";
-  const barcodeInput = { iban: pdf.seller.iban ?? null, reference: pdf.reference, amountCents: pdf.grossCents };
-  const barcode = isCreditNote
-    ? null
-    : buildBankBarcode({ ...barcodeInput, iban: barcodeInput.iban ?? "", dueDate: `${pdf.dueDate}T00:00:00.000Z` });
-  const barcodeProblem = isCreditNote || barcode ? null : barcodeIssue(barcodeInput);
-  return noStoreJson({ invoice, paymentDuplicates, barcode, barcodeIssue: barcodeProblem });
+  const barcode = await invoiceBarcodeFields(session.userId, id);
+  return noStoreJson({ invoice, paymentDuplicates, ...barcode });
 });
 
 export const PATCH = withErrorHandler(async (req: NextRequest, context: RouteContext) => {

@@ -15,6 +15,7 @@ import { formatDate, formatEur } from "./format";
 import { allocateInvoiceNumber, peekInvoiceNumber, releaseInvoiceNumber } from "./invoice-sequence";
 import { helsinkiCalendarDate, isoDateToUtc, periodScopeBoundsUtc } from "./validation";
 import { normalizeReference, referenceForInvoice } from "./finnish-reference";
+import { barcodeIssue, buildBankBarcode } from "./bank-barcode";
 import { normalizeRef, planPairs, type GateCandidate, type GatedPair, type GateVerdict } from "./match-gate";
 import { cachedReviews, prismaReviewCache, reviewKey, type ReviewCase } from "./match-review";
 import {
@@ -2319,6 +2320,22 @@ export async function buildInvoicePdfData(
       netCents: line.netCents,
     })),
   };
+}
+
+/**
+ * The virtuaaliviivakoodi the invoice's PDF prints, for the app to copy; or why it has none.
+ * A credit note asks for no payment, so it has neither. The detail and a copy's answer both give
+ * these fields, so a copy opens on what its detail will show.
+ */
+export async function invoiceBarcodeFields(
+  userId: string,
+  invoiceId: string
+): Promise<{ barcode: string | null; barcodeIssue: string | null }> {
+  const pdf = await buildInvoicePdfData(userId, invoiceId);
+  if (pdf.documentKind === "credit_note") return { barcode: null, barcodeIssue: null };
+  const input = { iban: pdf.seller.iban ?? "", reference: pdf.reference, amountCents: pdf.grossCents };
+  const barcode = buildBankBarcode({ ...input, dueDate: `${pdf.dueDate}T00:00:00.000Z` });
+  return { barcode, barcodeIssue: barcode ? null : barcodeIssue(input) };
 }
 
 /**

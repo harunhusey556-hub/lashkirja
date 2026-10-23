@@ -39,6 +39,91 @@ private func fixture(_ name: String) throws -> Data {
     #expect(opened.paymentDuplicates == nil)
 }
 
+/// The detail route's answer as the server shapes it: `barcode` and `barcodeIssue` beside the invoice,
+/// never inside it (`app/src/app/api/invoices/[id]/route.ts`).
+private func detailAnswer(adding top: [String: Any] = [:], removing gone: [String] = []) throws -> Data {
+    let parsed = try JSONSerialization.jsonObject(with: fixture("invoice-detail.json"))
+    var answer = try #require(parsed as? [String: Any])
+    answer.merge(top) { _, added in added }
+    for key in gone { answer.removeValue(forKey: key) }
+    return try JSONSerialization.data(withJSONObject: answer)
+}
+
+@Test func theBarcodeBesideTheInvoiceLandsOnTheInvoice() throws {
+    let code = "421123456000007850002017000000000000000000000013261016"
+    let detail = try JSONDecoder().decode(InvoiceDetailResponse.self, from: detailAnswer(adding: ["barcode": code, "barcodeIssue": NSNull()]))
+    #expect(detail.invoice.barcode == code)
+    #expect(detail.invoice.barcodeIssue == nil)
+    #expect(detail.paymentDuplicates?.isEmpty == true)
+    // The screen the copy opens on is seeded from the decoded answer: it keeps the barcode.
+    #expect(InvoiceDetailResponse(invoice: detail.invoice).invoice.barcode == code)
+}
+
+@Test func theIssueBesideTheInvoiceLandsOnTheInvoice() throws {
+    let issue = "Lisää yrityksen tilinumero (IBAN) asetuksiin, niin laskuun tulee virtuaaliviivakoodi."
+    let detail = try JSONDecoder().decode(InvoiceDetailResponse.self, from: detailAnswer(adding: ["barcode": NSNull(), "barcodeIssue": issue]))
+    #expect(detail.invoice.barcode == nil)
+    #expect(detail.invoice.barcodeIssue == issue)
+}
+
+@Test func aCopysAnswerWithoutPaymentDuplicatesCarriesTheBarcodeToo() throws {
+    // `POST /api/invoices/{id}/duplicate` answers `{ invoice, barcode, barcodeIssue }`.
+    let code = "421123456000007850002017000000000000000000000013261016"
+    let copy = try JSONDecoder().decode(InvoiceDetailResponse.self, from: detailAnswer(adding: ["barcode": code, "barcodeIssue": NSNull()], removing: ["paymentDuplicates"]))
+    #expect(copy.invoice.barcode == code)
+    #expect(copy.paymentDuplicates == nil)
+}
+
+@Test func noBarcodeInTheAnswerLeavesTheInvoiceWithoutOne() throws {
+    let detail = try JSONDecoder().decode(InvoiceDetailResponse.self, from: detailAnswer())
+    #expect(detail.invoice.barcode == nil)
+    #expect(detail.invoice.barcodeIssue == nil)
+    let credit = try JSONDecoder().decode(InvoiceDetailResponse.self, from: detailAnswer(adding: ["barcode": NSNull(), "barcodeIssue": NSNull()]))
+    #expect(credit.invoice.barcode == nil)
+    #expect(credit.invoice.barcodeIssue == nil)
+}
+
+@Test func aStatusOrPaymentAnswerKeepsTheBarcodeTheScreenShows() throws {
+    // `POST /api/invoices/{id}/status` and `DELETE /api/invoices/{id}/payments` answer `{ invoice }` alone;
+    // the screen replaces its invoice with it, and the barcode row would vanish after Merkitse lähetetyksi.
+    let code = "421123456000007850002017000000000000000000000013261016"
+    let shown = try JSONDecoder().decode(InvoiceDetailResponse.self, from: detailAnswer(adding: ["barcode": code, "barcodeIssue": NSNull()])).invoice
+    let answer = try JSONDecoder().decode(InvoiceResponse.self, from: fixture("invoice-detail.json")).invoice
+    #expect(answer.barcode == nil)
+    let kept = answer.keepingBarcode(of: shown)
+    #expect(kept.barcode == code)
+    #expect(kept.barcodeIssue == nil)
+    // Only the barcode fields come from the invoice on screen; the rest is the answer's.
+    var stripped = kept
+    stripped.barcode = nil
+    stripped.barcodeIssue = nil
+    #expect(stripped == answer)
+}
+
+@Test func aStatusAnswerKeepsTheIssueWhenThereWasNoBarcode() throws {
+    let issue = "Lisää yrityksen tilinumero (IBAN) asetuksiin, niin laskuun tulee virtuaaliviivakoodi."
+    let shown = try JSONDecoder().decode(InvoiceDetailResponse.self, from: detailAnswer(adding: ["barcode": NSNull(), "barcodeIssue": issue])).invoice
+    let answer = try JSONDecoder().decode(InvoiceResponse.self, from: fixture("invoice-detail.json")).invoice
+    let kept = answer.keepingBarcode(of: shown)
+    #expect(kept.barcode == nil)
+    #expect(kept.barcodeIssue == issue)
+}
+
+@Test func anAnswerThatCarriesItsOwnBarcodeKeepsIt() throws {
+    let shown = try JSONDecoder().decode(InvoiceDetailResponse.self, from: detailAnswer(adding: ["barcode": "old-code"])).invoice
+    let newer = try JSONDecoder().decode(InvoiceDetailResponse.self, from: detailAnswer(adding: ["barcode": "new-code"])).invoice
+    #expect(newer.keepingBarcode(of: shown).barcode == "new-code")
+    #expect(newer.keepingBarcode(of: nil).barcode == "new-code")
+}
+
+@Test func nothingShownLeavesAStatusAnswerWithoutABarcode() throws {
+    let answer = try JSONDecoder().decode(InvoiceResponse.self, from: fixture("invoice-detail.json")).invoice
+    let kept = answer.keepingBarcode(of: nil)
+    #expect(kept.barcode == nil)
+    #expect(kept.barcodeIssue == nil)
+    #expect(kept == answer)
+}
+
 @Test func statusLabels() {
     #expect(InvoiceStatus.draft.label == "Luonnos")
     #expect(InvoiceStatus.sent.label == "Odottaa maksua")
