@@ -636,6 +636,20 @@ final class StabilityTests: WalkTestCase {
 
         // The page's own load comes in under the rows it already has: nothing moves.
         guard sendAt != nil else { dump(app, "stability-34-no-send"); return }
+        // R5-COPY: polled through the load, not only read after it: a gate saw a SCROLLJUMP dy=-46 on this
+        // page, and a move that settles back would pass the one read below. Every frame of both videos
+        // showed the page still: the line was the probe comparing the page's first list offset with a
+        // freed list's (ScrollOffsetsTests), so a move seen here is the page's own.
+        if let sendAt {
+            var drift: CGFloat = 0
+            let watchUntil = Date().addingTimeInterval(3)
+            repeat {
+                if send.exists { drift = max(drift, abs(send.frame.minY - sendAt)) }
+                usleep(100_000)
+            } while Date() < watchUntil
+            note("INFO stability 34: Lähetä lasku drifted \(drift) pt over 3 s after the first look")
+            XCTAssertLessThanOrEqual(drift, 1, "Lähetä lasku moved \(drift) pt from \(sendAt) while the copy loaded")
+        }
         waitStill(send)
         shot("stability-34-loaded")
         XCTAssertTrue(app.navigationBars[title].exists, "the title changed when the copy loaded")
