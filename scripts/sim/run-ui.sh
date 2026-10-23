@@ -3,6 +3,7 @@
 # Runs on the Mac, from a checkout of `native`:
 #   scripts/sim/run-ui.sh <simulator-udid> [only-testing, e.g. P0Tests/testA_ProfileSwipeBack] [tag]
 # Screenshots and notes.txt land in $LK_SHOT_DIR (default: <repo>/sim-shots/<tag>).
+# LK_CONFIGURATION=Release-UITest walks the optimized app (project.yml) instead of Debug.
 #
 # The Mac is shared: the script waits until no other project's xcodebuild runs and the load is low,
 # because two simulator test runs at once on a small Mac time each other out.
@@ -39,6 +40,26 @@ sleep 5
 # launch that way, CI 2026-10-15). Every walk starts signed out.
 xcrun simctl keychain "$U" reset || echo "simctl keychain reset failed: the walk may start from an old session"
 
+# A prebuilt tab copy the probe found still alive (M086, LK_RETAIN_TRACE=1) leaves its address in
+# probe.log: who holds it is the `leaks` reverse reference tree to that address, taken once per object
+# while the app still runs, in retain-<mark>.txt next to it; retain-autoreleasepools.txt holds what
+# the main thread's pools still hold. --noContent: without it leaks stops on the AttributeGraph
+# malloc zone ("Malloc enumeration ... failed") and writes nothing. In the background (leaks works on
+# a corpse of the app: the app itself stops for a moment only).
+retain_trace() {
+  [ "${LK_RETAIN_TRACE:-}" = 1 ] || return 0
+  local m f pid
+  pid=$(pgrep -f '/LashKirja.app/LashKirja' | head -1)
+  for m in $(grep -ho 'prebuild-[^ ]*-address=0x[0-9a-f]*' "$SH/probe.log" 2>/dev/null); do
+    f="$SH/retain-${m%%-address=*}.txt"
+    [ -e "$f" ] && continue
+    : > "$f"
+    ( leaks "$pid" --traceTree="${m##*=}" --noContent 2>&1 | head -400 > "$f" ) &
+    f="$SH/retain-autoreleasepools.txt"
+    [ -e "$f" ] || { : > "$f"; ( leaks "$pid" --autoreleasePools --noContent 2>&1 | head -400 > "$f" ) & }
+  done
+}
+
 rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
 # XCUIScreen screenshots time out on a headless simulator, so the test asks the host for them.
 # Same channel for links: a .openurl file holds a URL to open, as a quick action or Siri would.
@@ -46,6 +67,7 @@ rm -rf "$SH" "$REPO/build-sim/$TAG.xcresult"; mkdir -p "$SH" "$REPO/build-sim"
     for r in "$SH"/*.req(N); do n=${r:r}; xcrun simctl io "$U" screenshot "$n.png" >/dev/null 2>&1; rm -f "$r"; done
     for o in "$SH"/*.openurl(N); do xcrun simctl openurl "$U" "$(cat "$o")" >/dev/null 2>&1; rm -f "$o"; done
     for c in "$SH"/*.contentsize(N); do xcrun simctl ui "$U" content_size "$(cat "$c")" >/dev/null 2>&1; rm -f "$c"; done
+    retain_trace
     # Motion audit: <name>.rec holds the most seconds to record (30 at most); the test ends the
     # recording earlier with <name>.stop, once the step's result is filmed. <name>.recording gets the
     # epoch times the recording really started (simctl says so) and stopped; the test acts only once
@@ -84,7 +106,7 @@ trap 'kill $W $P 2>/dev/null; xcrun simctl ui "$U" content_size large >/dev/null
 cd "$APP" && PATH=$HOME/bin:$PATH xcodegen generate -q
 # Ad-hoc signing: an unsigned simulator build cannot use the Keychain, so sign-in would fail.
 TEST_RUNNER_LK_SHOT_DIR="$SH" xcodebuild test -project LashKirja.xcodeproj -scheme LashKirja-UITests \
-  -destination "id=$U" -derivedDataPath "$REPO/build-sim" \
+  -destination "id=$U" -derivedDataPath "$REPO/build-sim" ${LK_CONFIGURATION:+-configuration} ${LK_CONFIGURATION:+$LK_CONFIGURATION} \
   CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO API_BASE_URL="$API" \
   ${ONLY:+-only-testing:LashKirjaUITests/$ONLY} -resultBundlePath "$REPO/build-sim/$TAG.xcresult" \
   > "$REPO/build-sim/$TAG.log" 2>&1
