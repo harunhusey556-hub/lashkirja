@@ -28,6 +28,16 @@ enum UITestHooks {
     static let versionPollOff = false
     #endif
 
+    /// `-LKUndoWindow <seconds>` stretches the Kumoa of a deleted receipt (`AppModel.deleteWithUndo`),
+    /// so a slow runner still finds the button when the test reaches it. Without it, `normal`.
+    static func undoWindow(_ normal: TimeInterval) -> TimeInterval {
+        #if DEBUG || LK_UITEST_HOOKS
+        let seconds = UserDefaults.standard.double(forKey: "LKUndoWindow")
+        if seconds > 0 { return seconds }
+        #endif
+        return normal
+    }
+
     #if DEBUG || LK_UITEST_HOOKS
     /// Milliseconds since this process was started (by the kernel's clock), for launch timings
     /// that include what happens before `main`.
